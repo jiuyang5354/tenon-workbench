@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-surface="obsidian" data-accent="cobalt" data-inspector="standard" data-crosshairs="on" data-hatch="on" data-metal="chromatic">
+<html lang="zh-CN" data-surface="weave" data-accent="lime" data-inspector="standard" data-crosshairs="off" data-hatch="off" data-metal="off">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -103,12 +103,12 @@
             <span class="sidebar-label">脚本与规则</span>
           </button>
 
-          <button type="button" class="foot-nav-btn" id="btnEnvPopover" title="本机 AGY / CODEX 健康状态">
+          <button type="button" class="foot-nav-btn" id="btnEnvPopover" title="本机 Gemini (agy) 与 Codex CLI 健康状态">
             <span class="dual-dots" aria-hidden="true">
               <span class="status-dot" id="dotAgy"></span>
               <span class="status-dot" id="dotCodex"></span>
             </span>
-            <span class="sidebar-label mono-xs">AGY / CODEX</span>
+            <span class="sidebar-label mono-xs">Gemini · Codex</span>
           </button>
 
           <button type="button" class="foot-nav-btn" id="btnToggleTweaks" aria-expanded="false" aria-controls="tweaksPanel" title="实时调参面板 (T)">
@@ -181,72 +181,41 @@
       <!-- Scrollable Conversation Feed (21st.dev Conversation #46450) -->
       <div class="conversation-viewport" id="conversationViewport" role="log" aria-label="双模型协同对话流" tabindex="0">
         <div class="conversation-column" id="conversationColumn">
-          <!-- Centered Codex-Style Empty State + Ink-Orbit Live Architectural Bento -->
+          <!-- Centered Serene App Empty State (Zero Brochure Fluff, Immediate Actionable Starters) -->
           <section class="welcome-stage" id="welcomeStage">
-            <div class="ink-sec">
-              <div class="ink-head">
-                <span class="ink-tag mono" id="welcomeEnvTag">DUAL-MODEL ORCHESTRATION · LOCAL CLI READY</span>
-                <h1 class="welcome-title">
-                  <span>Smart <span class="ink-muted-word">Multi-Model</span></span>
-                  <span>Orchestration</span>
-                </h1>
+            <div class="studio-empty">
+              <div class="studio-empty-head">
+                <span class="studio-empty-orb" aria-hidden="true">
+                  <svg class="thinking-orb" width="32" height="32" viewBox="0 0 32 32" data-orb-state="reasoning" data-orb-variant="twins" data-orb-size="32"></svg>
+                </span>
+                <span class="ink-tag mono" id="welcomeEnvTag">GEMINI · CODEX LOCAL CLI READY</span>
+                <h1 class="welcome-title">CONDUIT 工作台</h1>
                 <p class="welcome-sub">
-                  像 Codex 桌面端一样自然对话。Gemini 负责需求拆解与人话交付，Codex 在安全沙箱中完成硬核施工与 Pre-CI 审查门禁。
+                  Gemini 拆解接口契约并输出 10 秒汇报，Codex 在受管沙箱实现代码与 Pre-CI 审查。全部直连本机官方 CLI 订阅额度。
                 </p>
               </div>
 
-              <!-- 3-Card Live Interactive SVG Bento (adapted from InkOrbitFeatures) -->
-              <div class="ink-bento" id="inkOrbitBento">
-                <!-- Card 1 (Wide): Live Gemini -> CONDUIT Hub -> Codex Report Stack Flow -->
-                <div class="ink-frame ink-wide" id="inkFlowFrame">
-                  <span class="ib-c ib-c-tl" aria-hidden="true"></span>
-                  <span class="ib-c ib-c-tr" aria-hidden="true"></span>
-                  <span class="ib-c ib-c-bl" aria-hidden="true"></span>
-                  <span class="ib-c ib-c-br" aria-hidden="true"></span>
-                  <div class="ink-card ink-card-flush">
-                    <div id="inkFlowSvgMount"></div>
-                    <div class="ink-wide-copy">
-                      <button type="button" class="ink-copy-btn" data-starter-mode="full-pipeline" data-starter-prompt="分析当前项目结构，为一个新功能先出接口契约与实施方案，等我拍板后再派发 Codex 实现并过 Pre-CI 审查。">
-                        <h3>01 · 全链路双模型协同</h3>
-                        <p>Gemini 拆解接口契约并等待你拍板，Codex 在安全沙箱施工并自动沉淀改动 Diff。</p>
-                      </button>
-                      <button type="button" class="ink-copy-btn" data-starter-mode="plan-only" data-starter-prompt="用只读模式评估当前工程目录的模块划分与潜在耦合风险，输出 3 条可落地的重构方案与验收标准。">
-                        <h3>02 · 只读规划与人话交付</h3>
-                        <p>复杂任务先由 Gemini 只读审视结构与边界，最终把 Diff 与审查结论翻译为 10 秒速览汇报。</p>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Card 2: Live 4-Tool CLI Integrations Hub -->
-                <div class="ink-frame" id="inkHubFrame">
-                  <span class="ib-c ib-c-tl" aria-hidden="true"></span>
-                  <span class="ib-c ib-c-tr" aria-hidden="true"></span>
-                  <span class="ib-c ib-c-bl" aria-hidden="true"></span>
-                  <span class="ib-c ib-c-br" aria-hidden="true"></span>
-                  <div class="ink-card">
-                    <div id="inkHubSvgMount"></div>
-                    <button type="button" class="ink-copy-btn" data-starter-mode="codex-review" data-starter-prompt="对当前工作区的未提交变更执行 Pre-CI 两级代码审查，严查数据丢失、越权和边界缺陷。">
-                      <h3>03 · 本地 CLI 工具矩阵与门禁</h3>
-                      <p>原生串联 AGY、Codex、Git Worktree 与 Pre-CI 审查，命中高危文件自动升档 xhigh。</p>
-                    </button>
-                  </div>
-                </div>
-
-                <!-- Card 3: Scrubbable Telemetry & Copy/Quality Insights Chart -->
-                <div class="ink-frame" id="inkChartFrame">
-                  <span class="ib-c ib-c-tl" aria-hidden="true"></span>
-                  <span class="ib-c ib-c-tr" aria-hidden="true"></span>
-                  <span class="ib-c ib-c-bl" aria-hidden="true"></span>
-                  <span class="ib-c ib-c-br" aria-hidden="true"></span>
-                  <div class="ink-card">
-                    <div id="inkChartSvgMount"></div>
-                    <button type="button" class="ink-copy-btn" data-starter-mode="copy-polish" data-starter-prompt="请帮我润色这段空状态文案：选中对话里的一段话，点侧边问就能在这儿顺便问一句，不打断它正在做的事。">
-                      <h3>04 · 吞吐轨迹与文案顾问</h3>
-                      <p>在图表上滑动可实时查看调度吞吐曲线；点击即可呼出 Gemini 文案与交互去 AI 味顾问。</p>
-                    </button>
-                  </div>
-                </div>
+              <div class="starter-grid">
+                <button type="button" class="starter-card" data-starter-mode="full-pipeline" data-starter-prompt="分析当前项目结构，为一个新功能先出接口契约与实施方案，等我拍板后再派发 Codex 实现并过 Pre-CI 审查。">
+                  <span class="starter-kicker mono">FULL PIPELINE</span>
+                  <strong class="starter-title">全链路协同开发</strong>
+                  <span class="starter-desc">Gemini 规划契约 → 人工拍板 → Codex 沙箱施工与审查</span>
+                </button>
+                <button type="button" class="starter-card" data-starter-mode="plan-only" data-starter-prompt="用只读模式评估当前工程目录的模块划分与潜在耦合风险，输出 3 条可落地的重构方案与验收标准。">
+                  <span class="starter-kicker mono">READ-ONLY PLAN</span>
+                  <strong class="starter-title">只读架构评估</strong>
+                  <span class="starter-desc">不修改任何文件，快速梳理模块边界与重构路线</span>
+                </button>
+                <button type="button" class="starter-card" data-starter-mode="codex-review" data-starter-prompt="对当前工作区的未提交变更执行 Pre-CI 两级代码审查，严查数据丢失、越权和边界缺陷。">
+                  <span class="starter-kicker mono">PRE-CI GATE</span>
+                  <strong class="starter-title">未提交代码门禁审查</strong>
+                  <span class="starter-desc">分级拦截高危改动，敏感路径自动升档 xhigh</span>
+                </button>
+                <button type="button" class="starter-card is-canvas-entry" id="btnStarterOpenCanvas">
+                  <span class="starter-kicker mono">INFINITE CANVAS</span>
+                  <strong class="starter-title">打开多 Agent 无限画布 →</strong>
+                  <span class="starter-desc">自由拖拽节点、独立换模型、多路并行集群合并</span>
+                </button>
               </div>
             </div>
           </section>
@@ -270,55 +239,60 @@
             <div class="ic-nodes-layer" id="wfNodesLayer"></div>
           </div>
 
-          <!-- Floating Top-Left: Add Agent Node Palette + Multi-Cluster Presets -->
+          <!-- Floating Top-Left: Unified Architectural Add & Preset Strip -->
           <div class="ic-floating-bar ic-top-left">
             <div class="ic-add-group" role="group" aria-label="添加 Agent 节点">
               <button type="button" class="ic-chip-btn" data-ic-add="gemini-plan" title="添加 Gemini 规划节点">+ Gemini</button>
               <button type="button" class="ic-chip-btn" data-ic-add="codex-exec" title="添加并行 Codex 沙箱工位">+ Codex</button>
-              <button type="button" class="ic-chip-btn is-accent" data-ic-add="cluster-merge" title="添加多路集群聚合合并器">+ 合并器</button>
+              <button type="button" class="ic-chip-btn" data-ic-add="cluster-merge" title="添加多路集群聚合合并器">+ 合并器</button>
               <button type="button" class="ic-chip-btn" data-ic-add="codex-review" title="添加 Pre-CI 代码审查门禁">+ Pre-CI</button>
             </div>
             <span class="ic-divider" aria-hidden="true"></span>
-            <div class="ic-preset-group" role="group" aria-label="自定义与集群拓扑预设">
-              <button type="button" class="ic-chip-btn is-active" data-ic-preset="cluster">5节点集群</button>
-              <button type="button" class="ic-chip-btn" data-ic-preset="multi" title="9节点双集群两级聚合合并">双集群二级合并</button>
-              <button type="button" class="ic-chip-btn" data-ic-preset="linear">3节点精简</button>
-              <button type="button" class="ic-chip-btn" data-ic-preset="blank" title="从空白画布完全自由构建">空白自定义</button>
-            </div>
+            <label class="ic-preset-wrap" title="切换集群拓扑模板">
+              <select id="selectWfPreset" class="ic-preset-select" aria-label="集群拓扑模板">
+                <option value="cluster" selected>5节点集群</option>
+                <option value="multi">双集群二级合并 (9节点)</option>
+                <option value="linear">3节点精简链路</option>
+                <option value="blank">空白自定义画布</option>
+              </select>
+            </label>
           </div>
 
-          <!-- Floating Top-Right: Execution & Blender Edit Controls -->
+          <!-- Floating Top-Right: Quiet Studio Actions + Signature Chartreuse CTA -->
           <div class="ic-floating-bar ic-top-right">
-            <button type="button" class="btn-primary-sm wf-btn" id="btnWfRunAll">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5Z" /></svg>
-              <span>运行集群</span>
-            </button>
-            <button type="button" class="ic-chip-btn is-accent" id="btnWfDrawerToggle" title="展开/收起集群交付成果与思考链面板">成果面板</button>
-            <button type="button" class="ic-chip-btn" id="btnWfLayout" title="按拓扑层级自动整理节点 (L)">整理 L</button>
+            <button type="button" class="ic-chip-btn" id="btnWfDrawerToggle" title="展开/收起集群交付成果与思考链面板">成果面板</button>
+            <button type="button" class="ic-chip-btn" id="btnWfLayout" title="按拓扑层级自动整理节点 (L)">整理</button>
             <button type="button" class="ic-chip-btn" id="btnWfUndo" title="撤销上一步 (Ctrl+Z)">撤销</button>
             <button type="button" class="ic-chip-btn" id="btnWfReset" title="重置运行状态">重置</button>
+            <span class="ic-divider" aria-hidden="true"></span>
             <label class="ic-chip-check" title="勾选后在终局门禁触发模拟拦截">
               <input type="checkbox" id="chkWfFailLast" />
               <span>模拟拦截</span>
             </label>
+            <button type="button" class="btn-weave-cta wf-btn" id="btnWfRunAll">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5Z" /></svg>
+              <span>运行集群</span>
+            </button>
           </div>
 
-          <!-- Floating Bottom-Center: Compact Status Pill + Cluster Command Bar + Zoom HUD (Zero-Overlap Stack!) -->
+          <!-- Floating Bottom-Left: Compact Zoom & Fit Controls (Zero overlap with prompt!) -->
+          <div class="ic-floating-bar ic-zoom-hud">
+            <button type="button" class="ic-zoom-btn mono" id="btnWfZoomOut" title="缩小">−</button>
+            <button type="button" class="ic-zoom-val mono" id="btnWfZoomReset" title="点击重置为 100%">84%</button>
+            <button type="button" class="ic-zoom-btn mono" id="btnWfZoomIn" title="放大">+</button>
+            <span class="ic-divider" aria-hidden="true"></span>
+            <button type="button" class="ic-chip-btn" id="btnWfFit" title="适配全部节点到视野 (F)">全览</button>
+            <button type="button" class="ic-chip-btn" id="btnWfExport" title="导出集群拓扑 JSON">JSON</button>
+          </div>
+
+          <!-- Floating Bottom-Center: Quiet Status Caption + Floating Command Bar (Single Hero CTA Rule!) -->
           <div class="ic-bottom-stack">
             <div class="ic-status-pill mono-xs" id="wfStatusBar" role="status" aria-live="polite">
-              无限画布就绪：点击任意节点 Model 胶囊即可独立切换模型 · 右键画布呼出 Blender 菜单 · 拖端口自由连线。
+              5 节点 · 5 连线 · 右键或 Shift+A 添加节点 · 拖端口自由连线
             </div>
             <div class="ic-cmd-bar" id="wfCommandBar">
-              <input type="text" class="ic-cmd-input" id="inputWfCommand" placeholder="输入集群任务需求（回车直接驱动当前画布全部节点并输出交付报告）..." autocomplete="off" />
-              <button type="button" class="btn-primary-sm wf-btn" id="btnWfCommandRun">派发集群</button>
-            </div>
-            <div class="ic-floating-bar ic-zoom-hud">
-              <button type="button" class="ic-zoom-btn mono" id="btnWfZoomOut" title="缩小">-</button>
-              <button type="button" class="ic-zoom-val mono" id="btnWfZoomReset" title="点击重置为 100%">84%</button>
-              <button type="button" class="ic-zoom-btn mono" id="btnWfZoomIn" title="放大">+</button>
-              <span class="ic-divider" aria-hidden="true"></span>
-              <button type="button" class="ic-chip-btn" id="btnWfFit" title="适配全部节点到视野 (F)">全览 F</button>
-              <button type="button" class="ic-chip-btn" id="btnWfExport" title="导出集群拓扑 JSON">JSON</button>
+              <input type="text" class="ic-cmd-input" id="inputWfCommand" placeholder="输入任务需求，回车驱动当前画布节点并发执行..." autocomplete="off" />
+              <button type="button" class="btn-cmd-send wf-btn" id="btnWfCommandRun">派发</button>
             </div>
           </div>
 
@@ -637,20 +611,20 @@
     </div>
 
     <div class="tweak-group">
-      <span class="tweak-label">表面主题</span>
+      <span class="tweak-label">建筑画布纸面</span>
       <div class="tweak-pills" data-tweak="surface">
-        <button type="button" data-val="obsidian" class="active">黑曜石</button>
-        <button type="button" data-val="graphite">深石墨</button>
-        <button type="button" data-val="daylight">昼间白</button>
+        <button type="button" data-val="weave" class="active">建筑白昼</button>
+        <button type="button" data-val="paper">暖石膏纸</button>
+        <button type="button" data-val="charcoal">建筑暗房</button>
       </div>
     </div>
 
     <div class="tweak-group">
-      <span class="tweak-label">手术刀高亮色</span>
+      <span class="tweak-label">主强调色</span>
       <div class="tweak-pills" data-tweak="accent">
-        <button type="button" data-val="cobalt" class="active">钴蓝</button>
-        <button type="button" data-val="cyan">光学青</button>
-        <button type="button" data-val="mono">纯白单色</button>
+        <button type="button" data-val="lime" class="active">柠黄高亮</button>
+        <button type="button" data-val="ink">极简纯墨</button>
+        <button type="button" data-val="sage">雾森绿</button>
       </div>
     </div>
 
@@ -664,11 +638,11 @@
     </div>
 
     <div class="tweak-group">
-      <span class="tweak-label">液态金属边环 (metal-fx)</span>
+      <span class="tweak-label">液态金属边环 (可选装饰)</span>
       <div class="tweak-pills" data-tweak="metal">
-        <button type="button" data-val="chromatic" class="active">虹彩镀铬</button>
+        <button type="button" data-val="off" class="active">关闭</button>
         <button type="button" data-val="silver">冷晶银</button>
-        <button type="button" data-val="off">关闭</button>
+        <button type="button" data-val="chromatic">虹彩铬</button>
       </div>
     </div>
 
@@ -678,18 +652,18 @@
     </div>
 
     <div class="tweak-group">
-      <span class="tweak-label">遥测波形振幅：<span class="mono" id="tweakWaveVal">75%</span></span>
-      <input type="range" id="tweakWaveRange" min="0" max="100" step="5" value="75" />
+      <span class="tweak-label">遥测波形振幅：<span class="mono" id="tweakWaveVal">55%</span></span>
+      <input type="range" id="tweakWaveRange" min="0" max="100" step="5" value="55" />
     </div>
 
     <div class="tweak-group tweak-row-check">
       <label class="check-item">
-        <input type="checkbox" id="tweakCrosshairs" checked />
+        <input type="checkbox" id="tweakCrosshairs" />
         <span>折角护框</span>
       </label>
       <label class="check-item">
-        <input type="checkbox" id="tweakHatch" checked />
-        <span>斜线工程底纹</span>
+        <input type="checkbox" id="tweakHatch" />
+        <span>斜线底纹</span>
       </label>
       <label class="check-item">
         <input type="checkbox" id="tweakMotion" checked />
@@ -698,7 +672,7 @@
     </div>
 
     <div class="tweaks-foot">
-      <button type="button" class="btn-secondary-sm full-w" id="btnResetTweaks">恢复 DeepBook 默认值</button>
+      <button type="button" class="btn-secondary-sm full-w" id="btnResetTweaks">恢复 Figma Weave 默认值</button>
     </div>
   </aside>
 

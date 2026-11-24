@@ -34,14 +34,14 @@
   ];
 
   const DEFAULT_TWEAKS = {
-    surface: 'obsidian',
-    accent: 'cobalt',
+    surface: 'weave',
+    accent: 'lime',
     inspector: 'standard',
-    metal: 'chromatic',
+    metal: 'off',
     fontSize: 14,
-    waveAmplitude: 75,
-    crosshairs: true,
-    hatch: true,
+    waveAmplitude: 55,
+    crosshairs: false,
+    hatch: false,
     motion: true,
   };
 
@@ -94,7 +94,7 @@
 
   function loadTweaks() {
     try {
-      const saved = JSON.parse(localStorage.getItem('conduit_tweaks_v2') || 'null');
+      const saved = JSON.parse(localStorage.getItem('conduit_tweaks_v7') || 'null');
       return saved ? { ...DEFAULT_TWEAKS, ...saved } : { ...DEFAULT_TWEAKS };
     } catch {
       return { ...DEFAULT_TWEAKS };
@@ -103,7 +103,7 @@
 
   function saveTweaks() {
     try {
-      localStorage.setItem('conduit_tweaks_v2', JSON.stringify(appState.tweaks));
+      localStorage.setItem('conduit_tweaks_v7', JSON.stringify(appState.tweaks));
     } catch {
       // Ignore
     }
@@ -115,7 +115,7 @@
     root.dataset.surface = t.surface;
     root.dataset.accent = t.accent;
     root.dataset.inspector = t.inspector;
-    root.dataset.metal = t.metal || 'chromatic';
+    root.dataset.metal = t.metal || 'off';
     root.dataset.crosshairs = t.crosshairs ? 'on' : 'off';
     root.dataset.hatch = t.hatch ? 'on' : 'off';
     root.dataset.motion = t.motion ? 'on' : 'off';
@@ -138,6 +138,7 @@
 
     if (waveEngine) waveEngine.sync();
     if (metalEngine) metalEngine.sync();
+    if (canvasEngine) canvasEngine.render();
     if (window.ConduitOrbs) window.ConduitOrbs.syncAll();
     requestAnimationFrame(syncAllFluidTracks);
   }
@@ -438,7 +439,7 @@
       };
 
       hubMount.innerHTML = `
-        <svg class="ib-diagram" viewBox="0 0 300 148" role="group" aria-label="本地 CLI 集成矩阵">
+        <svg class="ib-diagram" viewBox="0 0 300 156" role="group" aria-label="本地 CLI 集成矩阵">
           ${hubTools.map((_, i) => `<path d="${pathFor(i)}" class="ib-flow ${activeIdx === i ? 'ib-flow-on' : ''}" />`).join('')}
           ${animate && activeIdx >= 0 ? `<circle r="2.3" class="ib-pkt"><animateMotion dur="1.15s" repeatCount="indefinite" path="${pathFor(activeIdx)}" /></circle>` : ''}
           <g transform="translate(132,56)">
@@ -455,7 +456,7 @@
               </g>`
             )
             .join('')}
-          <text x="150" y="114" text-anchor="middle" font-size="7.5" fill="var(--ink-muted)" font-family="var(--font-mono)">
+          <text x="150" y="148" text-anchor="middle" font-size="7.5" fill="var(--ink-muted)" font-family="var(--font-mono)">
             ${activeIdx >= 0 ? `syncing · ${hubTools[activeIdx].label.toLowerCase()}` : '4 local tools connected'}
           </text>
         </svg>`;
@@ -593,7 +594,7 @@
     const COUNTS = { bars: 22, grid: 18, line: 34, dots: 12, radial: 36 };
     let variant = 'bars';
     try {
-      const saved = localStorage.getItem('conduit_viz_mode_v1');
+      const saved = localStorage.getItem('conduit_viz_mode_v2');
       if (saved && COUNTS[saved]) variant = saved;
     } catch {}
 
@@ -603,7 +604,7 @@
     let hoverNorm = -1; // 0..1 across canvas when pointer hovers
     let hoverEnergy = 0;
     let values = new Array(COUNTS[variant]).fill(0);
-    let colors = { accent: '#1B66FF', warn: '#f59e0b', tick: '#313640', rest: 'rgba(255,255,255,0.08)' };
+    let colors = { accent: '#111315', warn: '#b45309', tick: '#c8cfd6', rest: 'rgba(17,19,21,0.08)' };
     let dims = { w: 0, h: 0, ctx: null };
 
     const clamp01 = (v) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0);
@@ -624,7 +625,7 @@
       if (!COUNTS[next]) return;
       variant = next;
       values = new Array(COUNTS[variant]).fill(0);
-      try { localStorage.setItem('conduit_viz_mode_v1', variant); } catch {}
+      try { localStorage.setItem('conduit_viz_mode_v2', variant); } catch {}
       syncPills();
       drawFrame(1 / 60, false);
     }
@@ -655,10 +656,10 @@
     function refreshColors() {
       const cs = getComputedStyle(document.documentElement);
       colors = {
-        accent: cs.getPropertyValue('--accent-hex').trim() || '#1B66FF',
-        warn: cs.getPropertyValue('--state-warn').trim() || '#f59e0b',
-        tick: cs.getPropertyValue('--line-strong').trim() || '#313640',
-        rest: cs.getPropertyValue('--line-subtle').trim() || '#1d2026',
+        accent: cs.getPropertyValue('--ink-primary').trim() || '#111315',
+        warn: cs.getPropertyValue('--state-warn').trim() || '#b45309',
+        tick: cs.getPropertyValue('--line-strong').trim() || '#c8cfd6',
+        rest: cs.getPropertyValue('--line-subtle').trim() || 'rgba(17,19,21,0.08)',
       };
     }
 
@@ -1492,6 +1493,8 @@
   }
 
   function updatePipelinePills(run) {
+    const topbar = document.querySelector('.stage-topbar');
+    if (topbar) topbar.classList.toggle('has-active-run', Boolean(run));
     const order = ['plan', 'gate', 'exec', 'review', 'summary'];
     const stageIdxMap = { init: -1, plan: 0, copy: 0, exec: 2, review: 3, summary: 4, done: 5, failed: -2 };
     let activeIdx = run ? (stageIdxMap[run.activeStage] ?? -1) : -1;
@@ -2294,7 +2297,7 @@
       appState.health = data;
       el('dotAgy').className = `status-dot ${data.agy.installed ? 'ok' : 'err'}`;
       el('dotCodex').className = `status-dot ${data.codex.installed ? 'ok' : 'err'}`;
-      el('welcomeEnvTag').textContent = `AGY ${data.agy.installed ? 'OK' : 'MISSING'} · CODEX ${data.codex.installed ? 'OK' : 'MISSING'}`;
+      el('welcomeEnvTag').textContent = `GEMINI CLI ${data.agy.installed ? 'READY' : 'MISSING'} · CODEX CLI ${data.codex.installed ? 'READY' : 'MISSING'}`;
 
       if (!el('inputWorkspace').value) {
         el('inputWorkspace').value = data.defaultWorkspace || data.workbenchDir || '';
@@ -2714,6 +2717,8 @@
         worktree: Boolean(el('chkWorktree')?.checked),
       }),
       onPresetChange: (presetName) => {
+        const sel = el('selectWfPreset');
+        if (sel && presetName) sel.value = presetName;
         document.querySelectorAll('[data-ic-preset]').forEach((b) => {
           b.classList.toggle('is-active', Boolean(presetName) && b.dataset.icPreset === presetName);
         });
@@ -2766,6 +2771,8 @@
     appState.stageView = next;
     el('conversationViewport').classList.toggle('hidden', next !== 'chat');
     el('workflowStage').classList.toggle('hidden', next !== 'workflow');
+    const topbar = document.querySelector('.stage-topbar');
+    if (topbar) topbar.classList.toggle('is-workflow-mode', next === 'workflow');
     const composerDock = document.querySelector('.composer-dock');
     if (composerDock) composerDock.classList.toggle('hidden', next === 'workflow');
     closePickers();
@@ -2965,6 +2972,9 @@
     document.querySelectorAll('[data-ic-add]').forEach((btn) => {
       btn.addEventListener('click', () => { if (canvasEngine) canvasEngine.addNode(btn.dataset.icAdd); });
     });
+    el('selectWfPreset')?.addEventListener('change', (e) => {
+      if (canvasEngine && e.target.value) canvasEngine.loadPreset(e.target.value);
+    });
     document.querySelectorAll('[data-ic-preset]').forEach((btn) => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('[data-ic-preset]').forEach((b) => b.classList.toggle('is-active', b === btn));
@@ -3060,7 +3070,10 @@
       renderSidebarThreads();
     });
 
-    // Starter copy buttons inside Ink-Orbit Bento
+    // Starter copy cards + direct Canvas entry on clean App Empty State
+    el('btnStarterOpenCanvas')?.addEventListener('click', () => {
+      switchStageView('workflow');
+    });
     document.querySelectorAll('[data-starter-mode]').forEach((card) => {
       card.addEventListener('click', () => {
         setModeValue(card.dataset.starterMode);
@@ -3300,7 +3313,7 @@
       appState.tweaks = { ...DEFAULT_TWEAKS };
       applyTweaks();
       saveTweaks();
-      showToast('已恢复 DeepBook 默认参数');
+      showToast('已恢复 Figma Weave 建筑白昼默认值');
     });
 
     // Global Keyboard & Outside-Click Dismiss

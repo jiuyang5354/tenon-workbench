@@ -204,14 +204,15 @@
     let rafId = null;
 
     function renderFrame(advance = true) {
-      const mode = document.documentElement.dataset.metal || 'chromatic';
+      const mode = document.documentElement.dataset.metal || 'off';
       const motionEnabled = document.documentElement.dataset.motion !== 'off' && !reducedMotion;
       if (mode === 'off') {
         instances.forEach((i) => i.ctx.clearRect(0, 0, i.canvas.width, i.canvas.height));
         return;
       }
 
-      const isLight = document.documentElement.dataset.surface === 'daylight' ? 1.0 : 0.0;
+      const surf = document.documentElement.dataset.surface || 'weave';
+      const isLight = surf === 'weave' || surf === 'paper' || surf === 'daylight' ? 1.0 : 0.0;
       const presetVal = mode === 'chromatic' ? 1.0 : 0.0;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
@@ -272,7 +273,7 @@
     }
 
     function loop() {
-      const mode = document.documentElement.dataset.metal || 'chromatic';
+      const mode = document.documentElement.dataset.metal || 'off';
       const motionEnabled = document.documentElement.dataset.motion !== 'off' && !reducedMotion;
       if (mode === 'off' || !motionEnabled) {
         rafId = null;
@@ -283,7 +284,7 @@
     }
 
     function sync() {
-      const mode = document.documentElement.dataset.metal || 'chromatic';
+      const mode = document.documentElement.dataset.metal || 'off';
       const motionEnabled = document.documentElement.dataset.motion !== 'off' && !reducedMotion;
       renderFrame(false);
       if (mode !== 'off' && motionEnabled && !rafId) {

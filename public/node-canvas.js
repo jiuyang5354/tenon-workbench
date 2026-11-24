@@ -12,7 +12,7 @@
    */
 
   const NODE_WIDTH = 296;
-  const PORT_Y = 34;
+  const PORT_Y = 58;
   const GRID_SNAP = 24;
   const MIN_ZOOM = 0.25;
   const MAX_ZOOM = 2.0;
@@ -32,11 +32,12 @@
   const NODE_TEMPLATES = {
     'gemini-plan': {
       kind: 'gemini-plan',
+      roleCode: 'PLANNER',
       provider: 'gemini',
       title: 'Gemini · 架构规划师',
       subtitle: '需求拆解与接口契约设计',
       mode: 'plan-only',
-      orbIdle: ['base', 'default'],
+      orbIdle: ['reasoning', 'default'],
       orbRun: ['reasoning', 'twins'],
       inLabel: '上游需求',
       outLabel: 'Spec 契约',
@@ -52,11 +53,12 @@
     },
     'codex-exec': {
       kind: 'codex-exec',
+      roleCode: 'WORKER',
       provider: 'codex',
       title: 'Codex · 沙箱工位',
       subtitle: '独立沙箱编写代码与单测',
       mode: 'codex-exec',
-      orbIdle: ['base', 'default'],
+      orbIdle: ['working', 'gyro'],
       orbRun: ['working', 'gyro'],
       inLabel: 'Spec 契约',
       outLabel: 'Branch Diff',
@@ -72,11 +74,12 @@
     },
     'cluster-merge': {
       kind: 'cluster-merge',
+      roleCode: 'MERGE HUB',
       provider: 'both',
       title: '集群聚合合并器',
       subtitle: '汇合多路 Agent 产物与冲突仲裁',
       mode: 'full-pipeline',
-      orbIdle: ['base', 'default'],
+      orbIdle: ['compacting', 'squeeze'],
       orbRun: ['compacting', 'fuse'],
       inLabel: '多路并行输入',
       outLabel: 'Merged Patch',
@@ -92,11 +95,12 @@
     },
     'codex-review': {
       kind: 'codex-review',
+      roleCode: 'PRE-CI GATE',
       provider: 'codex',
       title: 'Pre-CI 审查与终局汇报',
       subtitle: '分级阻断审查 + Gemini 10秒汇报',
       mode: 'codex-review',
-      orbIdle: ['base', 'default'],
+      orbIdle: ['searching', 'lighthouse'],
       orbRun: ['searching', 'lighthouse'],
       inLabel: 'Merged Diff',
       outLabel: 'Release Pass',
@@ -112,11 +116,12 @@
     },
     'gemini-copy': {
       kind: 'gemini-copy',
+      roleCode: 'COPY ADVISOR',
       provider: 'gemini',
       title: 'Gemini · 文案与交互顾问',
       subtitle: '去除 AI 解释腔，打磨界面文案',
       mode: 'copy-polish',
-      orbIdle: ['base', 'default'],
+      orbIdle: ['background', 'spiral'],
       orbRun: ['reasoning', 'default'],
       inLabel: '产品草稿',
       outLabel: '定稿文案',
@@ -204,7 +209,7 @@
           title: 'Gemini · 总架构规划师',
           subtitle: '拆解契约并分发双路并行任务',
           x: 60,
-          y: 200,
+          y: 230,
           params: [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Branching', v: '3 路权衡' }],
           toggles: [{ key: 'approval', label: '人工拍板闸门', desc: '派发集群前人工确认' }],
         }),
@@ -213,8 +218,8 @@
           kind: 'codex-exec',
           title: 'Codex · 前端工位 #1',
           subtitle: '并行实现 UI 组件与交互动效',
-          x: 430,
-          y: 36,
+          x: 460,
+          y: 16,
           params: [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Effort', dynamic: 'nodeEffort' }, { k: 'Worktree', v: 'wt/agent-fe' }],
           toggles: [{ key: 'worktree', label: 'Worktree 隔离', desc: '独立分支零污染' }],
         }),
@@ -223,8 +228,8 @@
           kind: 'codex-exec',
           title: 'Codex · 后端工位 #2',
           subtitle: '并行实现接口契约与单元测试',
-          x: 430,
-          y: 416,
+          x: 460,
+          y: 448,
           params: [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Effort', dynamic: 'nodeEffort' }],
           toggles: [{ key: 'writable', label: '沙箱写权限', desc: 'workspace-write' }],
         }),
@@ -233,8 +238,8 @@
           kind: 'cluster-merge',
           title: '集群聚合合并器',
           subtitle: '汇合双路 Diff 并统一对齐接口',
-          x: 810,
-          y: 196,
+          x: 860,
+          y: 230,
           params: [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Inputs', dynamic: 'inCount' }],
           toggles: [{ key: 'autoNewDiff', label: '合并新建未跟踪文件', desc: '纳入统一 Diff 视图' }],
         }),
@@ -243,8 +248,8 @@
           kind: 'codex-review',
           title: 'Pre-CI 门禁与终局汇报',
           subtitle: '两级阻断审查 + 10秒人话总结',
-          x: 1180,
-          y: 196,
+          x: 1260,
+          y: 230,
           params: [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Effort', dynamic: 'nodeEffort' }, { k: 'Max Rounds', dynamic: 'maxRounds' }],
           toggles: [{ key: 'humanReport', label: 'Gemini 终局汇报', desc: '输出人类速览结论' }],
         }),
@@ -622,8 +627,9 @@
       worldEl.style.transform = `translate3d(${state.panX.toFixed(1)}px, ${state.panY.toFixed(1)}px, 0) scale(${state.zoom.toFixed(4)})`;
       const minor = 24 * state.zoom;
       const major = 120 * state.zoom;
-      viewportEl.style.backgroundSize = `${minor.toFixed(2)}px ${minor.toFixed(2)}px, ${major.toFixed(2)}px ${major.toFixed(2)}px, ${major.toFixed(2)}px ${major.toFixed(2)}px`;
-      viewportEl.style.backgroundPosition = `${state.panX.toFixed(1)}px ${state.panY.toFixed(1)}px, ${state.panX.toFixed(1)}px ${state.panY.toFixed(1)}px, ${state.panX.toFixed(1)}px ${state.panY.toFixed(1)}px`;
+      const p = `${state.panX.toFixed(1)}px ${state.panY.toFixed(1)}px`;
+      viewportEl.style.backgroundSize = `${minor.toFixed(2)}px ${minor.toFixed(2)}px, ${minor.toFixed(2)}px ${minor.toFixed(2)}px, ${major.toFixed(2)}px ${major.toFixed(2)}px, ${major.toFixed(2)}px ${major.toFixed(2)}px`;
+      viewportEl.style.backgroundPosition = `${p}, ${p}, ${p}, ${p}`;
       if (zoomLabelEl) zoomLabelEl.textContent = `${Math.round(state.zoom * 100)}%`;
       drawMinimap();
     }
@@ -678,15 +684,15 @@
     function autoLayout() {
       pushHistory();
       const waves = topoWaves(state.graph);
-      const colGap = 384;
-      const rowGap = 350;
+      const colGap = 408;
+      const rowGap = 400;
       waves.forEach((wave, col) => {
         const totalH = (wave.length - 1) * rowGap;
         wave.forEach((id, row) => {
           const n = state.graph.nodes.find((x) => x.id === id);
           if (!n) return;
-          n.x = 60 + col * colGap;
-          n.y = Math.round(330 - totalH / 2 + row * rowGap);
+          n.x = 64 + col * colGap;
+          n.y = Math.round(350 - totalH / 2 + row * rowGap);
         });
       });
       renderAll();
@@ -753,25 +759,26 @@
             ? 'var(--line-subtle)'
             : isErr
               ? 'var(--state-err)'
-              : isRunning || isDone
-                ? 'var(--accent-hex)'
-                : 'var(--line-strong)';
+              : isRunning
+                ? 'var(--wire-active)'
+                : isDone
+                  ? 'var(--wire-done)'
+                  : 'var(--wire-idle)';
           const midX = (x1 + x2) / 2;
           const midY = (y1 + y2) / 2;
 
           return `
             <g class="ic-edge-group" data-edge-id="${escapeHtml(e.id)}">
               <path d="${d}" class="ic-edge-hit" />
-              <path d="${d}" class="ic-edge-halo" style="stroke:${stroke};opacity:${isRunning ? '0.32' : '0.12'}" />
-              <path d="${d}" class="ic-edge-line ${isRunning ? 'is-flowing' : ''}" style="stroke:${stroke}" stroke-dasharray="${isDone && !isRunning ? 'none' : '7 6'}" />
+              <path d="${d}" class="ic-edge-line ${isRunning ? 'is-flowing' : ''} ${isDone ? 'is-done' : ''}" style="stroke:${stroke}" stroke-dasharray="${isRunning ? '5 5' : 'none'}" />
               ${
                 isRunning && motionOn
-                  ? `<circle r="3.6" fill="var(--accent-hex)"><animateMotion dur="1.05s" repeatCount="indefinite" path="${d}" /></circle>`
+                  ? `<circle r="3" fill="var(--wire-active)"><animateMotion dur="1.15s" repeatCount="indefinite" path="${d}" /></circle>`
                   : ''
               }
               <g class="ic-edge-del" transform="translate(${midX.toFixed(1)},${midY.toFixed(1)})" data-del-edge="${escapeHtml(e.id)}" role="button" tabindex="0" aria-label="断开连线">
-                <circle r="9" class="ic-edge-del-bg" />
-                <path d="M-3 -3 L3 3 M3 -3 L-3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                <circle r="8.5" class="ic-edge-del-bg" />
+                <path d="M-2.8 -2.8 L2.8 2.8 M2.8 -2.8 L-2.8 2.8" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" />
               </g>
             </g>`;
         })
@@ -784,9 +791,8 @@
           const d = bezierPath(src.x + NODE_WIDTH, src.y + PORT_Y, state.wiring.x, state.wiring.y);
           draftWire = `
             <g class="ic-edge-draft">
-              <path d="${d}" class="ic-edge-halo" style="stroke:var(--accent-hex);opacity:0.35" />
-              <path d="${d}" class="ic-edge-line is-flowing" style="stroke:var(--accent-hex)" stroke-dasharray="6 5" />
-              <circle cx="${state.wiring.x.toFixed(1)}" cy="${state.wiring.y.toFixed(1)}" r="4.5" fill="var(--accent-hex)" />
+              <path d="${d}" class="ic-edge-line is-flowing" style="stroke:var(--wire-active)" stroke-dasharray="5 4" />
+              <circle cx="${state.wiring.x.toFixed(1)}" cy="${state.wiring.y.toFixed(1)}" r="3.5" fill="var(--wire-active)" />
             </g>`;
         }
       }
@@ -916,15 +922,6 @@
           const [orbState, orbVariant] = running ? tpl.orbRun : st === 'error' ? ['retrying', 'default'] : tpl.orbIdle;
           const isMerge = n.kind === 'cluster-merge';
 
-          const chipIcon =
-            n.muted
-              ? '<span class="wf-chip-dot"></span>'
-              : st === 'completed'
-                ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
-                : st === 'error'
-                  ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>'
-                  : `<span class="wf-chip-dot-wrap">${running ? '<span class="wf-chip-ping"></span>' : ''}<span class="wf-chip-dot"></span></span>`;
-
           const paramsHtml = (n.params || [])
             .map(
               (p) => `
@@ -951,21 +948,32 @@
             })
             .join('');
 
+          const extRole = tpl.roleCode || 'AGENT';
+          const extModel = formatNodeModelLabel(n);
+
           return `
             <div class="ic-node-wrap ${sel ? 'is-selected' : ''} ${isMerge ? 'is-merge-hub' : ''} ${n.muted ? 'is-muted' : ''}" data-node-id="${escapeHtml(n.id)}" data-status="${safeSt}" style="transform:translate3d(${n.x}px,${n.y}px,0)">
+              <div class="ic-node-ext-meta mono">
+                <div class="ic-ext-left">
+                  <span class="ic-ext-role">${escapeHtml(extRole)}</span>
+                  <button type="button" class="ic-ext-model" data-ic-pick-model="${escapeHtml(n.id)}" title="点击快速切换此节点模型">${escapeHtml(extModel)}</button>
+                </div>
+                <span class="ic-ext-status ${safeSt}">
+                  <span class="ic-ext-dot ${running ? 'is-pulse' : ''}"></span>
+                  <span>${n.muted ? '已静音' : meta.label}</span>
+                </span>
+              </div>
               <div class="agent-node ${sel ? 'is-selected' : ''}" data-status="${safeSt}">
-                ${running ? '<span class="agent-node-glow" aria-hidden="true"></span>' : ''}
                 <div class="agent-node-surface">
                   ${running ? '<span class="agent-node-sweep-track" aria-hidden="true"><span class="agent-node-sweep"></span></span>' : ''}
-                  <header class="agent-node-head ic-drag-handle" title="拖拽自由移动 · 双击看详情 · 右键呼出 Blender 菜单">
+                  <header class="agent-node-head ic-drag-handle" title="拖拽自由移动 · 双击看详情 · 右键呼出菜单">
                     <span class="agent-node-icon">
-                      <svg class="thinking-orb" width="22" height="22" viewBox="0 0 22 22" data-orb-state="${orbState}" data-orb-variant="${orbVariant}" data-orb-size="22" aria-hidden="true"></svg>
+                      <svg class="thinking-orb" width="26" height="26" viewBox="0 0 26 26" data-orb-state="${orbState}" data-orb-variant="${orbVariant}" data-orb-size="26" aria-hidden="true"></svg>
                     </span>
                     <div class="agent-node-titles">
                       <h3 class="agent-node-title">${escapeHtml(n.title)}</h3>
                       <p class="agent-node-sub">${escapeHtml(n.subtitle)}</p>
                     </div>
-                    <span class="wf-status-chip ${safeSt}">${chipIcon}<span>${n.muted ? '静音跳过' : meta.label}</span></span>
                   </header>
 
                   <div class="agent-node-body">
@@ -988,7 +996,6 @@
                     </div>
                   </footer>
                 </div>
-                ${running ? '<span class="agent-node-ring" aria-hidden="true"></span>' : ''}
 
                 ${
                   tpl.showIn
@@ -1050,8 +1057,9 @@
         });
       });
 
-      // Click Model pill right on card -> Per-node Model Picker!
-      nodesLayerEl.querySelectorAll('[data-ic-pick-model]').forEach((btn) => {
+      // Also update external micro-caption model label cleanly on title/render
+      const extModelBtns = nodesLayerEl.querySelectorAll('[data-ic-pick-model]');
+      extModelBtns.forEach((btn) => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           const r = btn.getBoundingClientRect();
@@ -1789,8 +1797,13 @@
       const vpRect = viewportEl.getBoundingClientRect();
       if (!vpRect.width || !vpRect.height) return;
       const cs = getComputedStyle(document.documentElement);
-      const inkPrimary = cs.getPropertyValue('--ink-primary').trim() || '#ffffff';
-      const accentHex = cs.getPropertyValue('--accent-hex').trim() || '#1b66ff';
+      const isDark = document.documentElement.dataset.surface === 'charcoal';
+      const inkPrimary = cs.getPropertyValue('--ink-primary').trim() || '#111315';
+      const wireIdle = isDark ? 'rgba(255,255,255,0.22)' : 'rgba(17,19,21,0.16)';
+      const stateOk = cs.getPropertyValue('--state-ok').trim() || '#1f7a4d';
+      const stateErr = cs.getPropertyValue('--state-err').trim() || '#c23b2b';
+      const vpStroke = isDark ? 'rgba(238,255,130,0.45)' : 'rgba(17,19,21,0.32)';
+      const vpFill = isDark ? 'rgba(238,255,130,0.05)' : 'rgba(17,19,21,0.035)';
 
       const viewX0 = -state.panX / state.zoom;
       const viewY0 = -state.panY / state.zoom;
@@ -1816,8 +1829,8 @@
       const byId = new Map(state.graph.nodes.map((n) => [n.id, n]));
       const statusMap = effectiveStatuses();
 
-      ctx.strokeStyle = 'rgba(130, 150, 190, 0.48)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = wireIdle;
+      ctx.lineWidth = 0.85;
       state.graph.edges.forEach((e) => {
         const s = byId.get(e.source);
         const t = byId.get(e.target);
@@ -1831,22 +1844,22 @@
       state.graph.nodes.forEach((n) => {
         const st = statusMap.get(n.id) || 'idle';
         ctx.fillStyle = n.muted
-          ? 'rgba(100,105,115,0.35)'
+          ? 'rgba(132, 139, 152, 0.22)'
           : st === 'running'
-            ? accentHex
+            ? inkPrimary
             : st === 'completed'
-              ? '#10b981'
+              ? stateOk
               : st === 'error'
-                ? '#ef4444'
+                ? stateErr
                 : n.id === state.selectedId
-                  ? inkPrimary
-                  : 'rgba(140, 148, 162, 0.58)';
-        ctx.fillRect(ox + n.x * scale, oy + n.y * scale, Math.max(8, NODE_WIDTH * scale), Math.max(6, 175 * scale));
+                  ? (isDark ? 'rgba(244,245,246,0.78)' : 'rgba(17,19,21,0.58)')
+                  : (isDark ? 'rgba(255,255,255,0.22)' : 'rgba(17,19,21,0.18)');
+        ctx.fillRect(ox + n.x * scale, oy + n.y * scale, Math.max(7, NODE_WIDTH * scale), Math.max(5, 165 * scale));
       });
 
-      ctx.strokeStyle = accentHex;
-      ctx.fillStyle = 'rgba(27, 102, 255, 0.12)';
-      ctx.lineWidth = 1.25;
+      ctx.strokeStyle = vpStroke;
+      ctx.fillStyle = vpFill;
+      ctx.lineWidth = 1;
       ctx.fillRect(ox + viewX0 * scale, oy + viewY0 * scale, (viewX1 - viewX0) * scale, (viewY1 - viewY0) * scale);
       ctx.strokeRect(ox + viewX0 * scale, oy + viewY0 * scale, (viewX1 - viewX0) * scale, (viewY1 - viewY0) * scale);
     }
