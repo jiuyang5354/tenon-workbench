@@ -288,7 +288,7 @@
             </button>
           </div>
 
-          <!-- Floating Bottom-Left: Compact Zoom, Shader & Fit Controls -->
+          <!-- Floating Bottom-Left: Compact Zoom, Grid & Fit Controls -->
           <div class="ic-floating-bar ic-zoom-hud">
             <button type="button" class="ic-zoom-btn mono" id="btnWfZoomOut" title="缩小">−</button>
             <button type="button" class="ic-zoom-val mono" id="btnWfZoomReset" title="点击重置为 100%">84%</button>
@@ -297,17 +297,6 @@
             <button type="button" class="ic-chip-btn" id="btnWfGridCycle" title="切换无限画布底纹（点状网格 / 制图细格 / 纯粹素面）">网格: 点阵</button>
             <button type="button" class="ic-chip-btn" id="btnWfFit" title="适配全部节点到视野 (F)">全览</button>
             <button type="button" class="ic-chip-btn" id="btnWfExport" title="导出集群拓扑 JSON">JSON</button>
-          </div>
-
-          <!-- Floating Bottom-Center: Quiet Status Caption + Floating Command Bar (Single Hero CTA Rule!) -->
-          <div class="ic-bottom-stack">
-            <div class="ic-status-pill mono-xs" id="wfStatusBar" role="status" aria-live="polite">
-              5 节点 · 5 连线 · 右键或 Shift+A 添加节点 · 拖端口自由连线
-            </div>
-            <div class="ic-cmd-bar" id="wfCommandBar">
-              <input type="text" class="ic-cmd-input" id="inputWfCommand" placeholder="输入任务需求，回车驱动当前画布节点并发执行..." autocomplete="off" />
-              <button type="button" class="btn-cmd-send wf-btn" id="btnWfCommandRun">派发</button>
-            </div>
           </div>
 
           <!-- Floating Bottom-Right: Live Interactive Minimap -->

@@ -272,7 +272,7 @@
           title: 'Codex · 前端工位 #1',
           subtitle: '并行实现 UI 组件与交互动效',
           x: 460,
-          y: 16,
+          y: -36,
           params: [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Effort', dynamic: 'nodeEffort' }, { k: 'Worktree', v: 'wt/agent-fe' }],
           toggles: [{ key: 'worktree', label: 'Worktree 隔离', desc: '独立分支零污染' }],
         }),
@@ -282,7 +282,7 @@
           title: 'Codex · 后端工位 #2',
           subtitle: '并行实现接口契约与单元测试',
           x: 460,
-          y: 448,
+          y: 472,
           params: [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Effort', dynamic: 'nodeEffort' }],
           toggles: [{ key: 'writable', label: '沙箱写权限', desc: 'workspace-write' }],
         }),
@@ -882,10 +882,10 @@
           const badgeText = liveCount > 0 ? `${liveCount} 运行中` : doneCount === b.members.length ? '全部就绪 ✓' : `${b.members.length} 节点`;
           return `
             <div class="ic-node-group is-accent-${escapeHtml(g.accent || 'sage')} ${g.collapsed ? 'is-collapsed' : ''}" data-group-id="${escapeHtml(g.id)}" style="transform:translate(${b.x}px,${b.y}px);width:${b.w}px;height:${b.h}px">
-              <div class="ic-group-head" data-group-drag="${escapeHtml(g.id)}" title="拖动标题栏可整体平移组内节点 · 点击右侧按钮折叠/拆散">
+              <div class="ic-group-head" data-group-drag="${escapeHtml(g.id)}" title="拖动标题栏可整体平移组内节点 · 点击名称可直接改名">
                 <div class="ic-group-title-wrap">
                   <span class="ic-group-pip" aria-hidden="true"></span>
-                  <span class="ic-group-title mono">${escapeHtml(g.title)}</span>
+                  <input type="text" class="ic-group-title-input mono" data-group-rename="${escapeHtml(g.id)}" value="${escapeHtml(g.title)}" aria-label="节点组名称" />
                   <span class="ic-group-count mono-xs">${escapeHtml(badgeText)}</span>
                 </div>
                 <div class="ic-group-actions">
@@ -932,9 +932,18 @@
         });
       });
 
+      framesLayerEl.querySelectorAll('[data-group-rename]').forEach((inp) => {
+        inp.addEventListener('pointerdown', (e) => e.stopPropagation());
+        inp.addEventListener('dblclick', (e) => e.stopPropagation());
+        inp.addEventListener('input', () => {
+          const g = (state.graph.groups || []).find((x) => x.id === inp.dataset.groupRename);
+          if (g) g.title = inp.value;
+        });
+      });
+
       framesLayerEl.querySelectorAll('[data-group-drag]').forEach((head) => {
         head.addEventListener('dblclick', (e) => {
-          if (e.target.closest('button')) return;
+          if (e.target.closest('button, input')) return;
           e.stopPropagation();
           const g = (state.graph.groups || []).find((x) => x.id === head.dataset.groupDrag);
           if (!g) return;
@@ -943,7 +952,7 @@
           renderAll();
         });
         head.addEventListener('pointerdown', (e) => {
-          if (e.button !== 0 || e.target.closest('button') || state.spaceDown || state.panning || state.wiring) return;
+          if (e.button !== 0 || e.target.closest('button, input') || state.spaceDown || state.panning || state.wiring) return;
           e.stopPropagation();
           closeContextMenu();
           const gid = head.dataset.groupDrag;
@@ -1101,7 +1110,7 @@
       drawMinimap();
     }
 
-    function resolveParamHtml(p, node) {
+    function resolveParamHtml(p, node, paramIdx) {
       const ctx = getContext ? getContext() : {};
       if (p.dynamic === 'nodeModel') {
         const label = formatNodeModelLabel(node);
@@ -1111,6 +1120,9 @@
       if (p.dynamic === 'nodeEffort') {
         const eff = formatNodeEffortLabel(node);
         return `<button type="button" class="wf-param-val is-pickable ${node.effort ? 'is-custom' : ''}" data-ic-pick-effort="${escapeHtml(node.id)}" title="点击切换此节点推理深度">${escapeHtml(eff)} <span class="ic-pick-chev">▾</span></button>`;
+      }
+      if (!p.dynamic) {
+        return `<dd class="wf-param-val is-editable"><input type="text" class="wf-param-input mono" data-ic-param-node="${escapeHtml(node.id)}" data-ic-param-idx="${paramIdx}" value="${escapeHtml(p.v || '')}" placeholder="点击修改..." aria-label="${escapeHtml(p.k)}" /></dd>`;
       }
       let val = p.v || '—';
       if (p.dynamic === 'sandbox') val = ctx.sandbox || 'workspace-write';
@@ -1205,10 +1217,10 @@
 
           const paramsHtml = (n.params || [])
             .map(
-              (p) => `
+              (p, idx) => `
               <div class="wf-param-row">
                 <dt class="wf-param-label">${escapeHtml(p.k)}</dt>
-                ${resolveParamHtml(p, n)}
+                ${resolveParamHtml(p, n, idx)}
               </div>`
             )
             .join('');
@@ -1250,13 +1262,13 @@
               <div class="agent-node ${sel ? 'is-selected' : ''} ${n.collapsed ? 'is-collapsed' : ''}" data-status="${safeSt}">
                 <div class="agent-node-surface">
                   ${running ? '<span class="agent-node-sweep-track" aria-hidden="true"><span class="agent-node-sweep"></span></span>' : ''}
-                  <header class="agent-node-head ic-drag-handle" title="拖拽自由移动 · 双击看详情 · 按 H 折叠节点 · 右键呼出菜单">
+                  <header class="agent-node-head ic-drag-handle" title="拖拽空白区移动 · 点击名称或简介可直接编辑 · 按 H 折叠节点">
                     <span class="agent-node-icon">
                       <svg class="thinking-orb" width="26" height="26" viewBox="0 0 26 26" data-orb-state="${orbState}" data-orb-variant="${orbVariant}" data-orb-size="26" aria-hidden="true"></svg>
                     </span>
                     <div class="agent-node-titles">
-                      <h3 class="agent-node-title">${escapeHtml(n.title)}</h3>
-                      <p class="agent-node-sub">${escapeHtml(n.subtitle)}</p>
+                      <input type="text" class="ic-inline-title" data-ic-title="${escapeHtml(n.id)}" value="${escapeHtml(n.title)}" aria-label="节点标题" />
+                      <input type="text" class="ic-inline-sub" data-ic-sub="${escapeHtml(n.id)}" value="${escapeHtml(n.subtitle)}" aria-label="节点说明" />
                     </div>
                     <button type="button" class="ic-node-fold-btn" data-ic-fold="${escapeHtml(n.id)}" title="${n.collapsed ? '展开节点 (H)' : '折叠节点为紧凑标题栏 (H)'}" aria-expanded="${!n.collapsed}">
                       <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -1266,6 +1278,13 @@
                   </header>
 
                   <div class="agent-node-body">
+                    <div class="ic-node-prompt-box">
+                      <div class="ic-prompt-head">
+                        <span class="mono-xs">任务需求 · PROMPT</span>
+                        <span class="mono-xs ic-prompt-hint">Ctrl+Enter 执行</span>
+                      </div>
+                      <textarea class="ic-inline-prompt" rows="2" data-ic-prompt="${escapeHtml(n.id)}" placeholder="直接输入该节点的任务需求或指令...">${escapeHtml(n.prompt)}</textarea>
+                    </div>
                     ${paramsHtml ? `<dl class="wf-params">${paramsHtml}</dl>` : ''}
                     ${renderNodeCoTTree(n, st)}
                     ${togglesHtml ? `<div class="wf-toggles">${togglesHtml}</div>` : ''}
@@ -1308,7 +1327,7 @@
         // Delayed pointer capture (4px threshold preserves native dblclick & avoids wasted undo entries!)
         wrap.addEventListener('pointerdown', (e) => {
           if (e.button !== 0 || state.spaceDown || state.panning || state.wiring) return;
-          if (e.target.closest('button, [role="switch"], .wf-port')) return;
+          if (e.target.closest('button, input, textarea, select, [role="switch"], .wf-port')) return;
           e.stopPropagation();
           closeContextMenu();
           if (document.activeElement instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
@@ -1339,10 +1358,72 @@
         });
 
         wrap.addEventListener('dblclick', (e) => {
-          if (e.target.closest('button, [role="switch"], .wf-port')) return;
+          if (e.target.closest('button, input, textarea, select, [role="switch"], .wf-port')) return;
           e.stopPropagation();
           state.selectedId = nid;
           openResultDrawer('node');
+        });
+      });
+
+      // Inline In-Card Editors: Title, Subtitle, Task Prompt & Editable Params (IME & focus safe!)
+      const selectNodeQuietly = (nid) => {
+        if (state.selectedId === nid) return;
+        state.selectedId = nid;
+        nodesLayerEl.querySelectorAll('.ic-node-wrap').forEach((w) => {
+          const s = w.dataset.nodeId === nid;
+          w.classList.toggle('is-selected', s);
+          w.querySelector('.agent-node')?.classList.toggle('is-selected', s);
+        });
+      };
+
+      nodesLayerEl.querySelectorAll('[data-ic-title]').forEach((inp) => {
+        inp.addEventListener('pointerdown', (e) => { e.stopPropagation(); selectNodeQuietly(inp.dataset.icTitle); });
+        inp.addEventListener('input', () => {
+          const n = state.graph.nodes.find((x) => x.id === inp.dataset.icTitle);
+          if (!n) return;
+          n.title = inp.value;
+          const drawerTitle = resultDrawerEl?.querySelector('#icEditTitle');
+          if (drawerTitle && state.selectedId === n.id) drawerTitle.value = inp.value;
+        });
+      });
+
+      nodesLayerEl.querySelectorAll('[data-ic-sub]').forEach((inp) => {
+        inp.addEventListener('pointerdown', (e) => { e.stopPropagation(); selectNodeQuietly(inp.dataset.icSub); });
+        inp.addEventListener('input', () => {
+          const n = state.graph.nodes.find((x) => x.id === inp.dataset.icSub);
+          if (n) n.subtitle = inp.value;
+        });
+      });
+
+      nodesLayerEl.querySelectorAll('[data-ic-prompt]').forEach((ta) => {
+        ta.addEventListener('pointerdown', (e) => { e.stopPropagation(); selectNodeQuietly(ta.dataset.icPrompt); });
+        ta.addEventListener('wheel', (e) => {
+          if (ta.scrollHeight > ta.clientHeight) e.stopPropagation();
+        }, { passive: true });
+        ta.addEventListener('input', () => {
+          const n = state.graph.nodes.find((x) => x.id === ta.dataset.icPrompt);
+          if (!n) return;
+          n.prompt = ta.value;
+          const drawerPrompt = resultDrawerEl?.querySelector('#icEditPrompt');
+          if (drawerPrompt && state.selectedId === n.id) drawerPrompt.value = ta.value;
+        });
+        ta.addEventListener('keydown', (e) => {
+          if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+            runSinglePreview(ta.dataset.icPrompt);
+          }
+        });
+      });
+
+      nodesLayerEl.querySelectorAll('[data-ic-param-node]').forEach((inp) => {
+        inp.addEventListener('pointerdown', (e) => { e.stopPropagation(); selectNodeQuietly(inp.dataset.icParamNode); });
+        inp.addEventListener('input', () => {
+          const n = state.graph.nodes.find((x) => x.id === inp.dataset.icParamNode);
+          const idx = Number(inp.dataset.icParamIdx);
+          if (n && n.params && n.params[idx]) {
+            n.params[idx].v = inp.value;
+          }
         });
       });
 
@@ -2556,7 +2637,7 @@
         return;
       }
       const token = ++state.demoToken;
-      const prompt = (commandInputEl?.value || state.lastTaskPrompt || node.prompt || '').trim();
+      const prompt = (node.prompt || commandInputEl?.value || state.lastTaskPrompt || '').trim();
       state.demoRunning = true;
       if (!isEditingInDrawer()) state.selectedId = nid;
       node.status = 'running';
@@ -2639,6 +2720,7 @@
     viewportEl.addEventListener('pointerdown', (e) => {
       const isUi = Boolean(e.target.closest(OVERLAY_SEL));
       if (isUi || state.dragging || state.wiring) return;
+      if (e.target.closest('input, textarea, select')) return;
       const isBg = !e.target.closest('.ic-node-wrap, .ic-group-head, .ic-node-group.is-collapsed');
       if (e.button === 1 || (e.button === 0 && (isBg || state.spaceDown))) {
         if (document.activeElement instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
