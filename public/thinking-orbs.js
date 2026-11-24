@@ -480,7 +480,17 @@
   }
 
   /* =========================================================================
-     Semantic 10-State AI Orb State Machine (Native Port of 21st.dev ai-orb.tsx)
+     DIALOGUE STREAM ENGINE: Authentic 10-State AI Orb (8 Distinct Geometries)
+     Cleanly separated from Node Canvas Fibonacci Orbs above.
+     Native port of `ai-orb.tsx` + `thinking-orbs` geometric visual language:
+       - ai-breathing  (idle / done / error): organic undulating radial-tick loop
+       - ai-listening  (listening):           3D parallel latitude dot rings
+       - ai-working    (thinking):            free-floating 3D particle swarm
+       - ai-solving    (reasoning):           3D dot cloud w/ bright focal sparks
+       - ai-searching  (tool-call):           latitude dot sphere + lens spotlight
+       - ai-connecting (tool-result):         3D constellation wireframe graph
+       - ai-composing  (streaming):           3D flowing twisted ribbon vortex
+       - ai-shaping    (waiting-approval):    clean circular bead ring (crimson)
      ========================================================================= */
   const AI_ORB_STATES = [
     'idle',
@@ -508,18 +518,404 @@
     done: '本轮协同已完成',
   };
 
-  const AI_ORB_VISUALS = {
-    idle: { state: 'base', variant: 'default', speed: 0.6, paused: false, settles: true, tone: 'muted' },
-    listening: { state: 'waiting', variant: 'default', speed: 1, paused: false, settles: true, tone: 'primary' },
-    thinking: { state: 'working', variant: 'default', speed: 1, paused: false, settles: false, tone: 'primary' },
-    reasoning: { state: 'reasoning', variant: 'twins', speed: 1, paused: false, settles: false, tone: 'primary' },
-    'tool-call': { state: 'searching', variant: 'lighthouse', speed: 1, paused: false, settles: false, tone: 'primary' },
-    'tool-result': { state: 'compacting', variant: 'fuse', speed: 1, paused: false, settles: false, tone: 'primary' },
-    streaming: { state: 'working', variant: 'gyro', speed: 1, paused: false, settles: false, tone: 'primary' },
-    'waiting-approval': { state: 'compacting', variant: 'squeeze', speed: 0.8, paused: false, settles: true, tone: 'attention' },
-    error: { state: 'retrying', variant: 'default', speed: 1, paused: true, settles: false, tone: 'critical' },
-    done: { state: 'base', variant: 'default', speed: 0.6, paused: false, settles: true, tone: 'primary' },
+  const AI_ORB_HINTS = {
+    idle: '通道安静待命，可直接派发需求或点击切换状态。',
+    listening: '已捕获输入框草稿，按 Ctrl+Enter 或点击发送即可启动。',
+    thinking: '正在拆解任务边界并规划双模型协同路径。',
+    reasoning: '正在执行多方案深度推演与接口契约校验。',
+    'tool-call': '正在调用本机 CLI、Git 探测或文件检索工具。',
+    'tool-result': '正在汇聚各路工具返回结果并建立上下文关联。',
+    streaming: '正在实时流式输出代码、结论或交付文档。',
+    'waiting-approval': '高危或架构拍板节点已挂起，请确认后继续放行。',
+    error: '运行被中断或出现异常，可查看右侧审查/终端定位原因。',
+    done: '本轮双模型协同已顺利完成，随时可继续追问。',
   };
+
+  const AI_ORB_VISUALS = {
+    idle: { geom: 'ai-breathing', speed: 0.6, paused: false, settles: true, tone: 'muted' },
+    listening: { geom: 'ai-listening', speed: 1, paused: false, settles: true, tone: 'primary' },
+    thinking: { geom: 'ai-working', speed: 1, paused: false, settles: false, tone: 'primary' },
+    reasoning: { geom: 'ai-solving', speed: 1, paused: false, settles: false, tone: 'primary' },
+    'tool-call': { geom: 'ai-searching', speed: 1, paused: false, settles: false, tone: 'primary' },
+    'tool-result': { geom: 'ai-connecting', speed: 1, paused: false, settles: false, tone: 'primary' },
+    streaming: { geom: 'ai-composing', speed: 1, paused: false, settles: false, tone: 'primary' },
+    'waiting-approval': { geom: 'ai-shaping', speed: 0.8, paused: false, settles: true, tone: 'attention' },
+    error: { geom: 'ai-breathing', speed: 1, paused: true, settles: false, tone: 'critical' },
+    done: { geom: 'ai-breathing', speed: 0.6, paused: false, settles: true, tone: 'primary' },
+  };
+
+  function makeSvgEl(tag) {
+    return document.createElementNS('http://www.w3.org/2000/svg', tag);
+  }
+
+  function mountAiOrb(svg, opts = {}) {
+    if (!svg) return null;
+    const {
+      geom = 'ai-breathing',
+      size = 22,
+      speed = 1,
+      paused = false,
+      label = '',
+    } = opts;
+
+    svg.replaceChildren();
+    svg.setAttribute('width', String(size));
+    svg.setAttribute('height', String(size));
+    svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
+    svg.setAttribute('fill', 'currentColor');
+    svg.dataset.orbFamily = 'ai';
+    if (label) {
+      svg.setAttribute('role', 'img');
+      svg.setAttribute('aria-label', label);
+      svg.removeAttribute('aria-hidden');
+    } else {
+      svg.setAttribute('aria-hidden', 'true');
+      svg.removeAttribute('role');
+      svg.removeAttribute('aria-label');
+    }
+
+    const c = size / 2;
+    const R = size * 0.41;
+    const scale = Math.max(0.42, size / 44);
+    let draw = () => {};
+
+    if (geom === 'ai-breathing') {
+      // Organic 3-lobed undulating loop of crisp radial tick-dashes (idle / error / done)
+      const N = size <= 24 ? 42 : 58;
+      const lines = Array.from({ length: N }, () => {
+        const ln = makeSvgEl('line');
+        ln.setAttribute('stroke', 'currentColor');
+        ln.setAttribute('stroke-linecap', 'round');
+        ln.setAttribute('stroke-width', Math.max(0.65, 1.05 * scale).toFixed(2));
+        return svg.appendChild(ln);
+      });
+      const halfTick = Math.max(1.05, 1.95 * scale);
+      draw = (t) => {
+        const phase = paused ? 1.85 : (t / 4600) * TAU;
+        for (let i = 0; i < N; i += 1) {
+          const th = (i / N) * TAU;
+          const wave =
+            0.095 * Math.sin(3 * th + phase) +
+            0.055 * Math.cos(2 * th - phase * 0.72) +
+            0.022 * Math.sin(5 * th + phase * 1.25);
+          const rad = R * (0.94 + wave);
+          const tickGrow = halfTick * (0.82 + 0.36 * (0.5 + 0.5 * Math.sin(3 * th + phase + 0.6)));
+          const cos = Math.cos(th);
+          const sin = Math.sin(th);
+          const ln = lines[i];
+          ln.setAttribute('x1', (c + (rad - tickGrow) * cos).toFixed(2));
+          ln.setAttribute('y1', (c + (rad - tickGrow) * sin).toFixed(2));
+          ln.setAttribute('x2', (c + (rad + tickGrow) * cos).toFixed(2));
+          ln.setAttribute('y2', (c + (rad + tickGrow) * sin).toFixed(2));
+          const op = 0.52 + 0.46 * (0.5 + 0.5 * Math.sin(2 * th - phase * 0.9));
+          ln.setAttribute('stroke-opacity', op.toFixed(2));
+        }
+      };
+    } else if (geom === 'ai-shaping') {
+      // Clean circular ring of evenly spaced round beads (waiting-approval)
+      const N = size <= 24 ? 18 : 24;
+      const dots = Array.from({ length: N }, () => svg.appendChild(makeSvgEl('circle')));
+      const baseR = Math.max(0.7, 1.25 * scale);
+      const ringR = R * 0.93;
+      draw = (t) => {
+        const ph = (t / 2800) * TAU;
+        for (let i = 0; i < N; i += 1) {
+          const th = (i / N) * TAU - Math.PI / 2;
+          const pulse = 0.5 + 0.5 * Math.sin(th * 2 - ph);
+          const rad = ringR * (1 + 0.03 * Math.sin(th * 3 + ph * 0.7));
+          const dot = dots[i];
+          dot.setAttribute('cx', (c + rad * Math.cos(th)).toFixed(2));
+          dot.setAttribute('cy', (c + rad * Math.sin(th)).toFixed(2));
+          dot.setAttribute('r', (baseR * (0.76 + 0.42 * pulse)).toFixed(2));
+          dot.setAttribute('fill-opacity', (0.48 + 0.52 * pulse).toFixed(2));
+        }
+      };
+    } else if (geom === 'ai-listening') {
+      // Clean parallel horizontal latitude dot rings rotating gently in 3D
+      const bands = size <= 24 ? [-0.72, -0.42, -0.14, 0.14, 0.42, 0.72] : [-0.78, -0.52, -0.26, 0, 0.26, 0.52, 0.78];
+      const pts = [];
+      bands.forEach((y, bi) => {
+        const rLat = Math.sqrt(Math.max(0.04, 1 - y * y));
+        const nLon = Math.max(6, Math.round((size <= 24 ? 10 : 14) * rLat));
+        for (let j = 0; j < nLon; j += 1) {
+          const lon = (j / nLon) * TAU + (bi % 2) * (Math.PI / nLon);
+          pts.push([rLat * Math.cos(lon), y, rLat * Math.sin(lon)]);
+        }
+      });
+      const dots = pts.map(() => svg.appendChild(makeSvgEl('circle')));
+      const baseR = Math.max(0.52, 0.92 * scale);
+      const st = Math.sin(0.24);
+      const ct = Math.cos(0.24);
+      draw = (t) => {
+        const yaw = (t / 7600) * TAU;
+        const sy = Math.sin(yaw);
+        const cy = Math.cos(yaw);
+        const breathe = 1 + 0.035 * Math.sin((t / 2200) * TAU);
+        for (let i = 0; i < pts.length; i += 1) {
+          const [x, y, z] = pts[i];
+          const x1 = x * cy + z * sy;
+          const z1 = -x * sy + z * cy;
+          const y2 = y * ct - z1 * st;
+          const z2 = y * st + z1 * ct;
+          const d = (z2 + 1) * 0.5;
+          const dot = dots[i];
+          dot.setAttribute('cx', (c + x1 * R * breathe).toFixed(2));
+          dot.setAttribute('cy', (c - y2 * R * breathe).toFixed(2));
+          dot.setAttribute('r', (baseR * (0.48 + 0.85 * d)).toFixed(2));
+          dot.setAttribute('fill-opacity', Math.max(0.1, Math.min(1, 0.14 + 0.86 * d * d)).toFixed(2));
+        }
+      };
+    } else if (geom === 'ai-working') {
+      // Free-floating swarming 3D constellation particles drifting organically inside sphere
+      const N = size <= 24 ? 32 : 46;
+      const seeds = Array.from({ length: N }, (_, i) => ({
+        ax: 0.6 + hash(i * 11.3 + 1) * 0.9,
+        ay: 0.6 + hash(i * 17.7 + 2) * 0.9,
+        az: 0.6 + hash(i * 23.1 + 3) * 0.9,
+        px: hash(i * 5.7 + 4) * TAU,
+        py: hash(i * 9.3 + 5) * TAU,
+        pz: hash(i * 13.9 + 6) * TAU,
+        rad: 0.3 + Math.cbrt(hash(i * 3.1 + 7)) * 0.68,
+        spark: i % 5 === 0,
+      }));
+      const dots = seeds.map(() => svg.appendChild(makeSvgEl('circle')));
+      const baseR = Math.max(0.5, 0.95 * scale);
+      draw = (t) => {
+        const s = t / 2400;
+        for (let i = 0; i < N; i += 1) {
+          const p = seeds[i];
+          const x = Math.sin(s * p.ax + p.px) * p.rad;
+          const y = Math.cos(s * p.ay + p.py) * p.rad;
+          const z = Math.sin(s * p.az + p.pz) * p.rad;
+          const norm = Math.hypot(x, y, z);
+          const clampK = norm > 0.96 ? 0.96 / norm : 1;
+          const d = (z * clampK + 1) * 0.5;
+          const boost = p.spark ? 1.38 : 0.88;
+          const dot = dots[i];
+          dot.setAttribute('cx', (c + x * clampK * R).toFixed(2));
+          dot.setAttribute('cy', (c - y * clampK * R).toFixed(2));
+          dot.setAttribute('r', (baseR * boost * (0.45 + 0.8 * d)).toFixed(2));
+          dot.setAttribute('fill-opacity', Math.max(0.12, Math.min(1, (p.spark ? 0.45 : 0.16) + 0.78 * d)).toFixed(2));
+        }
+      };
+    } else if (geom === 'ai-solving') {
+      // Structured 3D dot cloud where crisp focal nodes pulse/solve across the sphere
+      const N = size <= 24 ? 54 : 84;
+      const pts = distribute('base', N);
+      const dots = pts.map(() => svg.appendChild(makeSvgEl('circle')));
+      const baseR = Math.max(0.45, 0.85 * scale);
+      const st = Math.sin(0.32);
+      const ct = Math.cos(0.32);
+      draw = (t) => {
+        const yaw = (t / 6400) * TAU;
+        const sy = Math.sin(yaw);
+        const cy = Math.cos(yaw);
+        const pulseT = t / 680;
+        for (let i = 0; i < N; i += 1) {
+          const [x, y, z] = pts[i];
+          const x1 = x * cy + z * sy;
+          const z1 = -x * sy + z * cy;
+          const y2 = y * ct - z1 * st;
+          const z2 = y * st + z1 * ct;
+          const d = (z2 + 1) * 0.5;
+          const focusWave = Math.max(0, Math.sin(pulseT + i * 1.618 + y * 4.2));
+          const isFocal = focusWave > 0.82 && d > 0.35;
+          const spark = isFocal ? (focusWave - 0.82) / 0.18 : 0;
+          const dot = dots[i];
+          dot.setAttribute('cx', (c + x1 * R).toFixed(2));
+          dot.setAttribute('cy', (c - y2 * R).toFixed(2));
+          dot.setAttribute('r', (baseR * (0.42 + 0.55 * d + 1.05 * spark)).toFixed(2));
+          dot.setAttribute('fill-opacity', Math.max(0.08, Math.min(1, 0.12 + 0.38 * d + 0.65 * spark)).toFixed(2));
+        }
+      };
+    } else if (geom === 'ai-searching') {
+      // Latitude dot grid sphere with directional spotlight lens magnifying front-band dots
+      const bands = size <= 24 ? [-0.74, -0.45, -0.15, 0.15, 0.45, 0.74] : [-0.8, -0.58, -0.35, -0.12, 0.12, 0.35, 0.58, 0.8];
+      const pts = [];
+      bands.forEach((y) => {
+        const rLat = Math.sqrt(Math.max(0.04, 1 - y * y));
+        const nLon = Math.max(8, Math.round((size <= 24 ? 14 : 20) * rLat));
+        for (let j = 0; j < nLon; j += 1) {
+          const lon = (j / nLon) * TAU;
+          pts.push([rLat * Math.cos(lon), y, rLat * Math.sin(lon)]);
+        }
+      });
+      const dots = pts.map(() => svg.appendChild(makeSvgEl('circle')));
+      const baseR = Math.max(0.45, 0.82 * scale);
+      const st = Math.sin(0.22);
+      const ct = Math.cos(0.22);
+      draw = (t) => {
+        const yaw = (t / 9200) * TAU;
+        const sy = Math.sin(yaw);
+        const cy = Math.cos(yaw);
+        const spotAng = (t / 3200) * TAU;
+        const lx = Math.cos(spotAng) * 0.46;
+        const ly = Math.sin(spotAng * 0.7) * 0.36;
+        const lz = Math.sqrt(Math.max(0.1, 1 - lx * lx - ly * ly));
+        for (let i = 0; i < pts.length; i += 1) {
+          const [x, y, z] = pts[i];
+          const x1 = x * cy + z * sy;
+          const z1 = -x * sy + z * cy;
+          const y2 = y * ct - z1 * st;
+          const z2 = y * st + z1 * ct;
+          const d = (z2 + 1) * 0.5;
+          const dotProd = Math.max(0, x1 * lx + y2 * ly + z2 * lz);
+          const lens = Math.pow(dotProd, 3.2);
+          const dot = dots[i];
+          dot.setAttribute('cx', (c + x1 * R).toFixed(2));
+          dot.setAttribute('cy', (c - y2 * R).toFixed(2));
+          dot.setAttribute('r', (baseR * (0.38 + 0.55 * d + 1.25 * lens)).toFixed(2));
+          dot.setAttribute('fill-opacity', Math.max(0.08, Math.min(1, 0.1 + 0.3 * d + 0.78 * lens)).toFixed(2));
+        }
+      };
+    } else if (geom === 'ai-connecting') {
+      // 3D rotating constellation network graph: vertices + delicate polygonal wireframe edges
+      const N = size <= 24 ? 16 : 24;
+      const pts = distribute('base', N);
+      const edgeSet = new Set();
+      const edges = [];
+      for (let i = 0; i < N; i += 1) {
+        const nbrs = nearest(pts, i, 3);
+        nbrs.forEach((j) => {
+          const a = Math.min(i, j);
+          const b = Math.max(i, j);
+          const k = `${a}:${b}`;
+          if (!edgeSet.has(k)) {
+            edgeSet.add(k);
+            edges.push([a, b]);
+          }
+        });
+      }
+      const lineEls = edges.map(() => {
+        const ln = makeSvgEl('line');
+        ln.setAttribute('stroke', 'currentColor');
+        ln.setAttribute('stroke-width', Math.max(0.45, 0.68 * scale).toFixed(2));
+        return svg.appendChild(ln);
+      });
+      const dotEls = pts.map(() => svg.appendChild(makeSvgEl('circle')));
+      const baseR = Math.max(0.55, 0.95 * scale);
+      const proj = new Array(N);
+      const st = Math.sin(0.32);
+      const ct = Math.cos(0.32);
+      draw = (t) => {
+        const yaw = (t / 8400) * TAU;
+        const sy = Math.sin(yaw);
+        const cy = Math.cos(yaw);
+        for (let i = 0; i < N; i += 1) {
+          const [x, y, z] = pts[i];
+          const x1 = x * cy + z * sy;
+          const z1 = -x * sy + z * cy;
+          const y2 = y * ct - z1 * st;
+          const z2 = y * st + z1 * ct;
+          const px = c + x1 * R;
+          const py = c - y2 * R;
+          const d = (z2 + 1) * 0.5;
+          proj[i] = [px, py, d];
+          const isHub = i % 4 === 0;
+          const dot = dotEls[i];
+          dot.setAttribute('cx', px.toFixed(2));
+          dot.setAttribute('cy', py.toFixed(2));
+          dot.setAttribute('r', (baseR * (isHub ? 1.35 : 0.82) * (0.55 + 0.65 * d)).toFixed(2));
+          dot.setAttribute('fill-opacity', Math.max(0.18, Math.min(1, 0.22 + 0.78 * d)).toFixed(2));
+        }
+        for (let e = 0; e < edges.length; e += 1) {
+          const [a, b] = edges[e];
+          const pa = proj[a];
+          const pb = proj[b];
+          const depth = (pa[2] + pb[2]) * 0.5;
+          const ln = lineEls[e];
+          ln.setAttribute('x1', pa[0].toFixed(2));
+          ln.setAttribute('y1', pa[1].toFixed(2));
+          ln.setAttribute('x2', pb[0].toFixed(2));
+          ln.setAttribute('y2', pb[1].toFixed(2));
+          ln.setAttribute('stroke-opacity', Math.max(0.06, Math.min(0.62, depth * depth * 0.58)).toFixed(2));
+        }
+      };
+    } else if (geom === 'ai-composing') {
+      // 3D flowing twisted hyperbolic ribbon / vortex torus (streaming)
+      const rings = size <= 24 ? 8 : 13;
+      const perRing = size <= 24 ? 12 : 18;
+      const total = rings * perRing;
+      const dots = Array.from({ length: total }, () => svg.appendChild(makeSvgEl('circle')));
+      const baseR = Math.max(0.4, 0.74 * scale);
+      draw = (t) => {
+        const flow = (t / 3400) * TAU;
+        let idx = 0;
+        for (let u = 0; u < rings; u += 1) {
+          const frac = u / rings;
+          const major = frac * TAU + flow;
+          const tiltA = Math.sin(major) * 0.85;
+          const tiltB = Math.cos(major) * 0.55;
+          for (let v = 0; v < perRing; v += 1) {
+            const minor = (v / perRing) * TAU + flow * 0.6;
+            const ringRad = 0.54 + 0.36 * Math.cos(minor * 0.5 + major * 0.5);
+            let x = Math.cos(minor) * ringRad;
+            let y = Math.sin(minor) * ringRad * 0.78;
+            let z = Math.sin(major + minor * 0.5) * 0.52;
+            // Apply ribbon twist
+            const rx = x * Math.cos(tiltA) - z * Math.sin(tiltA);
+            const rz = x * Math.sin(tiltA) + z * Math.cos(tiltA);
+            const ry = y * Math.cos(tiltB) - rz * Math.sin(tiltB);
+            const zz = y * Math.sin(tiltB) + rz * Math.cos(tiltB);
+            const d = (zz + 1) * 0.5;
+            const crest = Math.max(0, Math.sin(minor + major * 0.5));
+            const dot = dots[idx++];
+            dot.setAttribute('cx', (c + rx * R * 1.04).toFixed(2));
+            dot.setAttribute('cy', (c - ry * R * 1.04).toFixed(2));
+            dot.setAttribute('r', (baseR * (0.45 + 0.72 * d + 0.35 * crest)).toFixed(2));
+            dot.setAttribute('fill-opacity', Math.max(0.06, Math.min(0.95, 0.08 + 0.62 * d + 0.28 * crest)).toFixed(2));
+          }
+        }
+      };
+    }
+
+    const look = `ai:${geom}@${speed}`;
+    draw(tick(look, performance.now(), speed));
+
+    let visible = true;
+    let raf = 0;
+    let dead = false;
+    const io = new IntersectionObserver((es) => {
+      visible = es[es.length - 1].isIntersecting;
+    });
+    io.observe(svg);
+
+    function frame(now) {
+      if (dead || !svg.isConnected) {
+        api.destroy();
+        return;
+      }
+      const t = tick(look, now, speed);
+      if (visible) draw(t);
+      raf = requestAnimationFrame(frame);
+    }
+
+    const api = {
+      svg,
+      key: `ai:${geom}:${size}:${speed}:${paused ? 1 : 0}`,
+      pause() {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      },
+      play() {
+        if (!raf && !dead && !paused && isMotionEnabled()) {
+          raf = requestAnimationFrame(frame);
+        }
+      },
+      destroy() {
+        if (dead) return;
+        dead = true;
+        cancelAnimationFrame(raf);
+        raf = 0;
+        io.disconnect();
+        activeInstances.delete(api);
+      },
+    };
+
+    activeInstances.add(api);
+    if (!paused) api.play();
+    return api;
+  }
 
   function orbStateFor({ status = 'ready', activity, hasDraft = false, hasAnswered = false } = {}) {
     if (status === 'error') return 'error';
@@ -533,23 +929,25 @@
     return hasAnswered ? 'done' : 'idle';
   }
 
-  function applyAiOrbState(svg, aiState, { settleMs = 5000 } = {}) {
+  function applyAiOrbState(svg, aiState, { settleMs = 5000, forcePaused = false } = {}) {
     if (!svg) return;
     const key = AI_ORB_VISUALS[aiState] ? aiState : 'idle';
     const v = AI_ORB_VISUALS[key];
+    const isPaused = Boolean(forcePaused || v.paused);
+    svg.dataset.orbFamily = 'ai';
     svg.dataset.aiOrbState = key;
     svg.dataset.aiOrbTone = v.tone;
-    svg.dataset.orbState = v.state;
-    svg.dataset.orbVariant = v.variant;
+    svg.dataset.orbState = v.geom;
+    svg.dataset.orbVariant = 'ai';
     svg.dataset.orbSpeed = String(v.speed);
-    svg.dataset.orbPaused = v.paused ? '1' : '0';
+    svg.dataset.orbPaused = isPaused ? '1' : '0';
     svg.setAttribute('aria-label', AI_ORB_LABELS[key] || key);
     if (svg.__settleTimer) {
       clearTimeout(svg.__settleTimer);
       svg.__settleTimer = null;
     }
     mountAll(svg.parentElement || document);
-    if (v.settles && !v.paused && settleMs > 0) {
+    if (v.settles && !isPaused && settleMs > 0) {
       svg.__settleTimer = setTimeout(() => {
         if (svg.dataset.aiOrbState === key && svg.__conduitOrb) svg.__conduitOrb.pause();
       }, settleMs);
@@ -566,18 +964,21 @@
     nodes.forEach((svg) => {
       const state = svg.dataset.orbState || 'base';
       const variant = svg.dataset.orbVariant || 'default';
+      const isAi = svg.dataset.orbFamily === 'ai' || state.startsWith('ai-');
       const size = Number(svg.dataset.orbSize) || 20;
       const speed = Number(svg.dataset.orbSpeed) || 1;
       const paused = svg.dataset.orbPaused === '1';
       const label = svg.dataset.orbLabel || '';
-      const key = `${state}:${variant}:${size}:${speed}:${paused ? 1 : 0}`;
+      const key = `${isAi ? 'ai' : 'node'}:${state}:${variant}:${size}:${speed}:${paused ? 1 : 0}`;
       if (svg.__conduitOrb && svg.__conduitOrb.key === key) {
         if (isMotionEnabled() && !paused) svg.__conduitOrb.play();
         else svg.__conduitOrb.pause();
         return;
       }
       if (svg.__conduitOrb) svg.__conduitOrb.destroy();
-      const inst = mountOrb(svg, { state, variant, size, speed, label, paused });
+      const inst = isAi
+        ? mountAiOrb(svg, { geom: state.startsWith('ai-') ? state : 'ai-breathing', size, speed, label, paused })
+        : mountOrb(svg, { state, variant, size, speed, label, paused });
       if (inst) {
         inst.key = key;
         svg.__conduitOrb = inst;
@@ -602,9 +1003,11 @@
     VARIANTS,
     AI_ORB_STATES,
     AI_ORB_LABELS,
+    AI_ORB_HINTS,
     AI_ORB_VISUALS,
     orbStateFor,
     applyAiOrbState,
+    mountAiOrb,
     mountOrb,
     mountAll,
     syncAll,

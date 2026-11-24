@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-surface="weave" data-accent="lime" data-inspector="standard" data-crosshairs="off" data-hatch="off" data-metal="off" data-canvas-scale="2">
+<html lang="zh-CN" data-surface="weave" data-accent="lime" data-inspector="standard" data-crosshairs="off" data-hatch="off" data-canvas-scale="2" data-canvas-grid="dots">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -40,16 +40,14 @@
         </button>
       </div>
 
-      <!-- Primary New Thread Button (wrapped in 21st.dev Liquid Metal ring) -->
+      <!-- Primary New Thread Button (Pure Architectural Hairline) -->
       <div class="sidebar-top-actions">
-        <div class="metal-fx-wrap metal-fx-block" data-metal-fx data-metal-variant="pill" data-metal-ring="1.8">
-          <button type="button" class="btn-new-chat" id="btnNewChat" title="新建协同会话">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M8 3V13M3 8H13" stroke="currentColor" stroke-width="1.5" />
-            </svg>
-            <span class="sidebar-label">新建协同会话</span>
-          </button>
-        </div>
+        <button type="button" class="btn-new-chat" id="btnNewChat" title="新建协同会话">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 3V13M3 8H13" stroke="currentColor" stroke-width="1.5" />
+          </svg>
+          <span class="sidebar-label">新建协同会话</span>
+        </button>
 
         <!-- Active Workspace Pill -->
         <button type="button" class="ws-selector-card" id="btnWsPopover" title="点击切换或探测目标工程目录">
@@ -153,7 +151,7 @@
             </svg>
           </button>
           <span class="topbar-orb-wrap" id="topbarOrbWrap" title="当前协同引擎实时状态">
-            <svg class="thinking-orb topbar-orb" id="topbarOrb" width="22" height="22" viewBox="0 0 22 22" data-orb-state="base" data-orb-variant="default" data-orb-size="22" aria-hidden="true"></svg>
+            <svg class="thinking-orb topbar-orb" id="topbarOrb" width="24" height="24" viewBox="0 0 24 24" data-orb-family="ai" data-orb-state="ai-breathing" data-orb-variant="ai" data-orb-size="24" aria-hidden="true"></svg>
           </span>
           <div class="topbar-title-wrap">
             <span class="topbar-title" id="topbarTitle">新协同会话</span>
@@ -169,6 +167,17 @@
             <button type="button" class="stage-view-tab" role="tab" aria-selected="false" data-stage-view="workflow">节点画布</button>
             <button type="button" class="stage-view-tab" role="tab" aria-selected="false" data-stage-view="settings">设置</button>
           </div>
+          <!-- One-Click Morphing Light/Dark Theme Toggle (21st.dev #37503) -->
+          <button type="button" class="theme-toggle-btn" id="btnThemeToggle" aria-label="一键切换明暗主题" title="一键切换建筑白昼 / 建筑暗房">
+            <svg class="theme-toggle-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <g class="tt-sun">
+                <circle cx="12" cy="12" r="4.2" />
+                <path d="M12 2.5v2.2M12 19.3v2.2M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6" />
+              </g>
+              <path class="tt-moon" d="M20.2 14.8A8.2 8.2 0 1 1 9.2 3.8a6.4 6.4 0 0 0 11 11Z" />
+            </svg>
+            <span class="theme-toggle-label" id="themeToggleLabel">白昼</span>
+          </button>
           <button type="button" class="inspector-toggle-btn" id="btnToggleInspector" aria-expanded="false">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <rect x="1.5" y="2" width="13" height="12" stroke="currentColor" stroke-width="1.25" />
@@ -237,17 +246,19 @@
         <div class="ic-viewport" id="wfViewport" tabindex="0">
           <!-- Transformed Infinite World Layer -->
           <div class="ic-world" id="wfWorld">
+            <div class="ic-frames-layer" id="wfFramesLayer"></div>
             <svg class="ic-edges-svg" id="wfEdgesSvg" aria-hidden="true"></svg>
             <div class="ic-nodes-layer" id="wfNodesLayer"></div>
           </div>
 
-          <!-- Floating Top-Left: Unified Architectural Add & Preset Strip -->
+          <!-- Floating Top-Left: Unified Architectural Add, Node Group & Preset Strip -->
           <div class="ic-floating-bar ic-top-left">
-            <div class="ic-add-group" role="group" aria-label="添加 Agent 节点">
+            <div class="ic-add-group" role="group" aria-label="添加 Agent 节点与节点组">
               <button type="button" class="ic-chip-btn" data-ic-add="gemini-plan" title="添加 Gemini 规划节点">+ Gemini</button>
               <button type="button" class="ic-chip-btn" data-ic-add="codex-exec" title="添加并行 Codex 沙箱工位">+ Codex</button>
               <button type="button" class="ic-chip-btn" data-ic-add="cluster-merge" title="添加多路集群聚合合并器">+ 合并器</button>
               <button type="button" class="ic-chip-btn" data-ic-add="codex-review" title="添加 Pre-CI 代码审查门禁">+ Pre-CI</button>
+              <button type="button" class="ic-chip-btn is-group-add" id="btnWfAddGroup" title="创建 Blender 风格节点组容器 (Ctrl+G)">+ 节点组</button>
             </div>
             <span class="ic-divider" aria-hidden="true"></span>
             <label class="ic-preset-wrap" title="切换集群拓扑模板">
@@ -277,12 +288,13 @@
             </button>
           </div>
 
-          <!-- Floating Bottom-Left: Compact Zoom & Fit Controls (Zero overlap with prompt!) -->
+          <!-- Floating Bottom-Left: Compact Zoom, Shader & Fit Controls -->
           <div class="ic-floating-bar ic-zoom-hud">
             <button type="button" class="ic-zoom-btn mono" id="btnWfZoomOut" title="缩小">−</button>
             <button type="button" class="ic-zoom-val mono" id="btnWfZoomReset" title="点击重置为 100%">84%</button>
             <button type="button" class="ic-zoom-btn mono" id="btnWfZoomIn" title="放大">+</button>
             <span class="ic-divider" aria-hidden="true"></span>
+            <button type="button" class="ic-chip-btn" id="btnWfGridCycle" title="切换无限画布底纹（点状网格 / 制图细格 / 纯粹素面）">网格: 点阵</button>
             <button type="button" class="ic-chip-btn" id="btnWfFit" title="适配全部节点到视野 (F)">全览</button>
             <button type="button" class="ic-chip-btn" id="btnWfExport" title="导出集群拓扑 JSON">JSON</button>
           </div>
@@ -358,13 +370,12 @@
           </nav>
 
           <div class="settings-content" id="settingsContent">
-            <!-- Section 1: Appearance & Canvas Resolution (Replaces floating Tweaks!) -->
+            <!-- Section 1: Appearance & Canvas Resolution -->
             <div class="settings-pane" data-settings-pane="appearance">
               <header class="settings-pane-head">
                 <div>
-                  <span class="mono-xs settings-kicker">DISPLAY &amp; CANVAS RENDERING</span>
+                  <span class="mono-xs settings-kicker">DISPLAY &amp; CANVAS</span>
                   <h2>外观与画布清晰度</h2>
-                  <p>独立调节无限画布 HiDPI 渲染分辨率、建筑纸面质感、强调色与动效细节。</p>
                 </div>
                 <button type="button" class="btn-secondary-sm" id="btnResetTweaks">恢复默认值</button>
               </header>
@@ -372,8 +383,7 @@
               <div class="settings-card">
                 <div class="settings-row">
                   <div class="settings-row-info">
-                    <strong>画布渲染分辨率（HiDPI / Retina）</strong>
-                    <span>同步提升节点画布、缩略图、声学遥测波形、EffortSlider 及图像/视频生成的渲染精度。</span>
+                    <strong>画布渲染分辨率</strong>
                   </div>
                   <div class="tweak-pills settings-pills" data-tweak="canvasScale">
                     <button type="button" data-val="1">1× 标准</button>
@@ -384,8 +394,18 @@
 
                 <div class="settings-row">
                   <div class="settings-row-info">
-                    <strong>建筑画布纸面</strong>
-                    <span>锁定 Figma Weave 建筑语法，支持昼间冷矿物纸面、暖石膏纸与建筑暗房。</span>
+                    <strong>画布背景底纹</strong>
+                  </div>
+                  <div class="tweak-pills settings-pills" data-tweak="canvasGrid">
+                    <button type="button" data-val="dots" class="active">点状网格</button>
+                    <button type="button" data-val="grid">制图细格</button>
+                    <button type="button" data-val="solid">纯粹素面</button>
+                  </div>
+                </div>
+
+                <div class="settings-row">
+                  <div class="settings-row-info">
+                    <strong>界面明暗主题</strong>
                   </div>
                   <div class="tweak-pills settings-pills" data-tweak="surface">
                     <button type="button" data-val="weave" class="active">建筑白昼</button>
@@ -397,7 +417,6 @@
                 <div class="settings-row">
                   <div class="settings-row-info">
                     <strong>主强调色</strong>
-                    <span>控制主执行按钮与 Ultracode 档位的点阵强调色系。</span>
                   </div>
                   <div class="tweak-pills settings-pills" data-tweak="accent">
                     <button type="button" data-val="lime" class="active">柠黄高亮</button>
@@ -408,8 +427,7 @@
 
                 <div class="settings-row">
                   <div class="settings-row-info">
-                    <strong>右侧审查与 Diff 面板宽度</strong>
-                    <span>调整 Git Diff、审查门禁与运行队列抽屉的默认展开宽度。</span>
+                    <strong>右侧面板宽度</strong>
                   </div>
                   <div class="tweak-pills settings-pills" data-tweak="inspector">
                     <button type="button" data-val="compact">紧凑</button>
@@ -417,41 +435,26 @@
                     <button type="button" data-val="wide">宽幅</button>
                   </div>
                 </div>
-
-                <div class="settings-row">
-                  <div class="settings-row-info">
-                    <strong>液态金属边环（可选装饰）</strong>
-                    <span>默认关闭保持建筑克制感；按需可开启冷晶银或虹彩铬 WebGL 细边环。</span>
-                  </div>
-                  <div class="tweak-pills settings-pills" data-tweak="metal">
-                    <button type="button" data-val="off" class="active">关闭</button>
-                    <button type="button" data-val="silver">冷晶银</button>
-                    <button type="button" data-val="chromatic">虹彩铬</button>
-                  </div>
-                </div>
               </div>
 
               <div class="settings-card">
                 <div class="settings-row">
                   <div class="settings-row-info">
-                    <strong>界面基础字号</strong>
-                    <span>当前值：<span class="mono" id="tweakFontVal">14px</span>（范围 13px – 16px）</span>
+                    <strong>基础字号 · <span class="mono" id="tweakFontVal">14px</span></strong>
                   </div>
                   <input type="range" class="settings-range" id="tweakFontRange" min="13" max="16" step="1" value="14" />
                 </div>
 
                 <div class="settings-row">
                   <div class="settings-row-info">
-                    <strong>声学遥测波形振幅</strong>
-                    <span>当前值：<span class="mono" id="tweakWaveVal">55%</span>（控制左下角信号波形动态幅度）</span>
+                    <strong>波形振幅 · <span class="mono" id="tweakWaveVal">55%</span></strong>
                   </div>
                   <input type="range" class="settings-range" id="tweakWaveRange" min="0" max="100" step="5" value="55" />
                 </div>
 
                 <div class="settings-row">
                   <div class="settings-row-info">
-                    <strong>图纸装饰与动效开关</strong>
-                    <span>按需开关图纸折角护框、背景斜线底纹及思维球/波形动态脉动。</span>
+                    <strong>装饰与动效</strong>
                   </div>
                   <div class="settings-checks">
                     <label class="check-item"><input type="checkbox" id="tweakCrosshairs" /><span>折角护框</span></label>
@@ -462,13 +465,12 @@
               </div>
             </div>
 
-            <!-- Section 1.5: Telemetry & Metrics Dashboard (Native Port of shadcn-studio-chart-component-01) -->
+            <!-- Section 1.5: Telemetry & Metrics Dashboard -->
             <div class="settings-pane hidden" data-settings-pane="telemetry">
               <header class="settings-pane-head">
                 <div>
                   <span class="mono-xs settings-kicker">ORCHESTRATION TELEMETRY</span>
-                  <h2>协同遥测与指标总览</h2>
-                  <p>实时聚合本机 Gemini × Codex 运行分布、Pre-CI 门禁完成度与本地订阅额度状态。</p>
+                  <h2>协同遥测与指标</h2>
                 </div>
                 <button type="button" class="btn-secondary-sm" id="btnRefreshTelemetry">刷新指标</button>
               </header>
@@ -481,7 +483,6 @@
                 <div>
                   <span class="mono-xs settings-kicker">CUSTOM INSTRUCTIONS</span>
                   <h2>偏好指令</h2>
-                  <p>定制 Gemini 与 Codex 的默认答复风格与跨会话规则，保存后自动注入协作上下文。</p>
                 </div>
               </header>
               <div class="settings-card" id="settingsInstructionsMount"></div>
@@ -493,19 +494,17 @@
                 <div>
                   <span class="mono-xs settings-kicker">PERSISTENT MEMORY</span>
                   <h2>持久记忆库</h2>
-                  <p>管理助手在会话间保留的工程偏好与架构约定，支持检索、编辑、删除与撤销。</p>
                 </div>
               </header>
               <div class="settings-card" id="settingsMemoryMount"></div>
             </div>
 
-            <!-- Section 4: Local CLI Telemetry (Replaces floating envPopover!) -->
+            <!-- Section 4: Local CLI Telemetry -->
             <div class="settings-pane hidden" data-settings-pane="env">
               <header class="settings-pane-head">
                 <div>
                   <span class="mono-xs settings-kicker">LOCAL CLI TELEMETRY</span>
-                  <h2>本机 CLI 环境状态</h2>
-                  <p>工作台全部直连本机官方 agy 与 codex CLI 订阅额度，零反代、零云端上传。</p>
+                  <h2>本机 CLI 环境</h2>
                 </div>
                 <div class="settings-head-actions">
                   <button type="button" class="btn-secondary-sm" id="btnSettingsRefreshModels">刷新模型</button>
@@ -519,17 +518,16 @@
               </div>
             </div>
 
-            <!-- Section 5: Scripts & Rule Templates (Replaces cramped studioDrawer!) -->
+            <!-- Section 5: Scripts & Rule Templates -->
             <div class="settings-pane hidden" data-settings-pane="scripts">
               <header class="settings-pane-head">
                 <div>
-                  <span class="mono-xs settings-kicker">CLI SCRIPTS &amp; RULE TEMPLATES</span>
-                  <h2>独立脚本与规则模板库</h2>
-                  <p>直接复制绑定当前工程目录的终端命令，或在线编辑 GEMINI.md / CODEX.md 工程约束。</p>
+                  <span class="mono-xs settings-kicker">CLI SCRIPTS &amp; RULES</span>
+                  <h2>脚本与规则模板</h2>
                 </div>
               </header>
               <div class="settings-card">
-                <div class="section-cap mono-label">可执行 CLI 命令（自动绑定当前工程路径）</div>
+                <div class="section-cap mono-label">可执行 CLI 命令</div>
                 <div class="cli-cards" id="cliCommandCards"></div>
               </div>
               <div class="settings-card">
@@ -555,8 +553,7 @@
               <header class="settings-pane-head">
                 <div>
                   <span class="mono-xs settings-kicker">KEYBOARD SHORTCUTS</span>
-                  <h2>键盘快捷键一览</h2>
-                  <p>随时按 ? 打开此页，或按 Ctrl+K / ⌘K 呼出全局命令面板。</p>
+                  <h2>键盘快捷键</h2>
                 </div>
               </header>
               <div class="settings-card" id="settingsShortcutsMount"></div>
@@ -568,7 +565,6 @@
       <!-- Bottom Pinned Codex-Style Continuous-Curvature Composer -->
       <div class="composer-dock">
         <div class="composer-shell" id="composerShell">
-          <div class="border-beam" aria-hidden="true"></div>
 
           <!-- Floating / Slash & @ File Mention Palette -->
           <div class="prompt-palette hidden" id="promptPalette" role="listbox" aria-label="快捷指令与文件引用菜单"></div>
@@ -594,13 +590,20 @@
             placeholder="输入需求，或输入 / 切换模式、@ 引用工作区文件...（Enter 换行，Ctrl+Enter 发送）"
           ></textarea>
 
-          <!-- Single-Row Codex-Style Inline Toolbar (Zero native OS selects) -->
-          <div class="composer-bar">
-            <div class="composer-bar-left">
+          <!-- Single-Row 21st.dev chatcn (#45495) Prompt Composer Toolbar -->
+          <div class="composer-bar" data-slot="prompt-input-toolbar">
+            <div class="composer-bar-left" data-slot="prompt-input-tools">
               <!-- Hidden synced inputs/selects kept only for clean state API compatibility -->
               <input type="hidden" id="selectMode" value="full-pipeline" />
               <input type="hidden" id="selectGeminiModel" value="gemini-4-neon-high" />
               <input type="hidden" id="selectCodexModel" value="" />
+
+              <!-- Attach File / Reference Trigger (21st.dev PromptInputAttachButton #45495) -->
+              <button type="button" class="composer-icon-btn" id="btnAttachContext" title="附加工作区文件引用 (@)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m14.81 7.92-6.36 6.36a1.75 1.75 0 0 0 0 2.47 1.75 1.75 0 0 0 2.47 0l7.07-7.07a3.5 3.5 0 0 0-4.95-4.95L5.97 11.8a5.25 5.25 0 0 0 7.43 7.43l4.95-4.95" />
+                </svg>
+              </button>
 
               <!-- Custom Mode Picker Pill -->
               <button type="button" class="picker-pill" id="btnModePicker" aria-haspopup="listbox" aria-expanded="false">
@@ -629,8 +632,9 @@
                 </svg>
               </button>
 
-              <button type="button" class="pill-action-btn mono" id="btnTriggerSlash" title="输入 / 快捷切模式">/</button>
-              <button type="button" class="pill-action-btn mono" id="btnTriggerMention" title="输入 @ 引用当前目录文件">@</button>
+              <span class="composer-tool-sep" aria-hidden="true"></span>
+              <button type="button" class="composer-icon-btn mono" id="btnTriggerSlash" title="输入 / 快捷切模式">/</button>
+              <button type="button" class="composer-icon-btn mono" id="btnTriggerMention" title="输入 @ 引用当前目录文件">@</button>
 
               <!-- Guardrails Popover Button -->
               <button type="button" class="pill-action-btn" id="btnGuardrailsPopover" aria-expanded="false" aria-controls="guardrailsPopover" title="配置沙箱、审查模型、推理深度与 Worktree">
@@ -639,30 +643,48 @@
               </button>
             </div>
 
-            <div class="composer-bar-right">
-              <button type="button" class="btn-stop-icon hidden" id="btnCancelRun" title="中止当前进程">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-                  <rect x="2" y="2" width="8" height="8" rx="1.5" />
-                </svg>
-                <span>停止</span>
+            <div class="composer-bar-right" data-slot="prompt-input-actions">
+              <!-- Live Running AI Orb Stop Pill (Replaces red Stop block while active!) -->
+              <button type="button" class="btn-stop-orb hidden" id="btnCancelRun" title="协同运行中 · 点击立即停止">
+                <svg class="thinking-orb" id="cancelRunOrb" width="20" height="20" viewBox="0 0 20 20" data-orb-family="ai" data-orb-state="ai-solving" data-orb-variant="ai" data-orb-size="20" aria-hidden="true"></svg>
+                <span class="stop-orb-label" id="cancelRunLabel">运行中</span>
+                <span class="stop-orb-hover-hint mono-xs">点击停止</span>
               </button>
-              <!-- 21st.dev Liquid Metal (metal-fx) Pill CTA + Circular Spark Trigger -->
               <div class="metal-cta-pair" id="sendCtaGroup">
-                <div class="metal-fx-wrap" data-metal-fx data-metal-variant="pill" data-metal-ring="2">
-                  <button type="button" class="btn-send-metal" id="btnStartRun" title="发送并启动协同管线 (Ctrl+Enter)">
-                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                      <path d="M8 13V3M3.5 7.5L8 3L12.5 7.5" stroke="currentColor" stroke-width="1.6" />
-                    </svg>
-                    <span>派发协同</span>
-                  </button>
-                </div>
-                <div class="metal-fx-wrap metal-fx-circle" data-metal-fx data-metal-variant="circle" data-metal-ring="1.8">
-                  <button type="button" class="btn-circle-metal composer-orb-btn" id="btnQuickPlan" title="AI Orb 实时状态（点击一键切换 Gemini 只读规划）">
-                    <svg class="thinking-orb" id="composerOrb" width="20" height="20" viewBox="0 0 20 20" data-orb-state="base" data-orb-variant="default" data-orb-size="20" aria-hidden="true"></svg>
-                  </button>
-                </div>
+                <button type="button" class="btn-send-metal" id="btnStartRun" title="发送并启动协同管线 (Ctrl+Enter)">
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M8 13V3M3.5 7.5L8 3L12.5 7.5" stroke="currentColor" stroke-width="1.6" />
+                  </svg>
+                  <span>派发协同</span>
+                </button>
+                <!-- Dedicated Dialogue-Stream AI Orb Signal Controller (Idle / Listening / Done / Error) -->
+                <button type="button" class="btn-circle-metal composer-orb-btn" id="btnQuickPlan" aria-haspopup="dialog" aria-expanded="false" aria-controls="composerOrbPopover" title="对话流实时状态信号（点击查看反馈 / 启动或暂停）">
+                  <svg class="thinking-orb" id="composerOrb" width="22" height="22" viewBox="0 0 22 22" data-orb-family="ai" data-orb-state="ai-breathing" data-orb-variant="ai" data-orb-size="22" aria-hidden="true"></svg>
+                </button>
               </div>
             </div>
+          </div>
+
+          <!-- Dialogue-Anchored AI Orb Signal & Start/Pause Popover (Lives ONLY on the composer dialog!) -->
+          <div class="composer-orb-popover hidden" id="composerOrbPopover" role="dialog" aria-label="对话流实时信号与启停控制">
+            <div class="orb-pop-head">
+              <span class="orb-pop-hero-tile" id="orbPopHeroTile" data-ai-tone="muted">
+                <svg class="thinking-orb" id="orbPopHeroSvg" width="44" height="44" viewBox="0 0 44 44" data-orb-family="ai" data-orb-state="ai-breathing" data-orb-variant="ai" data-orb-size="44" aria-hidden="true"></svg>
+              </span>
+              <div class="orb-pop-meta">
+                <div class="orb-pop-title-row">
+                  <strong id="orbPopTitle">助手就绪</strong>
+                  <span class="orb-pop-code mono-xs" id="orbPopCode">idle</span>
+                </div>
+                <p class="orb-pop-hint" id="orbPopHint">通道安静待命，可直接派发需求或点击切换状态。</p>
+              </div>
+            </div>
+            <div class="orb-pop-controls">
+              <button type="button" class="btn-primary-sm" id="btnOrbPopPrimary">启动协同</button>
+              <button type="button" class="btn-secondary-sm" id="btnOrbPopPause">暂停信号</button>
+              <button type="button" class="btn-secondary-sm" id="btnOrbPopDemo">轮次演练</button>
+            </div>
+            <div class="orb-pop-grid" id="orbPopStatesGrid" role="group" aria-label="对话流 10 态实时信号预览"></div>
           </div>
         </div>
       </div>
@@ -809,7 +831,6 @@
   <!-- Toast feedback rack -->
   <div class="toast-rack" id="toastRack" role="status" aria-live="polite"></div>
 
-  <script src="/metal-fx.js" defer></script>
   <script src="/thinking-orbs.js" defer></script>
   <script src="/effort-slider.js" defer></script>
   <script src="/media-generation.js" defer></script>

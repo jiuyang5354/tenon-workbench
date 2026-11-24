@@ -45,8 +45,8 @@
     surface: 'weave',
     accent: 'lime',
     inspector: 'standard',
-    metal: 'off',
     canvasScale: '2',
+    canvasGrid: 'dots',
     fontSize: 14,
     waveAmplitude: 55,
     crosshairs: false,
@@ -95,11 +95,14 @@
     palette: { open: false, trigger: '', query: '', startPos: 0, items: [], selectedIdx: 0 },
     contextChips: [],
     localRuns: new Map(),
+    orbPaused: false,
+    orbPreviewState: null,
+    orbDemoTimers: [],
+    catchUpOpen: new Map(),
     tweaks: loadTweaks(),
   };
 
   let waveEngine = null;
-  let metalEngine = null;
   let canvasEngine = null;
   let effortSlider = null;
   let workspacePanels = null;
@@ -130,12 +133,26 @@
     root.dataset.surface = t.surface;
     root.dataset.accent = t.accent;
     root.dataset.inspector = t.inspector;
-    root.dataset.metal = t.metal || 'off';
     root.dataset.canvasScale = String(t.canvasScale || '2');
+    root.dataset.canvasGrid = String(t.canvasGrid || 'dots');
     root.dataset.crosshairs = t.crosshairs ? 'on' : 'off';
     root.dataset.hatch = t.hatch ? 'on' : 'off';
     root.dataset.motion = t.motion ? 'on' : 'off';
     root.style.setProperty('--base-font-size', `${t.fontSize}px`);
+
+    const isDark = t.surface === 'charcoal';
+    const ttBtn = el('btnThemeToggle');
+    if (ttBtn) {
+      ttBtn.dataset.themeMode = isDark ? 'dark' : 'light';
+      ttBtn.setAttribute('aria-pressed', String(isDark));
+      const lbl = el('themeToggleLabel');
+      if (lbl) lbl.textContent = isDark ? '暗房' : '白昼';
+    }
+    const gridBtn = el('btnWfGridCycle');
+    if (gridBtn) {
+      const gLabels = { dots: '网格: 点阵', grid: '网格: 细格', solid: '网格: 纯色' };
+      gridBtn.textContent = gLabels[t.canvasGrid || 'dots'] || '网格: 点阵';
+    }
 
     el('tweakFontRange').value = String(t.fontSize);
     el('tweakFontVal').textContent = `${t.fontSize}px`;
@@ -148,16 +165,44 @@
     document.querySelectorAll('.tweak-pills').forEach((group) => {
       const key = group.dataset.tweak;
       group.querySelectorAll('button').forEach((btn) => {
-        btn.classList.toggle('active', btn.dataset.val === t[key]);
+        btn.classList.toggle('active', btn.dataset.val === String(t[key]));
       });
     });
 
     if (waveEngine) waveEngine.sync();
-    if (metalEngine) metalEngine.sync();
     if (canvasEngine) canvasEngine.render();
     if (effortSlider) effortSlider.syncTheme();
     if (window.ConduitOrbs) window.ConduitOrbs.syncAll();
     requestAnimationFrame(syncAllFluidTracks);
+  }
+
+  /** One-Click Light/Dark Theme Toggle with optional organic View Transition reveal (21st.dev #37503) */
+  function toggleLightDarkTheme(ev) {
+    const nextSurface = appState.tweaks.surface === 'charcoal' ? 'weave' : 'charcoal';
+    const commit = () => {
+      appState.tweaks.surface = nextSurface;
+      applyTweaks();
+      saveTweaks();
+    };
+    const motionOk =
+      appState.tweaks.motion &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches &&
+      typeof document.startViewTransition === 'function';
+    if (!motionOk) {
+      commit();
+      showToast(nextSurface === 'charcoal' ? '已切换至建筑暗房主题' : '已切换至建筑白昼主题');
+      return;
+    }
+    const x = ev && Number.isFinite(ev.clientX) ? ev.clientX : window.innerWidth - 160;
+    const y = ev && Number.isFinite(ev.clientY) ? ev.clientY : 24;
+    const maxR = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+    document.documentElement.style.setProperty('--tt-x', `${Math.round(x)}px`);
+    document.documentElement.style.setProperty('--tt-y', `${Math.round(y)}px`);
+    document.documentElement.style.setProperty('--tt-r', `${Math.ceil(maxR)}px`);
+    const vt = document.startViewTransition(commit);
+    vt.finished.finally(() => {
+      showToast(nextSurface === 'charcoal' ? '已切换至建筑暗房主题' : '已切换至建筑白昼主题');
+    });
   }
 
   const TOAST_ICONS = {
@@ -209,6 +254,13 @@
     while (rack.children.length >= 4) rack.firstElementChild?.remove();
     rack.appendChild(node);
     setTimeout(dismiss, 3400);
+  }
+
+  function stripPreferenceTag(str) {
+    return String(str || '')
+      .replace(/\s*\[(?:用户偏好风格|附加参考上下文):[\s\S]*?(?:\]|$)/g, ' ')
+      .replace(/…+$/g, '')
+      .trim();
   }
 
   function escapeHtml(str) {
@@ -1285,11 +1337,12 @@
           .map((r) => {
             const active = appState.currentRun?.id === r.id;
             const timeShort = new Date(r.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+            const cleanTitle = stripPreferenceTag(r.title) || '新协同会话';
             return `
-              <div class="thread-row ${active ? 'active' : ''}" data-thread-id="${escapeHtml(r.id)}" title="${escapeHtml(r.title)}">
+              <div class="thread-row ${active ? 'active' : ''}" data-thread-id="${escapeHtml(r.id)}" title="${escapeHtml(cleanTitle)}">
                 <span class="thread-dot ${escapeHtml(r.status)}"></span>
                 <div class="thread-info sidebar-label">
-                  <span class="thread-title">${escapeHtml(r.title)}</span>
+                  <span class="thread-title">${escapeHtml(cleanTitle)}</span>
                   <span class="thread-sub">${escapeHtml(MODE_LABELS[r.mode] || r.mode)} · ${timeShort}</span>
                 </div>
                 <div class="thread-actions sidebar-label">
@@ -1418,7 +1471,13 @@
     let aiState = 'idle';
     let cls = '';
 
-    if (run) {
+    if (appState.orbPreviewState) {
+      aiState = appState.orbPreviewState;
+      if (aiState === 'waiting-approval') cls = 'is-gate';
+      else if (aiState === 'error') cls = 'is-err';
+      else if (aiState === 'done') cls = 'is-done';
+      else if (aiState !== 'idle' && aiState !== 'listening') cls = 'is-live';
+    } else if (run) {
       if (run.status === 'running') {
         cls = 'is-live';
         if (run.activeStage === 'exec') aiState = 'streaming';
@@ -1435,30 +1494,109 @@
         aiState = 'error';
         cls = 'is-err';
       }
-    } else if (canvasEngine && canvasEngine.isDemoRunning()) {
-      cls = 'is-live';
-      aiState = 'reasoning';
     } else if (hasDraft) {
       aiState = 'listening';
     }
 
+    const paused = Boolean(appState.orbPaused);
     wrap.classList.remove('is-live', 'is-gate', 'is-done', 'is-err');
     if (cls) wrap.classList.add(cls);
     wrap.dataset.aiState = aiState;
     if (window.ConduitOrbs?.applyAiOrbState) {
       const label = window.ConduitOrbs.AI_ORB_LABELS[aiState] || aiState;
-      window.ConduitOrbs.applyAiOrbState(orb, aiState, { settleMs: 5000 });
-      wrap.title = `当前协同引擎状态：${label} (${aiState})`;
+      const hint = window.ConduitOrbs.AI_ORB_HINTS?.[aiState] || '';
+      const v = window.ConduitOrbs.AI_ORB_VISUALS[aiState] || window.ConduitOrbs.AI_ORB_VISUALS.idle;
+      window.ConduitOrbs.applyAiOrbState(orb, aiState, { settleMs: 5000, forcePaused: paused });
+      wrap.title = `对话流信号：${label} (${aiState})${paused ? ' · 已暂停' : ''}`;
       const compOrb = el('composerOrb');
       const compBtn = el('btnQuickPlan');
       if (compOrb) {
-        window.ConduitOrbs.applyAiOrbState(compOrb, aiState, { settleMs: 5000 });
+        window.ConduitOrbs.applyAiOrbState(compOrb, aiState, { settleMs: 5000, forcePaused: paused });
         if (compBtn) {
           compBtn.dataset.aiState = aiState;
-          compBtn.title = `AI Orb · ${label} (${aiState}) — 点击快速切换 Gemini 独立规划`;
+          compBtn.dataset.aiTone = v.tone;
+          compBtn.classList.toggle('is-paused', paused);
+          compBtn.title = `对话流实时信号：${label} (${aiState})${paused ? ' [已暂停]' : ''} — 点击展开控制`;
         }
       }
+      const cancelOrb = el('cancelRunOrb');
+      const cancelBtn = el('btnCancelRun');
+      const cancelLbl = el('cancelRunLabel');
+      if (cancelOrb) {
+        window.ConduitOrbs.applyAiOrbState(cancelOrb, aiState, { settleMs: 0, forcePaused: paused });
+        if (cancelBtn) {
+          cancelBtn.dataset.aiState = aiState;
+          cancelBtn.dataset.aiTone = v.tone;
+          cancelBtn.title = `${label} (${aiState}) · 点击立即停止当前协同`;
+        }
+        if (cancelLbl) cancelLbl.textContent = label;
+      }
+      // Keep anchored Composer Orb Popover synced whenever visible
+      const pop = el('composerOrbPopover');
+      if (pop && !pop.classList.contains('hidden')) {
+        syncComposerOrbPopover(aiState, label, hint, v.tone);
+      }
     }
+  }
+
+  function clearOrbDemoTimers() {
+    (appState.orbDemoTimers || []).forEach(clearTimeout);
+    appState.orbDemoTimers = [];
+  }
+
+  function syncComposerOrbPopover(aiState, label, hint, tone) {
+    const heroSvg = el('orbPopHeroSvg');
+    const heroTile = el('orbPopHeroTile');
+    const titleEl = el('orbPopTitle');
+    const codeEl = el('orbPopCode');
+    const hintEl = el('orbPopHint');
+    const primaryBtn = el('btnOrbPopPrimary');
+    const pauseBtn = el('btnOrbPopPause');
+    const isRunActive = Boolean(appState.currentRun && (appState.currentRun.status === 'running' || appState.currentRun.status === 'awaiting_approval'));
+    if (heroTile) heroTile.dataset.aiTone = tone || 'primary';
+    if (heroSvg && window.ConduitOrbs?.applyAiOrbState) {
+      window.ConduitOrbs.applyAiOrbState(heroSvg, aiState, { settleMs: 60000, forcePaused: appState.orbPaused });
+    }
+    if (titleEl) titleEl.textContent = appState.orbPaused ? `${label}（已暂停）` : label;
+    if (codeEl) codeEl.textContent = aiState;
+    if (hintEl) hintEl.textContent = hint;
+    if (primaryBtn) primaryBtn.textContent = isRunActive ? '停止当前协同' : '启动协同';
+    if (pauseBtn) pauseBtn.textContent = appState.orbPaused ? '恢复信号' : '暂停信号';
+    const grid = el('orbPopStatesGrid');
+    if (grid) {
+      grid.querySelectorAll('[data-orb-pick]').forEach((b) => {
+        b.classList.toggle('is-active', b.dataset.orbPick === aiState);
+      });
+    }
+  }
+
+  function renderComposerOrbPopoverGrid() {
+    const grid = el('orbPopStatesGrid');
+    if (!grid || !window.ConduitOrbs) return;
+    if (grid.dataset.built === '1') return;
+    grid.dataset.built = '1';
+    grid.innerHTML = window.ConduitOrbs.AI_ORB_STATES.map((st) => {
+      const v = window.ConduitOrbs.AI_ORB_VISUALS[st];
+      const lbl = window.ConduitOrbs.AI_ORB_LABELS[st] || st;
+      return `
+        <button type="button" class="orb-pop-cell" data-orb-pick="${st}" title="${escapeHtml(lbl)} (${st})">
+          <span class="orb-pop-mini-tile" data-ai-tone="${v.tone}">
+            <svg class="thinking-orb" width="28" height="28" viewBox="0 0 28 28" data-orb-family="ai" data-orb-state="${v.geom}" data-orb-variant="ai" data-orb-size="28" data-orb-speed="${v.speed}" data-orb-paused="${v.paused ? '1' : '0'}"></svg>
+          </span>
+          <span class="mono-xs orb-pop-cell-name">${st}</span>
+        </button>`;
+    }).join('');
+    window.ConduitOrbs.mountAll(grid);
+    grid.querySelectorAll('[data-orb-pick]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        clearOrbDemoTimers();
+        const picked = btn.dataset.orbPick;
+        appState.orbPaused = false;
+        appState.orbPreviewState = picked === 'idle' && !appState.currentRun ? null : picked;
+        syncTopbarOrb(appState.currentRun);
+      });
+    });
   }
 
   /* =========================================================================
@@ -1622,19 +1760,50 @@
   }
 
   /**
-   * Renders the ai-thinking-and-tool-calls SVG Activity Rail Tree:
+   * Renders the Dialogue Stream Chain-of-Thought & Tool Activity Tree:
    * - Single continuous SVG trunk (x=12.5) with curved Q elbows per row
-   * - Live shimmer summary header ("ran 2 commands · edited 1 file")
-   * - Auto-open while working, auto-collapses cleanly when settled (manual clicks always win)
+   * - Displays readable inline Chain-of-Thought reasoning steps + live tool/command activity
+   * - Uses live miniature AiOrb icons for active steps; zero clipped pills
    */
-  function renderToolTraceHtml(events, sourceFilter, isWorking, groupId) {
-    const items = (events || []).filter((e) => {
+  function renderToolTraceHtml(events, sourceFilter, isWorking, groupId, runCtx = null) {
+    const rawItems = (events || []).filter((e) => {
       if (sourceFilter && e.source !== sourceFilter) return false;
       return ['command', 'file_change', 'reasoning', 'step', 'stage', 'worktree'].includes(e.kind);
     });
+
+    // Ensure rich, transparent Chain-of-Thought steps are visible even before CLI tool calls emit
+    const items = [...rawItems];
+    const hasReasoning = items.some((e) => e.kind === 'reasoning');
+    if (!hasReasoning && (isWorking || items.length > 0)) {
+      const modelName =
+        sourceFilter === 'codex'
+          ? (runCtx?.config?.codexModel || 'Codex 默认模型')
+          : (runCtx?.config?.geminiModel || 'gemini-4-neon-high');
+      const scopeHint = appState.workspaceFiles?.length
+        ? `已挂载工作区上下文（${appState.workspaceFiles.length} 个文件）`
+        : '已接入当前工程工作区';
+      items.push({
+        kind: 'reasoning',
+        source: sourceFilter,
+        text:
+          sourceFilter === 'codex'
+            ? `基于已锁定接口契约在受管沙箱（${runCtx?.config?.sandbox || 'workspace-write'}）中规划代码改动与边界单测，准备捕获完整 Git Diff。`
+            : `使用 ${modelName} 进行需求意图拆解：${scopeHint}，正在权衡最小变更路径、接口边界与验收标准。`,
+        synthetic: true,
+      });
+      if (isWorking) {
+        items.push({
+          kind: 'step',
+          source: sourceFilter,
+          stepType: sourceFilter === 'codex' ? '沙箱实现与语法单测验证' : '整理结构化结论与执行方案',
+          state: 'running',
+          synthetic: true,
+        });
+      }
+    }
     if (items.length === 0) return '';
 
-    const shown = items.slice(-14);
+    const shown = items.slice(-16);
     let cmds = 0;
     let edits = 0;
     let thoughts = 0;
@@ -1647,20 +1816,17 @@
     });
 
     const segs = [];
-    if (cmds > 0) segs.push(`运行 ${cmds} 条命令`);
-    if (edits > 0) segs.push(`修改 ${edits} 处文件`);
-    if (thoughts > 0) segs.push(`推理 ${thoughts} 步`);
+    if (thoughts > 0) segs.push(`${thoughts} 步推理`);
+    if (cmds > 0) segs.push(`${cmds} 条命令`);
+    if (edits > 0) segs.push(`${edits} 处文件`);
     if (failedCount > 0) segs.push(`${failedCount} 项失败`);
-    const summaryText =
-      segs.length > 0
-        ? segs.join(' · ')
-        : isWorking
-          ? 'Thinking · 正在协同调度...'
-          : `已完成 ${shown.length} 步调度轨迹`;
+    const summaryText = isWorking
+      ? `思维链 · 正在推演（${segs.join(' · ') || '实时调度'}）`
+      : `思维链 · ${segs.join(' · ') || `已完成 ${shown.length} 步`}`;
 
     const isOpen = appState.treeGroupOpen.has(groupId)
       ? appState.treeGroupOpen.get(groupId)
-      : isWorking;
+      : isWorking || hasReasoning;
 
     const rowsHtml = shown
       .map((ev, idx) => {
@@ -1673,6 +1839,7 @@
 
         let verb = 'Stage';
         let pill = ev.text || '';
+        let inlineProse = '';
         let bodyHtml = '';
         let badge = '';
 
@@ -1695,16 +1862,17 @@
           pill = paths || 'workspace';
           bodyHtml = `<div class="tree-thought-body mono">${escapeHtml(JSON.stringify(ev.changes || [], null, 2))}</div>`;
         } else if (ev.kind === 'reasoning') {
-          verb = 'Thought process';
-          pill = (ev.text || '').slice(0, 60);
-          bodyHtml = `<div class="tree-thought-body">${escapeHtml(ev.text || '')}</div>`;
+          verb = '思考';
+          pill = '';
+          inlineProse = String(ev.text || '').trim();
+          bodyHtml = '';
         } else if (ev.kind === 'step') {
-          verb = 'Step';
-          pill = `${ev.stepType || 'step'} (${ev.state || ''})`;
+          verb = '步骤';
+          pill = `${ev.stepType || 'step'}${ev.state ? ` · ${ev.state}` : ''}`;
           bodyHtml = `<div class="tree-thought-body">${escapeHtml(pill)}</div>`;
         } else {
           verb = ev.kind === 'worktree' ? 'Worktree' : 'Stage';
-          pill = (ev.text || '').slice(0, 80);
+          pill = String(ev.text || '').trim();
           bodyHtml = `<div class="tree-thought-body">${escapeHtml(ev.text || '')}</div>`;
         }
 
@@ -1716,21 +1884,30 @@
             ${continues ? '<line x1="12.5" y1="10" x2="12.5" y2="100%" stroke-width="1" class="tree-rail-stroke" />' : ''}
           </svg>`;
 
+        const activeGeom = ev.kind === 'command' ? 'ai-searching' : ev.kind === 'file_change' ? 'ai-connecting' : 'ai-solving';
         return `
-          <div class="tree-row ${failed ? 'is-failed' : ''} ${rowOpen ? 'is-row-open' : ''}">
+          <div class="tree-row ${failed ? 'is-failed' : ''} ${rowOpen ? 'is-row-open' : ''} ${inlineProse ? 'is-thought-row' : ''}">
             ${railSvg}
-            <span class="tree-row-icon" aria-hidden="true">
-              ${isRowActive ? '<span class="tree-spinner"></span>' : treeGlyphSvg(ev.kind)}
+            <span class="tree-row-icon ${isRowActive ? 'is-live-orb' : ''}" aria-hidden="true">
+              ${
+                isRowActive
+                  ? `<svg class="thinking-orb" width="16" height="16" viewBox="0 0 16 16" data-orb-family="ai" data-orb-state="${activeGeom}" data-orb-variant="ai" data-orb-size="16" aria-hidden="true"></svg>`
+                  : treeGlyphSvg(ev.kind)
+              }
             </span>
-            <button type="button" class="tree-row-btn" data-tree-row="${escapeHtml(rowKey)}" aria-expanded="${rowOpen}">
-              <span class="tree-row-verb">${escapeHtml(verb)}</span>
-              ${pill ? `<span class="tree-pill">${escapeHtml(pill)}</span>` : ''}
-              ${badge}
-              <span class="tree-row-caret">${rowOpen ? '▾' : '▸'}</span>
-            </button>
-            <div class="tree-row-fold">
-              <div class="tree-row-fold-inner">${bodyHtml}</div>
-            </div>
+            ${
+              inlineProse
+                ? `<div class="cot-thought-inline"><span class="tree-row-verb">${escapeHtml(verb)}</span><p class="cot-thought-text">${escapeHtml(inlineProse)}</p></div>`
+                : `<button type="button" class="tree-row-btn" data-tree-row="${escapeHtml(rowKey)}" aria-expanded="${rowOpen}" title="${escapeHtml(pill || verb)}">
+                    <span class="tree-row-verb">${escapeHtml(verb)}</span>
+                    ${pill ? `<span class="tree-pill">${escapeHtml(pill)}</span>` : ''}
+                    ${badge}
+                    <span class="tree-row-caret">${rowOpen ? '▾' : '▸'}</span>
+                  </button>
+                  <div class="tree-row-fold">
+                    <div class="tree-row-fold-inner">${bodyHtml}</div>
+                  </div>`
+            }
           </div>`;
       })
       .join('');
@@ -1751,6 +1928,146 @@
       </div>`;
   }
 
+  /* =========================================================================
+     chatcn Middle Card: 4-Phase Research & Pipeline Progress Card
+     chatcn Left Card:   Catch up (前情提要 · 关键决策 · 待决问题)
+     ========================================================================= */
+  function renderResearchProgressCard(run) {
+    const g = run.gemini || {};
+    const c = run.codex || {};
+    const cleanTitle = stripPreferenceTag(run.title || run.prompt) || '双模型协同调研与交付';
+    const totalMs = (g.durationMs || 0) + (c.durationMs || 0);
+    const totalSec = totalMs > 0 ? `${(totalMs / 1000).toFixed(1)}s` : (run.status === 'running' ? '进行中' : '0.0s');
+    const sourceCount = Math.max(appState.workspaceFiles?.length || 0, (run.events || []).length);
+    const evCount = (run.events || []).length;
+    const isDone = run.status === 'completed';
+    const isFailed = run.status === 'failed' || run.status === 'blocked';
+    const isRunning = run.status === 'running';
+
+    // Determine 4 phase completion states
+    const p1Done = Boolean(g.planText || g.copyText || c.status !== 'idle' || isDone);
+    const p2Done = Boolean((run.events || []).some((e) => e.kind === 'command' || e.kind === 'file_change') || c.execText || g.planText || isDone);
+    const p3Done = Boolean(c.execText || run.reviewVerdict || (run.mode === 'plan-only' && g.planText) || isDone);
+    const p4Done = Boolean(isDone || g.summaryText || (run.mode === 'plan-only' && g.planText && !isRunning));
+    const phases = [
+      { key: '规划', en: 'Planning', done: p1Done, active: isRunning && !p1Done },
+      { key: '检索', en: 'Searching', done: p2Done, active: isRunning && p1Done && !p2Done },
+      { key: '施工推演', en: 'Reading', done: p3Done, active: isRunning && p2Done && !p3Done },
+      { key: '交付报告', en: 'Writing', done: p4Done, active: isRunning && p3Done && !p4Done },
+    ];
+    const wordLen = [g.planText, g.copyText, c.execText, g.summaryText].filter(Boolean).join('').length;
+    const statusLine = isDone
+      ? `已完成全部协同阶段 · ${totalSec} · 扫描 ${sourceCount} 项上下文`
+      : isFailed
+        ? `流程已拦截或中止 · ${totalSec} · 共记录 ${evCount} 条事件`
+        : `正在推进多模型协同 · ${totalSec} · 扫描 ${sourceCount} 项上下文`;
+    const footCopy = wordLen > 0
+      ? `已汇总 ${sourceCount} 项工作区上下文与 ${evCount} 条轨迹，当前交付约 ${wordLen.toLocaleString()} 字。`
+      : `正在实时索引工作区目录边界并生成结构化契约与验证结论。`;
+
+    return `
+      <section class="research-progress-card" data-slot="research-progress">
+        <header class="rp-head">
+          <span class="rp-status-ico ${isDone ? 'is-done' : isFailed ? 'is-err' : 'is-live'}" aria-hidden="true">
+            ${
+              isDone
+                ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9.5"/><path d="m8.5 12.5 2.4 2.4 4.8-5.2"/></svg>'
+                : `<svg class="thinking-orb" width="16" height="16" viewBox="0 0 16 16" data-orb-family="ai" data-orb-state="${isFailed ? 'ai-breathing' : 'ai-solving'}" data-orb-variant="ai" data-orb-size="16" data-orb-paused="${isFailed ? '1' : '0'}"></svg>`
+            }
+          </span>
+          <div class="rp-title-block">
+            <h3 class="rp-title">${escapeHtml(cleanTitle)}</h3>
+            <span class="rp-meta mono-xs">${escapeHtml(statusLine)}</span>
+          </div>
+        </header>
+        <div class="rp-phases" role="list" aria-label="协同四阶段进度">
+          ${phases
+            .map(
+              (p) => `
+              <div class="rp-phase ${p.done ? 'is-done' : p.active ? 'is-active' : ''}" role="listitem">
+                <span class="rp-bar"><span class="rp-bar-fill"></span></span>
+                <span class="rp-phase-label">${escapeHtml(p.key)} ${p.done ? '✓' : p.active ? '…' : ''}</span>
+              </div>`
+            )
+            .join('')}
+        </div>
+        <div class="rp-foot">
+          <p class="rp-summary">${escapeHtml(footCopy)}</p>
+          <div class="rp-foot-actions">
+            <button type="button" class="rp-activity-btn mono-xs" data-open-insp="events">活动轨迹 ${evCount} ▾</button>
+            <button type="button" class="rp-open-btn" data-open-insp="${run.codex?.diff ? 'diff' : run.reviewVerdict ? 'review' : 'preview'}">打开报告 →</button>
+          </div>
+        </div>
+      </section>`;
+  }
+
+  function renderCatchUpCard(run) {
+    const g = run.gemini || {};
+    const c = run.codex || {};
+    const combined = [g.summaryText, g.planText, g.copyText, c.execText].filter(Boolean).join('\n');
+    if (!combined.trim() && run.status === 'running') return '';
+
+    const rawLines = combined
+      .split(/\r?\n/)
+      .map((l) => l.replace(/^[-*•\d.)#\s]+/, '').replace(/\*\*/g, '').trim())
+      .filter((l) => l.length >= 8 && l.length <= 140 && !l.startsWith('```'));
+
+    const summaryBullets = rawLines.slice(0, 3);
+    if (summaryBullets.length === 0) {
+      summaryBullets.push(`当前模式：${MODE_LABELS[run.mode] || run.mode}，直连本机官方 CLI。`);
+    }
+
+    const decisions = [];
+    if (run.config?.geminiModel) decisions.push(`架构规划锁定 ${run.config.geminiModel}，保持接口契约优先。`);
+    if (run.config?.sandbox) decisions.push(`Codex 沙箱策略设为 ${run.config.sandbox}（推理档位 ${run.config.codexEffort || 'high'}）。`);
+    if (run.reviewVerdict) decisions.push(`Pre-CI 门禁裁决：${run.reviewVerdict.passed ? 'PASS 放行' : 'BLOCK 拦截'}。`);
+
+    const openQuestions = [];
+    if (run.status === 'awaiting_approval') {
+      openQuestions.push('当前处于人工拍板闸门，需确认接口契约后放行 Codex 施工。');
+    }
+    if (run.reviewVerdict?.blocking?.length) {
+      openQuestions.push(...run.reviewVerdict.blocking.slice(0, 2));
+    } else if (run.reviewVerdict?.suggestions?.length) {
+      openQuestions.push(run.reviewVerdict.suggestions[0]);
+    } else {
+      openQuestions.push('是否需要将本轮输出同步至右侧「代码 + 实时预览」双栏进一步核验？');
+    }
+
+    const isOpen = appState.catchUpOpen.has(run.id) ? appState.catchUpOpen.get(run.id) : true;
+    return `
+      <section class="catchup-card ${isOpen ? 'is-open' : 'is-compact'}" data-slot="catch-up">
+        <div class="cu-head">
+          <div class="cu-title-row">
+            <strong>前情提要</strong>
+            <span class="mono-xs cu-meta">${(run.events || []).length} 条会话轨迹 · ${MODE_LABELS[run.mode] || run.mode}</span>
+          </div>
+          <button type="button" class="link-btn cu-toggle-btn" data-cu-toggle="${escapeHtml(run.id)}">${isOpen ? '收起摘要' : '展开前情提要'}</button>
+        </div>
+        ${
+          isOpen
+            ? `<div class="cu-body">
+                <ul class="cu-list">
+                  ${summaryBullets.map((b) => `<li>${escapeHtml(b)}</li>`).join('')}
+                </ul>
+                <div class="cu-sec">
+                  <div class="cu-sec-head"><span>关键决策</span><span class="mono-xs">${decisions.length}</span></div>
+                  <ul class="cu-list is-sub">
+                    ${decisions.map((d) => `<li>${escapeHtml(d)}</li>`).join('')}
+                  </ul>
+                </div>
+                <div class="cu-sec">
+                  <div class="cu-sec-head"><span>待决问题</span><span class="mono-xs">${openQuestions.length}</span></div>
+                  <ul class="cu-list is-warn">
+                    ${openQuestions.map((q) => `<li>${escapeHtml(q)}</li>`).join('')}
+                  </ul>
+                </div>
+              </div>`
+            : ''
+        }
+      </section>`;
+  }
+
   function renderConversationThread(run) {
     if (!run) return;
     el('welcomeStage').classList.add('hidden');
@@ -1764,7 +2081,7 @@
 
     const totalTokens = (run.metrics?.geminiTokens || 0) + (run.metrics?.codexTokens || 0);
     const totalSec = (((run.gemini?.durationMs || 0) + (run.codex?.durationMs || 0)) / 1000).toFixed(1);
-    el('topbarTitle').textContent = run.title || '协同会话';
+    el('topbarTitle').textContent = stripPreferenceTag(run.title) || '协同会话';
     el('topbarMeta').textContent = `${MODE_LABELS[run.mode] || run.mode} · ${totalTokens.toLocaleString()} TOKENS · ${totalSec}s`;
     syncTopbarOrb(run);
 
@@ -1784,11 +2101,11 @@
     const parts = [];
     const createdStr = new Date(run.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 
-    // 1. User Prompt Turn
+    // 1. User Prompt Turn (Stripped of internal preference prompt suffix)
     parts.push(`
       <div class="msg-user-wrap">
         <div class="msg-user-bubble">
-          <div class="msg-user-text">${escapeHtml(run.prompt)}</div>
+          <div class="msg-user-text">${escapeHtml(stripPreferenceTag(run.prompt))}</div>
           <div class="msg-user-meta">
             <span>${escapeHtml(MODE_LABELS[run.mode] || run.mode)}</span>
             <span>·</span>
@@ -1796,6 +2113,11 @@
           </div>
         </div>
       </div>`);
+
+    // 1.5 Middle Control: 4-Phase Research & Pipeline Progress Card + Left Control: Catch Up Summary
+    parts.push(renderResearchProgressCard(run));
+    const catchUpHtml = renderCatchUpCard(run);
+    if (catchUpHtml) parts.push(catchUpHtml);
 
     // 2. Gemini Turn (Plan or Copy Advisor)
     const g = run.gemini || {};
@@ -1807,20 +2129,18 @@
       const statusText = isStreamingG ? '正在流式推理...' : (g.status || 'idle').toUpperCase();
       parts.push(`
         <article class="agent-turn ${isStreamingG ? 'is-streaming' : ''}">
-          <div class="border-beam" aria-hidden="true"></div>
           <header class="agent-turn-head">
             <div class="agent-identity">
-              <span class="agent-avatar gemini ${isStreamingG ? 'is-orb' : ''}">${isStreamingG ? renderOrbSvg('reasoning', 'twins', 18) : 'G'}</span>
+              <span class="agent-avatar gemini ${isStreamingG ? 'is-orb' : ''}">${isStreamingG ? '<svg class="thinking-orb" width="18" height="18" viewBox="0 0 18 18" data-orb-family="ai" data-orb-state="ai-solving" data-orb-variant="ai" data-orb-size="18" aria-hidden="true"></svg>' : 'G'}</span>
               <span class="agent-role-name">${titleLabel}</span>
               <span class="agent-model-tag">${escapeHtml(run.config?.geminiModel || '')}</span>
             </div>
             <span class="agent-status-pill ${escapeHtml(g.status || '')} ${isStreamingG ? 'is-shimmer' : ''}">
-              ${isStreamingG ? renderOrbSvg('reasoning', 'twins', 13) : ''}
               <span>${statusText}</span>
             </span>
           </header>
           ${renderBranchDeckHtml(run, isStreamingG)}
-          ${renderToolTraceHtml(run.events, 'gemini', isStreamingG, `${run.id}:gemini`)}
+          ${renderToolTraceHtml(run.events, 'gemini', isStreamingG, `${run.id}:gemini`, run)}
           ${text ? `<div class="markdown-output">${renderMarkdown(text)}</div>` : isStreamingG ? '<div class="mono-xs is-shimmer">正在拆解需求与接口契约...</div>' : ''}
           ${g.error && run.activeStage !== 'summary' ? `<div class="error-banner">${escapeHtml(g.error)}</div>` : ''}
           <footer class="agent-turn-foot">
@@ -1862,19 +2182,17 @@
       const statusText = isStreamingC ? '正在沙箱施工...' : (c.status || 'idle').toUpperCase();
       parts.push(`
         <article class="agent-turn ${isStreamingC ? 'is-streaming' : ''}">
-          <div class="border-beam" aria-hidden="true"></div>
           <header class="agent-turn-head">
             <div class="agent-identity">
-              <span class="agent-avatar codex ${isStreamingC ? 'is-orb is-codex' : ''}">${isStreamingC ? renderOrbSvg('working', 'gyro', 18) : 'C'}</span>
+              <span class="agent-avatar codex ${isStreamingC ? 'is-orb is-codex' : ''}">${isStreamingC ? '<svg class="thinking-orb" width="18" height="18" viewBox="0 0 18 18" data-orb-family="ai" data-orb-state="ai-composing" data-orb-variant="ai" data-orb-size="18" aria-hidden="true"></svg>' : 'C'}</span>
               <span class="agent-role-name">Codex · 沙箱工程师</span>
               <span class="agent-model-tag">${escapeHtml(run.config?.codexModel || '默认')} · ${escapeHtml(run.config?.codexEffort || 'high')} · ${escapeHtml(run.config?.sandbox || 'workspace-write')}${run.worktreePath ? ' · WT' : ''}</span>
             </div>
             <span class="agent-status-pill ${escapeHtml(c.status || '')} ${isStreamingC ? 'is-shimmer' : ''}">
-              ${isStreamingC ? renderOrbSvg('working', 'gyro', 13) : ''}
               <span>${statusText}</span>
             </span>
           </header>
-          ${renderToolTraceHtml(run.events, 'codex', isStreamingC, `${run.id}:codex`)}
+          ${renderToolTraceHtml(run.events, 'codex', isStreamingC, `${run.id}:codex`, run)}
           ${c.execText ? `<div class="markdown-output">${renderMarkdown(c.execText)}</div>` : isStreamingC ? '<div class="mono-xs is-shimmer">Codex 正在读取工作区并编写代码...</div>' : ''}
           ${
             c.diff
@@ -1905,15 +2223,13 @@
       const isStreamingR = c.status === 'running' && run.activeStage === 'review';
       parts.push(`
         <article class="agent-turn ${isStreamingR ? 'is-streaming' : ''}">
-          <div class="border-beam" aria-hidden="true"></div>
           <header class="agent-turn-head">
             <div class="agent-identity">
-              <span class="agent-avatar codex ${isStreamingR ? 'is-orb' : ''}">${isStreamingR ? renderOrbSvg('searching', 'lighthouse', 18) : 'R'}</span>
+              <span class="agent-avatar codex ${isStreamingR ? 'is-orb' : ''}">${isStreamingR ? '<svg class="thinking-orb" width="18" height="18" viewBox="0 0 18 18" data-orb-family="ai" data-orb-state="ai-searching" data-orb-variant="ai" data-orb-size="18" aria-hidden="true"></svg>' : 'R'}</span>
               <span class="agent-role-name">Pre-CI 代码审查门禁</span>
               <span class="agent-model-tag">ROUND ${run.reviewRound || 1} / ${run.mode === 'codex-review' ? 1 : (run.config?.maxReviewRounds || 2)}</span>
             </div>
             <span class="agent-status-pill ${v ? (v.passed ? 'done' : 'failed') : (isStreamingR ? 'running' : '')} ${isStreamingR ? 'is-shimmer' : ''}">
-              ${isStreamingR ? renderOrbSvg('searching', 'lighthouse', 13) : ''}
               <span>${isStreamingR ? '深度审查中...' : v ? (v.passed ? 'PASS' : 'BLOCK') : 'PENDING'}</span>
             </span>
           </header>
@@ -1958,14 +2274,12 @@
       const isStreamingS = g.status === 'running' && run.activeStage === 'summary';
       parts.push(`
         <article class="agent-turn ${isStreamingS ? 'is-streaming' : ''}">
-          <div class="border-beam" aria-hidden="true"></div>
           <header class="agent-turn-head">
             <div class="agent-identity">
-              <span class="agent-avatar gemini ${isStreamingS ? 'is-orb' : ''}">${isStreamingS ? renderOrbSvg('compacting', 'fuse', 18) : 'G'}</span>
+              <span class="agent-avatar gemini ${isStreamingS ? 'is-orb' : ''}">${isStreamingS ? '<svg class="thinking-orb" width="18" height="18" viewBox="0 0 18 18" data-orb-family="ai" data-orb-state="ai-connecting" data-orb-variant="ai" data-orb-size="18" aria-hidden="true"></svg>' : 'G'}</span>
               <span class="agent-role-name">Gemini · 最终交付汇报</span>
             </div>
             <span class="agent-status-pill ${escapeHtml(g.status || '')} ${isStreamingS ? 'is-shimmer' : ''}">
-              ${isStreamingS ? renderOrbSvg('compacting', 'fuse', 13) : ''}
               <span>${isStreamingS ? '正在汇总汇报...' : 'REPORT'}</span>
             </span>
           </header>
@@ -1985,10 +2299,9 @@
       const isRunningM = mj.status === 'queued' || mj.status === 'generating';
       parts.push(`
         <article class="agent-turn ${isRunningM ? 'is-streaming' : ''}">
-          <div class="border-beam" aria-hidden="true"></div>
           <header class="agent-turn-head">
             <div class="agent-identity">
-              <span class="agent-avatar gemini ${isRunningM ? 'is-orb' : ''}">${isRunningM ? renderOrbSvg('working', 'gyro', 18) : (isVid ? 'V' : 'I')}</span>
+              <span class="agent-avatar gemini ${isRunningM ? 'is-orb' : ''}">${isRunningM ? '<svg class="thinking-orb" width="18" height="18" viewBox="0 0 18 18" data-orb-family="ai" data-orb-state="ai-composing" data-orb-variant="ai" data-orb-size="18" aria-hidden="true"></svg>' : (isVid ? 'V' : 'I')}</span>
               <span class="agent-role-name">${isVid ? 'CONDUIT · 视频生成输出' : 'CONDUIT · 图像生成输出'}</span>
               <span class="agent-model-tag">${escapeHtml(mj.modelLabel || (isVid ? 'VIDEO STUDIO' : 'IMAGE STUDIO'))}</span>
             </div>
@@ -2037,6 +2350,16 @@
   }
 
   function bindThreadDynamicHandlers(container, run) {
+    // Catch-up collapsible summary toggle
+    container.querySelectorAll('[data-cu-toggle]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const rid = btn.dataset.cuToggle;
+        const cur = appState.catchUpOpen.has(rid) ? appState.catchUpOpen.get(rid) : true;
+        appState.catchUpOpen.set(rid, !cur);
+        renderConversationThread(run);
+      });
+    });
+
     // FLIP Branching Reasoning Deck layout & smooth in-place toggling
     container.querySelectorAll('.branch-deck-wrap').forEach((wrap) => {
       let expanded = wrap.dataset.branchExpanded === 'true';
@@ -2652,10 +2975,19 @@
       if (box && window.ConduitMediaGen) {
         const text = [run?.codex?.execText, run?.gemini?.planText, run?.gemini?.summaryText].filter(Boolean).join('\n');
         const htmlMatch = text.match(/```html\s*([\s\S]*?)```/i);
+        const codeMatch = text.match(/```([a-zA-Z0-9_-]*)\s*([\s\S]*?)```/);
         const urlMatch = text.match(/https?:\/\/(?:127\.0\.0\.1|localhost):\d+[^\s)"'`]*/i);
         window.ConduitMediaGen.mountSafariPreview(box, {
           url: urlMatch ? urlMatch[0] : '',
           htmlSnippet: htmlMatch ? htmlMatch[1] : '',
+          codeSnippet: codeMatch ? codeMatch[2].trim() : (run?.codex?.diff || ''),
+          codeLang: codeMatch ? (codeMatch[1] || 'tsx') : (run?.codex?.diff ? 'diff' : 'tsx'),
+          runMeta: run ? {
+            title: stripPreferenceTag(run.title) || 'conduit-workbench',
+            status: run.status,
+            durationSec: (((run.gemini?.durationMs || 0) + (run.codex?.durationMs || 0)) / 1000).toFixed(1),
+            passed: run.reviewVerdict ? run.reviewVerdict.passed : run.status === 'completed',
+          } : null,
           onToast: showToast,
         });
       }
@@ -3232,6 +3564,7 @@
     return window.ConduitCanvas.createInfiniteCanvas({
       viewportEl: el('wfViewport'),
       worldEl: el('wfWorld'),
+      framesLayerEl: el('wfFramesLayer'),
       edgesSvgEl: el('wfEdgesSvg'),
       nodesLayerEl: el('wfNodesLayer'),
       minimapCanvasEl: el('wfMinimapCanvas'),
@@ -3688,11 +4021,14 @@
      ========================================================================= */
   function closeAllPopovers(exceptId = '') {
     closeArchSelect();
-    ['wsPopover', 'guardrailsPopover'].forEach((id) => {
+    ['wsPopover', 'guardrailsPopover', 'composerOrbPopover'].forEach((id) => {
       if (id !== exceptId) el(id)?.classList.add('hidden');
     });
     if (exceptId !== 'guardrailsPopover') {
       el('btnGuardrailsPopover')?.setAttribute('aria-expanded', 'false');
+    }
+    if (exceptId !== 'composerOrbPopover') {
+      el('btnQuickPlan')?.setAttribute('aria-expanded', 'false');
     }
     if (!exceptId) closePickers();
   }
@@ -3972,11 +4308,32 @@
     };
     bindTrigger('btnTriggerSlash', '/');
     bindTrigger('btnTriggerMention', '@');
+    bindTrigger('btnAttachContext', '@');
+
+    // One-Click Topbar Light/Dark Theme Toggle (21st.dev #37503)
+    el('btnThemeToggle')?.addEventListener('click', (e) => toggleLightDarkTheme(e));
+
+    // Infinite Canvas Blender Node Group & Dot-Grid / Drafting Grid / Solid Cycle
+    el('btnWfAddGroup')?.addEventListener('click', () => canvasEngine?.createNodeGroup());
+    el('btnWfGridCycle')?.addEventListener('click', () => {
+      const order = ['dots', 'grid', 'solid'];
+      const cur = appState.tweaks.canvasGrid || 'dots';
+      const next = order[(order.indexOf(cur) + 1) % order.length];
+      appState.tweaks.canvasGrid = next;
+      applyTweaks();
+      saveTweaks();
+      const names = { dots: '点状网格', grid: '制图细格', solid: '纯粹素面' };
+      showToast(`无限画布底纹已切换为：${names[next]}`);
+    });
 
     promptTa.addEventListener('input', () => {
       cancelBlur();
       autoGrowTextarea(promptTa);
       evaluatePromptTrigger();
+      if (appState.orbPreviewState) {
+        clearOrbDemoTimers();
+        appState.orbPreviewState = null;
+      }
       syncTopbarOrb(appState.currentRun);
     });
 
@@ -4017,13 +4374,65 @@
     });
 
     el('btnStartRun').addEventListener('click', () => {
+      clearOrbDemoTimers();
+      appState.orbPreviewState = null;
+      appState.orbPaused = false;
+      closeAllPopovers();
       if (appState.stageView === 'workflow') switchStageView('chat');
       startRun();
     });
-    el('btnQuickPlan').addEventListener('click', () => {
-      setModeValue('plan-only');
-      showToast('已切换为「Gemini 独立规划」模式');
-      el('inputPrompt').focus();
+    el('btnQuickPlan').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const pop = el('composerOrbPopover');
+      if (!pop) return;
+      const opening = pop.classList.contains('hidden');
+      closeAllPopovers(opening ? 'composerOrbPopover' : '');
+      pop.classList.toggle('hidden', !opening);
+      el('btnQuickPlan')?.setAttribute('aria-expanded', String(opening));
+      if (opening) {
+        renderComposerOrbPopoverGrid();
+        syncTopbarOrb(appState.currentRun);
+      }
+    });
+    el('btnOrbPopPrimary')?.addEventListener('click', async () => {
+      const isRunActive = Boolean(appState.currentRun && (appState.currentRun.status === 'running' || appState.currentRun.status === 'awaiting_approval'));
+      if (isRunActive) {
+        try {
+          await api(`/api/runs/${encodeURIComponent(appState.currentRun.id)}/cancel`, { method: 'POST' });
+          showToast('已停止当前协同任务');
+        } catch (err) {
+          showToast(`停止失败: ${err.message}`);
+        }
+        return;
+      }
+      closeAllPopovers();
+      if ((el('inputPrompt')?.value || '').trim()) {
+        startRun();
+      } else {
+        el('inputPrompt')?.focus();
+        showToast('请在对话框输入需求，按 Ctrl+Enter 立即启动');
+      }
+    });
+    el('btnOrbPopPause')?.addEventListener('click', () => {
+      clearOrbDemoTimers();
+      appState.orbPaused = !appState.orbPaused;
+      syncTopbarOrb(appState.currentRun);
+      showToast(appState.orbPaused ? '对话流信号动效已暂停' : '对话流信号动效已恢复');
+    });
+    el('btnOrbPopDemo')?.addEventListener('click', () => {
+      clearOrbDemoTimers();
+      appState.orbPaused = false;
+      const seq = ['listening', 'thinking', 'tool-call', 'tool-result', 'reasoning', 'streaming', 'waiting-approval', 'error', 'done'];
+      seq.forEach((st, idx) => {
+        appState.orbDemoTimers.push(setTimeout(() => {
+          appState.orbPreviewState = st;
+          syncTopbarOrb(appState.currentRun);
+        }, idx * 1050));
+      });
+      appState.orbDemoTimers.push(setTimeout(() => {
+        appState.orbPreviewState = null;
+        syncTopbarOrb(appState.currentRun);
+      }, seq.length * 1050 + 900));
     });
     el('btnCancelRun').addEventListener('click', async () => {
       if (!appState.currentRun) return;
@@ -4122,13 +4531,14 @@
       const pairs = [
         ['wsPopover', 'btnWsPopover'],
         ['guardrailsPopover', 'btnGuardrailsPopover'],
+        ['composerOrbPopover', 'btnQuickPlan'],
       ];
       pairs.forEach(([popId, btnId]) => {
         const pop = el(popId);
         const btn = el(btnId);
         if (pop && btn && !pop.classList.contains('hidden') && !pop.contains(e.target) && !btn.contains(e.target)) {
           pop.classList.add('hidden');
-          if (btnId === 'btnGuardrailsPopover') btn.setAttribute('aria-expanded', 'false');
+          if (btnId === 'btnGuardrailsPopover' || btnId === 'btnQuickPlan') btn.setAttribute('aria-expanded', 'false');
         }
       });
 
@@ -4204,8 +4614,8 @@
   waveEngine = initWaveEngine();
   inkDiagrams = initInkOrbitDiagrams();
   canvasEngine = initInfiniteWorkflowCanvas();
-  if (window.ConduitMetalFx) metalEngine = window.ConduitMetalFx.init();
   if (window.ConduitOrbs) window.ConduitOrbs.mountAll(document);
+  syncTopbarOrb(null);
   setModeValue('full-pipeline');
   initGlobalEvents();
   loadHealth();

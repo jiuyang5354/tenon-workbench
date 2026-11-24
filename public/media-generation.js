@@ -1223,62 +1223,149 @@
       </svg>`;
   }
 
-  function mountSafariPreview(container, { url = '', htmlSnippet = '', onToast } = {}) {
+  function mountSafariPreview(container, { url = '', htmlSnippet = '', codeSnippet = '', codeLang = 'tsx', runMeta = null, onToast } = {}) {
     if (!container) return;
     let currentUrl = url || '';
-    let deviceMode = 'desktop';
+    let viewMode = url ? 'safari' : 'split'; // Default to Right Control: Code + Live Preview Split Workspace!
+
+    const fallbackCode = [
+      'export function DeployCard({ checks }: Props) {',
+      '  return (',
+      '    <section className="rounded-xl border p-5">',
+      '      <p className="text-xs text-muted">Deploy to production</p>',
+      '      <h3 className="font-mono text-sm">conduit-workbench@main</h3>',
+      '      <ul className="mt-4 space-y-2 text-xs">',
+      '        {checks.map((c) => (',
+      '          <li key={c.name} className="flex justify-between">',
+      '            <span>{c.name}</span>',
+      '            <span className="tabular-nums">{c.time}</span>',
+      '          </li>',
+      '        ))}',
+      '      </ul>',
+      '      <button className="mt-4 w-full rounded-lg bg-ink py-2">',
+      '        Promote to production',
+      '      </button>',
+      '    </section>',
+      '  );',
+      '}',
+    ].join('\n');
 
     function render() {
       const safeSrcdoc = htmlSnippet || '';
       const hasUrl = Boolean(currentUrl);
       const displayUrl = hasUrl ? currentUrl : safeSrcdoc ? 'sandbox://artifact-preview.html' : 'http://127.0.0.1:4177/';
+      const activeCode = (codeSnippet || safeSrcdoc || fallbackCode).trim();
+      const codeLines = activeCode.split(/\r?\n/).length;
+      const fileLabel = codeLang === 'diff' ? 'workspace.patch' : codeLang === 'html' ? 'preview.html' : `artifact.${codeLang || 'tsx'}`;
+      const targetName = runMeta?.title ? runMeta.title.slice(0, 24) : 'conduit-workbench@main';
+      const durSec = runMeta?.durationSec || '1.4';
+      const checks = [
+        { name: 'Syntax Check', time: '0.2 s' },
+        { name: 'Pre-CI Gate', time: `${durSec} s` },
+        { name: 'Unit Tests (5/5)', time: '1.1 s' },
+      ];
 
       container.innerHTML = `
         <div class="safari-preview-wrap" data-slot="safari-preview">
           <div class="safari-controls-top">
-            <span class="mono-xs">SAFARI WEB PREVIEW</span>
+            <span class="mono-xs">${viewMode === 'split' ? 'CODE + LIVE PREVIEW' : 'SAFARI WEB PREVIEW'}</span>
             <div class="safari-device-pills">
-              <button type="button" class="safari-dev-btn ${deviceMode === 'desktop' ? 'active' : ''}" data-saf-dev="desktop">桌面</button>
-              <button type="button" class="safari-dev-btn ${deviceMode === 'mobile' ? 'active' : ''}" data-saf-dev="mobile">375px</button>
+              <button type="button" class="safari-dev-btn ${viewMode === 'split' ? 'active' : ''}" data-saf-mode="split">代码 + 预览</button>
+              <button type="button" class="safari-dev-btn ${viewMode === 'safari' ? 'active' : ''}" data-saf-mode="safari">Safari 窗口</button>
             </div>
           </div>
-          <div class="safari-window">
-            <div class="safari-chrome">
-              <div class="safari-dots" aria-hidden="true">
-                <span></span><span></span><span></span>
-              </div>
-              <form class="safari-url-form" id="safariUrlForm">
-                <svg class="safari-lock" width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                  <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
-                  <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="currentColor" stroke-width="1.3"/>
-                </svg>
-                <input type="text" class="safari-url-input mono-xs" id="safariUrlInput" value="${escapeHtml(displayUrl)}" placeholder="输入本地预览地址，如 http://localhost:3000" autocomplete="off" />
-              </form>
-              <div class="safari-chrome-acts">
-                <button type="button" class="mg-icon-btn" id="safariReloadBtn" title="刷新预览">${ICONS.retry}</button>
-                ${hasUrl ? `<a class="mg-icon-btn" href="${escapeHtml(currentUrl)}" target="_blank" rel="noopener" title="新标签打开">${ICONS.open}</a>` : ''}
-              </div>
-            </div>
-            <div class="safari-viewport ${deviceMode === 'mobile' ? 'is-mobile' : ''}">
-              ${
-                hasUrl
-                  ? `<iframe class="safari-iframe" id="safariFrame" src="${escapeHtml(currentUrl)}" title="Safari 实时页面预览"></iframe>`
-                  : safeSrcdoc
-                    ? `<iframe class="safari-iframe" id="safariFrame" sandbox="allow-scripts" srcdoc="${escapeHtml(safeSrcdoc)}" title="HTML 产物实时预览"></iframe>`
-                    : `<div class="safari-standby">
-                        ${renderSafariMockupSvg({ url: 'localhost:3000' })}
-                        <p class="safari-standby-note">在上方 Safari 地址栏输入本地开发地址（如 <code>http://localhost:3000</code>）回车即可实时预览，或当 Codex 输出 HTML 代码块时自动渲染。</p>
-                      </div>`
-              }
-            </div>
-          </div>
+
+          ${
+            viewMode === 'split'
+              ? `<div class="code-preview-split" data-slot="code-preview-split">
+                  <div class="cps-code-pane">
+                    <div class="cps-pane-head">
+                      <span class="cps-filename mono-xs">${escapeHtml(fileLabel)}</span>
+                      <div class="cps-head-right">
+                        <span class="mono-xs cps-lines">${codeLines} lines</span>
+                        <button type="button" class="cps-copy-btn mono-xs" id="btnCpsCopy">复制</button>
+                      </div>
+                    </div>
+                    <pre class="cps-code-pre"><code>${escapeHtml(activeCode)}</code></pre>
+                  </div>
+                  <div class="cps-preview-pane">
+                    <div class="cps-pane-head">
+                      <span class="cps-filename mono-xs">Preview</span>
+                      <span class="mono-xs cps-lines">${safeSrcdoc ? 'HTML 实时沙箱' : '构建验证预览'}</span>
+                    </div>
+                    <div class="cps-preview-body">
+                      ${
+                        safeSrcdoc
+                          ? `<iframe class="cps-preview-iframe" sandbox="allow-scripts" srcdoc="${escapeHtml(safeSrcdoc)}" title="HTML 组件实时预览"></iframe>`
+                          : `<div class="cps-deploy-card">
+                              <span class="cps-deploy-kicker">Deploy to production</span>
+                              <strong class="cps-deploy-target mono">${escapeHtml(targetName)}</strong>
+                              <ul class="cps-checks-list">
+                                ${checks
+                                  .map(
+                                    (c) => `
+                                    <li>
+                                      <span>${escapeHtml(c.name)}</span>
+                                      <span class="mono">${escapeHtml(c.time)}</span>
+                                    </li>`
+                                  )
+                                  .join('')}
+                              </ul>
+                              <button type="button" class="cps-promote-btn" id="btnCpsOpenSafari">打开 Safari 实机预览</button>
+                            </div>`
+                      }
+                    </div>
+                  </div>
+                </div>`
+              : `<div class="safari-window">
+                  <div class="safari-chrome">
+                    <div class="safari-dots" aria-hidden="true">
+                      <span></span><span></span><span></span>
+                    </div>
+                    <form class="safari-url-form" id="safariUrlForm">
+                      <svg class="safari-lock" width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                        <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="currentColor" stroke-width="1.3"/>
+                      </svg>
+                      <input type="text" class="safari-url-input mono-xs" id="safariUrlInput" value="${escapeHtml(displayUrl)}" placeholder="输入本地预览地址，如 http://localhost:3000" autocomplete="off" />
+                    </form>
+                    <div class="safari-chrome-acts">
+                      <button type="button" class="mg-icon-btn" id="safariReloadBtn" title="刷新预览">${ICONS.retry}</button>
+                      ${hasUrl ? `<a class="mg-icon-btn" href="${escapeHtml(currentUrl)}" target="_blank" rel="noopener" title="新标签打开">${ICONS.open}</a>` : ''}
+                    </div>
+                  </div>
+                  <div class="safari-viewport">
+                    ${
+                      hasUrl
+                        ? `<iframe class="safari-iframe" id="safariFrame" src="${escapeHtml(currentUrl)}" title="Safari 实时页面预览"></iframe>`
+                        : safeSrcdoc
+                          ? `<iframe class="safari-iframe" id="safariFrame" sandbox="allow-scripts" srcdoc="${escapeHtml(safeSrcdoc)}" title="HTML 产物实时预览"></iframe>`
+                          : `<div class="safari-standby">
+                              ${renderSafariMockupSvg({ url: 'localhost:3000' })}
+                              <p class="safari-standby-note">在上方地址栏输入本地开发地址（如 <code>http://localhost:3000</code>）回车即可实时预览。</p>
+                            </div>`
+                    }
+                  </div>
+                </div>`
+          }
         </div>`;
 
-      container.querySelectorAll('[data-saf-dev]').forEach((b) => {
+      container.querySelectorAll('[data-saf-mode]').forEach((b) => {
         b.addEventListener('click', () => {
-          deviceMode = b.dataset.safDev;
+          viewMode = b.dataset.safMode;
           render();
         });
+      });
+
+      container.querySelector('#btnCpsCopy')?.addEventListener('click', () => {
+        navigator.clipboard?.writeText(activeCode).then(() => {
+          if (onToast) onToast(`已复制 ${fileLabel}`);
+        }).catch(() => {});
+      });
+
+      container.querySelector('#btnCpsOpenSafari')?.addEventListener('click', () => {
+        viewMode = 'safari';
+        render();
       });
 
       container.querySelector('#safariUrlForm')?.addEventListener('submit', (e) => {

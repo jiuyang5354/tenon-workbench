@@ -1852,12 +1852,13 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
 
 .tree-row-btn {
   margin-left: 56px;
-  height: 32px;
+  min-height: 32px;
   display: flex;
   align-items: center;
   gap: 8px;
   text-align: left;
   min-width: 0;
+  max-width: calc(100% - 60px);
   font-size: 12px;
 }
 
@@ -1877,13 +1878,13 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
 }
 
 .tree-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+  display: inline-block;
   height: 22px;
-  max-width: 62%;
-  padding: 0 7px;
-  border-radius: 4px;
+  line-height: 20px;
+  max-width: calc(100% - 88px);
+  min-width: 0;
+  padding: 0 8px;
+  border-radius: 5px;
   background: var(--bg-surface-2);
   border: 1px solid var(--line-subtle);
   font-family: var(--font-mono);
@@ -1892,6 +1893,11 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  vertical-align: middle;
+}
+
+.tree-row-icon.is-live-orb {
+  color: var(--ink-primary);
 }
 
 .tree-exit-ok {
@@ -3345,13 +3351,37 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
   cursor: grab;
   user-select: none;
   touch-action: none;
-  background-color: transparent;
+  background-color: var(--bg-canvas-stage);
+}
+
+/* Clean Architectural Canvas Backdrop: Dot-Matrix (default), Drafting Grid, or Pure Solid */
+.ic-viewport::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background-image: radial-gradient(circle, rgba(17, 19, 21, 0.17) 1.15px, transparent 1.15px);
+  background-size: var(--ic-dot-size, 24px 24px);
+  background-position: var(--ic-dot-pos, 0 0);
+}
+
+html[data-surface="charcoal"] .ic-viewport::before {
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.14) 1.15px, transparent 1.15px);
+}
+
+html[data-canvas-grid="grid"] .ic-viewport::before {
   background-image:
     linear-gradient(to right, var(--grid-minor) 1px, transparent 1px),
     linear-gradient(to bottom, var(--grid-minor) 1px, transparent 1px),
     linear-gradient(to right, var(--grid-major) 1px, transparent 1px),
     linear-gradient(to bottom, var(--grid-major) 1px, transparent 1px);
-  background-size: 24px 24px, 24px 24px, 120px 120px, 120px 120px;
+  background-size: var(--ic-bg-size, 24px 24px, 24px 24px, 120px 120px, 120px 120px);
+  background-position: var(--ic-bg-pos, 0 0, 0 0, 0 0, 0 0);
+}
+
+html[data-canvas-grid="solid"] .ic-viewport::before {
+  background-image: none;
 }
 
 .ic-viewport.is-panning,
@@ -3365,7 +3395,17 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
   left: 0;
   width: 0;
   height: 0;
+  z-index: 2;
   transform-origin: 0 0;
+}
+
+.ic-frames-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  z-index: 0;
 }
 
 .ic-edges-svg {
@@ -7734,6 +7774,1117 @@ html[data-surface="charcoal"] .mg-grain {
     font-size: 11px;
     gap: 4px;
   }
+}
+
+/* =========================================================================
+   10. v9 Desktop Polish: Topbar Theme Toggle (#37503), chatcn Composer (#45495),
+       Live AiOrb Stop/Signal Popover, Blender Node Groups & Typed Sockets
+   ========================================================================= */
+
+/* --- One-Click Morphing Light/Dark Theme Toggle (21st.dev #37503) --- */
+.theme-toggle-btn {
+  height: 32px;
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: var(--radius-sharp);
+  border: 1px solid var(--line-subtle);
+  background: var(--bg-surface-1);
+  color: var(--ink-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease, transform 120ms ease;
+}
+
+.theme-toggle-btn:hover {
+  background: var(--bg-surface-2);
+  border-color: var(--line-strong);
+  color: var(--ink-primary);
+}
+
+.theme-toggle-btn:active {
+  transform: scale(0.96);
+}
+
+.theme-toggle-svg .tt-sun,
+.theme-toggle-svg .tt-moon {
+  transform-origin: 12px 12px;
+  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease;
+}
+
+.theme-toggle-btn[data-theme-mode="light"] .tt-sun,
+.theme-toggle-btn:not([data-theme-mode="dark"]) .tt-sun {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
+.theme-toggle-btn[data-theme-mode="light"] .tt-moon,
+.theme-toggle-btn:not([data-theme-mode="dark"]) .tt-moon {
+  opacity: 0;
+  transform: scale(0.4) rotate(-45deg);
+}
+
+.theme-toggle-btn[data-theme-mode="dark"] .tt-sun {
+  opacity: 0;
+  transform: scale(0.4) rotate(60deg);
+}
+
+.theme-toggle-btn[data-theme-mode="dark"] .tt-moon {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
+/* Smooth radial reveal when View Transitions API is supported */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(root) {
+  animation: ttCircleReveal 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes ttCircleReveal {
+  from { clip-path: circle(0px at var(--tt-x, 90%) var(--tt-y, 24px)); }
+  to { clip-path: circle(var(--tt-r, 150vmax) at var(--tt-x, 90%) var(--tt-y, 24px)); }
+}
+
+/* --- Topbar & Desktop Control Spacing Harmonization --- */
+.stage-topbar {
+  padding: 0 20px;
+  gap: 16px;
+}
+
+.topbar-right {
+  gap: 10px;
+}
+
+.topbar-orb-wrap {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+.topbar-orb-wrap[data-ai-state="idle"] { color: rgba(255, 255, 255, 0.54); }
+.topbar-orb-wrap[data-ai-state="listening"],
+.topbar-orb-wrap[data-ai-state="thinking"],
+.topbar-orb-wrap[data-ai-state="reasoning"],
+.topbar-orb-wrap[data-ai-state="tool-call"],
+.topbar-orb-wrap[data-ai-state="tool-result"],
+.topbar-orb-wrap[data-ai-state="streaming"],
+.topbar-orb-wrap[data-ai-state="done"] { color: #ffffff; }
+.topbar-orb-wrap[data-ai-state="waiting-approval"] { color: #f43f5e; }
+.topbar-orb-wrap[data-ai-state="error"] { color: #f05252; }
+
+/* --- 21st.dev chatcn Prompt Composer (#45495) Structural Polish --- */
+.composer-dock {
+  padding: 10px 28px 20px;
+}
+
+.composer-shell {
+  max-width: 820px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 1px 2px rgba(17, 19, 21, 0.04), 0 8px 24px -10px rgba(17, 19, 21, 0.1);
+}
+
+.composer-shell:focus-within {
+  border-color: var(--ink-primary);
+  box-shadow: 0 0 0 1px var(--ink-primary), 0 12px 30px -12px rgba(17, 19, 21, 0.16);
+}
+
+.composer-textarea {
+  min-height: 58px;
+  padding: 15px 18px 10px;
+  font-size: 14.5px;
+  line-height: 1.58;
+}
+
+.composer-bar {
+  padding: 8px 12px 10px;
+  gap: 10px;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.composer-bar-left {
+  gap: 6px;
+}
+
+.composer-bar-right {
+  gap: 8px;
+}
+
+.picker-pill,
+.pill-action-btn,
+.composer-icon-btn {
+  height: 32px;
+  border-radius: 8px;
+}
+
+.picker-pill {
+  padding: 0 10px;
+  gap: 6px;
+  font-size: 12.5px;
+  max-width: 156px;
+}
+
+.pill-action-btn {
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.composer-icon-btn {
+  width: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease, transform 100ms ease;
+}
+
+.composer-icon-btn:hover {
+  background: var(--bg-surface-2);
+  border-color: var(--line-subtle);
+  color: var(--ink-primary);
+}
+
+.composer-icon-btn:active {
+  transform: scale(0.94);
+}
+
+.composer-tool-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--line-subtle);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+.btn-send-metal {
+  height: 32px;
+  border-radius: 8px !important;
+  padding: 0 14px;
+}
+
+/* --- Dialogue Stream AI Orb Button & Live Running AI Orb Stop Pill --- */
+.composer-orb-btn {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 8px !important;
+  padding: 0 !important;
+  display: inline-grid;
+  place-items: center;
+  background: #141618 !important;
+  color: rgba(255, 255, 255, 0.54) !important;
+  border: 1px solid rgba(17, 19, 21, 0.22) !important;
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.composer-orb-btn:hover {
+  border-color: rgba(17, 19, 21, 0.5) !important;
+  transform: translateY(-0.5px);
+}
+
+.composer-orb-btn[aria-expanded="true"] {
+  box-shadow: 0 0 0 2px var(--cta-bg);
+}
+
+.composer-orb-btn.is-paused {
+  opacity: 0.76;
+}
+
+.composer-orb-btn[data-ai-tone="muted"] { color: rgba(255, 255, 255, 0.54) !important; }
+.composer-orb-btn[data-ai-tone="primary"] { color: #ffffff !important; }
+.composer-orb-btn[data-ai-tone="attention"] { color: #f43f5e !important; }
+.composer-orb-btn[data-ai-tone="critical"] { color: #f05252 !important; }
+
+/* Replaces solid red Stop button with live AiOrb status + hover-stop pill! */
+.btn-stop-orb {
+  height: 32px;
+  padding: 0 12px 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  background: #141618;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 110ms ease;
+}
+
+.btn-stop-orb[data-ai-tone="attention"] { color: #f43f5e; border-color: rgba(244, 63, 94, 0.45); }
+.btn-stop-orb[data-ai-tone="critical"] { color: #f05252; border-color: rgba(240, 82, 82, 0.45); }
+
+.btn-stop-orb .stop-orb-label {
+  color: #f3f5f8;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+}
+
+.btn-stop-orb .stop-orb-hover-hint {
+  display: none;
+  color: #fda4af;
+  font-size: 11px;
+}
+
+.btn-stop-orb:hover {
+  border-color: rgba(244, 63, 94, 0.65);
+  background: #1d1517;
+}
+
+.btn-stop-orb:hover .stop-orb-label {
+  display: none;
+}
+
+.btn-stop-orb:hover .stop-orb-hover-hint {
+  display: inline;
+}
+
+.btn-stop-orb:active {
+  transform: scale(0.97);
+}
+
+/* --- Composer-Anchored AI Orb Signal & Start/Pause Popover (Lives ONLY on Dialog!) --- */
+.composer-orb-popover {
+  position: absolute;
+  right: 12px;
+  bottom: calc(100% + 10px);
+  width: 476px;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--bg-surface-1);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 18px 44px -12px rgba(17, 19, 21, 0.22);
+  z-index: 82;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: pickerReveal 160ms var(--ease-out);
+}
+
+.orb-pop-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.orb-pop-hero-tile {
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
+  background: #111315;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.orb-pop-hero-tile[data-ai-tone="muted"],
+.orb-pop-mini-tile[data-ai-tone="muted"] { color: rgba(255, 255, 255, 0.54); }
+.orb-pop-hero-tile[data-ai-tone="primary"],
+.orb-pop-mini-tile[data-ai-tone="primary"] { color: #ffffff; }
+.orb-pop-hero-tile[data-ai-tone="attention"],
+.orb-pop-mini-tile[data-ai-tone="attention"] { color: #f43f5e; }
+.orb-pop-hero-tile[data-ai-tone="critical"],
+.orb-pop-mini-tile[data-ai-tone="critical"] { color: #f05252; }
+
+.orb-pop-meta {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.orb-pop-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.orb-pop-title-row strong {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.orb-pop-code {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--line-subtle);
+  color: var(--ink-secondary);
+}
+
+.orb-pop-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-muted);
+}
+
+.orb-pop-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.orb-pop-controls > button {
+  flex: 1;
+}
+
+.orb-pop-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.orb-pop-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 4px;
+  border-radius: 8px;
+  background: #141618;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: border-color 140ms ease, transform 120ms ease;
+}
+
+.orb-pop-cell:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+  transform: translateY(-1px);
+}
+
+.orb-pop-cell.is-active {
+  border-color: var(--cta-bg);
+  box-shadow: 0 0 0 1px var(--cta-bg);
+}
+
+.orb-pop-mini-tile {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+}
+
+.orb-pop-cell-name {
+  font-size: 8.5px;
+  letter-spacing: -0.02em;
+  color: rgba(255, 255, 255, 0.76);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* --- Settings Executive Spacing (Clean, Quiet, Zero Clutter) --- */
+.settings-layout {
+  gap: 32px;
+  padding: 28px 36px 48px;
+}
+
+.settings-pane-head {
+  margin-bottom: 18px;
+}
+
+.settings-card {
+  padding: 8px 20px;
+}
+
+.settings-row {
+  padding: 15px 0;
+  gap: 20px;
+}
+
+/* --- Blender-Style Node Groups, Frames, Collapse & Typed Sockets --- */
+.ic-node-group {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 12px;
+  border: 1.25px solid rgba(20, 22, 24, 0.16);
+  background: rgba(255, 255, 255, 0.44);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 10px 28px -18px rgba(17, 19, 21, 0.16);
+  pointer-events: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+html[data-surface="charcoal"] .ic-node-group {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(24, 27, 32, 0.56);
+}
+
+.ic-node-group.is-accent-sage { border-top: 3px solid #65a30d; }
+.ic-node-group.is-accent-slate { border-top: 3px solid #0284c7; }
+.ic-node-group.is-accent-amber { border-top: 3px solid #d97706; }
+
+.ic-group-head {
+  height: 36px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--line-subtle);
+  background: rgba(255, 255, 255, 0.76);
+  border-radius: 10px 10px 0 0;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+html[data-surface="charcoal"] .ic-group-head {
+  background: rgba(30, 34, 40, 0.88);
+}
+
+.ic-group-head:active {
+  cursor: grabbing;
+}
+
+.ic-group-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ic-group-pip {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--ink-primary);
+  flex-shrink: 0;
+}
+
+.ic-node-group.is-accent-sage .ic-group-pip { background: #65a30d; }
+.ic-node-group.is-accent-slate .ic-group-pip { background: #0284c7; }
+.ic-node-group.is-accent-amber .ic-group-pip { background: #d97706; }
+
+.ic-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ic-group-count {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-surface-2);
+  color: var(--ink-secondary);
+  flex-shrink: 0;
+}
+
+.ic-group-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ic-group-btn {
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 5px;
+  border: 1px solid var(--line-subtle);
+  background: var(--bg-surface-1);
+  color: var(--ink-secondary);
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.ic-group-btn:hover {
+  background: var(--bg-surface-2);
+  border-color: var(--line-strong);
+  color: var(--ink-primary);
+}
+
+/* Collapsed Blender Node Group Proxy Card */
+.ic-node-group.is-collapsed {
+  pointer-events: auto;
+  background: var(--bg-surface-1);
+  box-shadow: var(--shadow-float);
+}
+
+.ic-group-proxy-body {
+  position: relative;
+  padding: 12px 14px;
+  height: calc(100% - 36px);
+  display: flex;
+  align-items: center;
+}
+
+.ic-group-proxy-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ic-proxy-chip {
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--line-subtle);
+  color: var(--ink-secondary);
+}
+
+.ic-group-port {
+  position: absolute;
+  top: 30px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #65a30d;
+  border: 2px solid var(--bg-surface-1);
+}
+
+.ic-group-port.is-in { left: -6px; }
+.ic-group-port.is-out { right: -6px; }
+
+.ic-node-wrap.is-group-hidden {
+  display: none;
+}
+
+/* Single-Node Blender Collapse (H) */
+.ic-node-fold-btn {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-muted);
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.ic-node-fold-btn:hover {
+  background: var(--bg-surface-2);
+  border-color: var(--line-subtle);
+  color: var(--ink-primary);
+}
+
+.agent-node.is-collapsed .agent-node-body,
+.agent-node.is-collapsed .agent-node-foot,
+.agent-node.is-collapsed .wf-node-error {
+  display: none;
+}
+
+.agent-node.is-collapsed .agent-node-head {
+  border-bottom: none;
+}
+
+.agent-node.is-collapsed .wf-port {
+  top: 42px;
+}
+
+/* Blender Typed Color-Coded Sockets + Vertical Multi-Input Capsule Socket */
+.wf-port[data-socket-type="prompt"] .wf-port-dot { background: #64748b; }
+.wf-port[data-socket-type="spec"] .wf-port-dot { background: #0284c7; }
+.wf-port[data-socket-type="diff"] .wf-port-dot { background: #65a30d; }
+.wf-port[data-socket-type="gate"] .wf-port-dot { background: #d97706; }
+.wf-port[data-socket-type="multi"] .wf-port-dot { background: #141618; }
+html[data-surface="charcoal"] .wf-port[data-socket-type="multi"] .wf-port-dot { background: #eeff82; }
+
+.wf-port.is-multi-socket .wf-port-dot {
+  width: 9px;
+  height: 22px;
+  border-radius: 5px;
+}
+
+.ic-chip-btn.is-group-add {
+  border-color: rgba(101, 163, 13, 0.36);
+  color: var(--ink-primary);
+}
+
+/* =========================================================================
+   11. Pure Minimalist Overrides (Zero Rainbow Borders / Zero Metal Rings)
+       + Inline Chain-of-Thought + 3 chatcn Controls (Catch-up, Research, Split)
+   ========================================================================= */
+
+/* Permanently disable any legacy rainbow border beams or liquid metal chrome */
+.border-beam,
+.metal-fx-canvas {
+  display: none !important;
+}
+
+.btn-new-chat {
+  border: 1px solid var(--line-strong) !important;
+  background: var(--bg-surface-1) !important;
+  box-shadow: none !important;
+}
+
+.btn-new-chat:hover {
+  border-color: var(--ink-primary) !important;
+  background: var(--bg-surface-2) !important;
+}
+
+.btn-send-metal {
+  border: 1px solid rgba(17, 19, 21, 0.16) !important;
+  background: var(--cta-bg) !important;
+  color: var(--cta-fg) !important;
+  box-shadow: none !important;
+}
+
+.btn-send-metal:hover {
+  filter: brightness(0.96);
+}
+
+/* Inline Readable Chain-of-Thought Prose inside Dialogue Stream */
+.tree-row.is-thought-row {
+  padding-bottom: 4px;
+}
+
+.cot-thought-inline {
+  margin-left: 56px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--line-subtle);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.cot-thought-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* --- Middle Control: 4-Phase Research & Pipeline Progress Card --- */
+.research-progress-card {
+  padding: 16px 18px;
+  border-radius: 10px;
+  background: var(--bg-surface-1);
+  border: 1px solid var(--line-subtle);
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rp-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.rp-status-ico {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--ink-primary);
+}
+
+.rp-status-ico.is-done { color: #16a34a; }
+.rp-status-ico.is-err { color: #e11d48; }
+
+.rp-title-block {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rp-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-primary);
+  line-height: 1.35;
+}
+
+.rp-meta {
+  color: var(--ink-muted);
+}
+
+.rp-phases {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.rp-phase {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rp-bar {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--line-subtle);
+  overflow: hidden;
+  display: block;
+}
+
+.rp-bar-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: var(--ink-primary);
+  transition: width 260ms var(--ease-out);
+}
+
+.rp-phase.is-done .rp-bar-fill { width: 100%; }
+.rp-phase.is-active .rp-bar-fill { width: 58%; opacity: 0.7; }
+
+.rp-phase-label {
+  font-size: 11.5px;
+  color: var(--ink-muted);
+}
+
+.rp-phase.is-done .rp-phase-label,
+.rp-phase.is-active .rp-phase-label {
+  color: var(--ink-primary);
+  font-weight: 500;
+}
+
+.rp-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding-top: 4px;
+}
+
+.rp-summary {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+  line-height: 1.45;
+}
+
+.rp-foot-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.rp-activity-btn {
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 7px;
+  border: 1px solid var(--line-subtle);
+  background: transparent;
+  color: var(--ink-secondary);
+  cursor: pointer;
+}
+
+.rp-activity-btn:hover {
+  background: var(--bg-surface-2);
+  color: var(--ink-primary);
+}
+
+.rp-open-btn {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 1px solid var(--ink-primary);
+  background: var(--ink-primary);
+  color: var(--bg-surface-1);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 140ms ease;
+}
+
+.rp-open-btn:hover {
+  opacity: 0.88;
+}
+
+/* --- Left Control: Catch Up (前情提要 · 关键决策 · 待决问题) --- */
+.catchup-card {
+  padding: 15px 18px;
+  border-radius: 10px;
+  background: var(--bg-surface-1);
+  border: 1px solid var(--line-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cu-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.cu-title-row strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.cu-meta {
+  color: var(--ink-muted);
+}
+
+.cu-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cu-list {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-primary);
+}
+
+.cu-list.is-sub {
+  color: var(--ink-secondary);
+}
+
+.cu-list.is-warn {
+  list-style: none;
+  padding-left: 0;
+}
+
+.cu-list.is-warn li {
+  position: relative;
+  padding-left: 18px;
+  color: var(--ink-secondary);
+}
+
+.cu-list.is-warn li::before {
+  content: '?';
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 1px solid #d97706;
+  color: #d97706;
+  font-size: 9px;
+  font-weight: 700;
+  display: inline-grid;
+  place-items: center;
+  line-height: 1;
+}
+
+.cu-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.cu-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+/* --- Right Control: Code + Live Preview Split Workspace --- */
+.code-preview-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  border-radius: 10px;
+  border: 1px solid var(--line-subtle);
+  background: var(--bg-surface-1);
+  overflow: hidden;
+  min-height: 440px;
+  flex: 1;
+}
+
+.cps-code-pane {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--line-subtle);
+  min-width: 0;
+}
+
+.cps-preview-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-surface-2);
+}
+
+.cps-pane-head {
+  height: 36px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--line-subtle);
+  background: var(--bg-surface-1);
+}
+
+.cps-filename {
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.cps-head-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cps-lines {
+  color: var(--ink-muted);
+}
+
+.cps-copy-btn {
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid var(--line-subtle);
+  background: var(--bg-surface-2);
+  color: var(--ink-secondary);
+  cursor: pointer;
+}
+
+.cps-copy-btn:hover {
+  color: var(--ink-primary);
+  border-color: var(--line-strong);
+}
+
+.cps-code-pre {
+  margin: 0;
+  padding: 14px;
+  flex: 1;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.62;
+  color: var(--ink-secondary);
+  background: var(--bg-surface-1);
+  tab-size: 2;
+}
+
+.cps-preview-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  min-height: 0;
+}
+
+.cps-preview-iframe {
+  width: 100%;
+  height: 100%;
+  min-height: 380px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.cps-deploy-card {
+  width: 100%;
+  max-width: 280px;
+  padding: 18px;
+  border-radius: 10px;
+  background: var(--bg-surface-1);
+  border: 1px solid var(--line-subtle);
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cps-deploy-kicker {
+  font-size: 11.5px;
+  color: var(--ink-muted);
+}
+
+.cps-deploy-target {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.cps-checks-list {
+  list-style: none;
+  margin: 6px 0 4px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cps-checks-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.cps-checks-list li > span:last-child {
+  color: var(--ink-primary);
+  font-weight: 500;
+}
+
+.cps-promote-btn {
+  margin-top: 6px;
+  height: 34px;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--ink-primary);
+  background: var(--ink-primary);
+  color: var(--bg-surface-1);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 140ms ease;
+}
+
+.cps-promote-btn:hover {
+  opacity: 0.88;
 }
 
 @media (prefers-reduced-motion: reduce) {

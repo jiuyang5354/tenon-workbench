@@ -43,6 +43,8 @@
       orbRun: ['reasoning', 'twins'],
       inLabel: '上游需求',
       outLabel: 'Spec 契约',
+      inType: 'prompt',
+      outType: 'spec',
       showIn: true,
       showOut: true,
       defaultPrompt: '只读分析工程目录边界，输出接口契约、多路并行子任务切分与验收标准。',
@@ -64,6 +66,8 @@
       orbRun: ['working', 'gyro'],
       inLabel: 'Spec 契约',
       outLabel: 'Branch Diff',
+      inType: 'spec',
+      outType: 'diff',
       showIn: true,
       showOut: true,
       defaultPrompt: '在 workspace-write 隔离工作树中严格按接口契约实现代码并补全自动化测试。',
@@ -85,6 +89,8 @@
       orbRun: ['compacting', 'fuse'],
       inLabel: '多路并行输入',
       outLabel: 'Merged Patch',
+      inType: 'multi',
+      outType: 'diff',
       showIn: true,
       showOut: true,
       defaultPrompt: '汇合全部上游并行 Agent 分支 Diff，执行三路语义合并、消除类型/接口冲突并生成统一补丁。',
@@ -106,6 +112,8 @@
       orbRun: ['searching', 'lighthouse'],
       inLabel: 'Merged Diff',
       outLabel: 'Release Pass',
+      inType: 'diff',
+      outType: 'gate',
       showIn: true,
       showOut: true,
       defaultPrompt: '只读审查统一合并后的 Git Diff，区分 BLOCKING 与 SUGGESTION，命中高危路径自动升档 xhigh。',
@@ -235,6 +243,7 @@
       y: Number.isFinite(Number(obj.y)) ? Number(obj.y) : 120,
       status: sanitizeStatus(obj.status, VALID_NODE_STATUS, 'idle'),
       muted: Boolean(obj.muted),
+      collapsed: Boolean(obj.collapsed),
       cotOpen: Boolean(obj.cotOpen),
       params: safeParams,
       toggles: safeToggles,
@@ -304,6 +313,15 @@
         { id: 'e-3', source: 'n-codex-fe', target: 'n-merge' },
         { id: 'e-4', source: 'n-codex-be', target: 'n-merge' },
         { id: 'e-5', source: 'n-merge', target: 'n-review' },
+      ],
+      groups: [
+        {
+          id: 'grp-codex-workers',
+          title: '并行施工节点组 · CODEX GROUP',
+          accent: 'sage',
+          nodeIds: ['n-codex-fe', 'n-codex-be'],
+          collapsed: false,
+        },
       ],
     };
   }
@@ -406,6 +424,22 @@
         { id: 'me-10', source: 'mc-merge-b', target: 'mc-master' },
         { id: 'me-11', source: 'mc-master', target: 'mc-review' },
       ],
+      groups: [
+        {
+          id: 'grp-cluster-a',
+          title: '集群 A · 前端界面节点组',
+          accent: 'slate',
+          nodeIds: ['mc-fe-1', 'mc-fe-2'],
+          collapsed: false,
+        },
+        {
+          id: 'grp-cluster-b',
+          title: '集群 B · 后端与单测节点组',
+          accent: 'sage',
+          nodeIds: ['mc-be-1', 'mc-be-2'],
+          collapsed: false,
+        },
+      ],
     };
   }
 
@@ -477,8 +511,15 @@
 
   function cloneGraph(g) {
     return {
-      nodes: g.nodes.map((n) => hydrateNode(n)),
-      edges: g.edges.map((e) => ({ ...e })),
+      nodes: (g.nodes || []).map((n) => hydrateNode(n)),
+      edges: (g.edges || []).map((e) => ({ ...e })),
+      groups: (g.groups || []).map((gr) => ({
+        id: String(gr.id || `grp-${Math.random().toString(36).slice(2, 7)}`),
+        title: String(gr.title || '节点组'),
+        accent: String(gr.accent || 'sage'),
+        nodeIds: Array.isArray(gr.nodeIds) ? [...gr.nodeIds] : [],
+        collapsed: Boolean(gr.collapsed),
+      })),
     };
   }
 
@@ -571,6 +612,7 @@
     const {
       viewportEl,
       worldEl,
+      framesLayerEl,
       edgesSvgEl,
       nodesLayerEl,
       minimapCanvasEl,
@@ -610,6 +652,7 @@
       statusMsg: '无限画布就绪：点击任意节点 Model 胶囊即可独立切换模型 · 右键画布呼出 Blender 菜单 · 拖端口自由连线。',
       panning: null,
       dragging: null,
+      draggingGroup: null,
       wiring: null,
       extraToggles: { autoNewDiff: true, humanReport: true },
       ctxMenu: { open: false, kind: 'menu', worldX: 200, worldY: 200, nodeId: null },
@@ -677,8 +720,12 @@
       const minor = 24 * state.zoom;
       const major = 120 * state.zoom;
       const p = `${px}px ${py}px`;
-      viewportEl.style.backgroundSize = `${minor.toFixed(2)}px ${minor.toFixed(2)}px, ${minor.toFixed(2)}px ${minor.toFixed(2)}px, ${major.toFixed(2)}px ${major.toFixed(2)}px, ${major.toFixed(2)}px ${major.toFixed(2)}px`;
-      viewportEl.style.backgroundPosition = `${p}, ${p}, ${p}, ${p}`;
+      const bgSize = `${minor.toFixed(2)}px ${minor.toFixed(2)}px, ${minor.toFixed(2)}px ${minor.toFixed(2)}px, ${major.toFixed(2)}px ${major.toFixed(2)}px, ${major.toFixed(2)}px ${major.toFixed(2)}px`;
+      const bgPos = `${p}, ${p}, ${p}, ${p}`;
+      viewportEl.style.setProperty('--ic-bg-size', bgSize);
+      viewportEl.style.setProperty('--ic-bg-pos', bgPos);
+      viewportEl.style.setProperty('--ic-dot-size', `${minor.toFixed(2)}px ${minor.toFixed(2)}px`);
+      viewportEl.style.setProperty('--ic-dot-pos', p);
       if (zoomLabelEl) zoomLabelEl.textContent = `${Math.round(state.zoom * 100)}%`;
       drawMinimap();
     }
@@ -783,20 +830,205 @@
       return map;
     }
 
+    function getCollapsedGroupForNode(nid) {
+      const groups = state.graph.groups || [];
+      return groups.find((g) => g.collapsed && g.nodeIds.includes(nid)) || null;
+    }
+
+    function computeGroupBounds(group) {
+      const members = (group.nodeIds || [])
+        .map((id) => state.graph.nodes.find((n) => n.id === id))
+        .filter(Boolean);
+      if (members.length === 0) return null;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      members.forEach((n) => {
+        const elWrap = nodeEls.get(n.id);
+        const h = n.collapsed ? 74 : (elWrap ? elWrap.offsetHeight || 272 : 272);
+        minX = Math.min(minX, n.x);
+        minY = Math.min(minY, n.y);
+        maxX = Math.max(maxX, n.x + NODE_WIDTH);
+        maxY = Math.max(maxY, n.y + h);
+      });
+      if (group.collapsed) {
+        const cx = minX;
+        const cy = Math.round((minY + maxY) / 2 - 58);
+        return { x: cx, y: cy, w: NODE_WIDTH, h: 116, members };
+      }
+      const padX = 24;
+      const padTop = 44;
+      const padBottom = 22;
+      return {
+        x: Math.round(minX - padX),
+        y: Math.round(minY - padTop),
+        w: Math.round(maxX - minX + padX * 2),
+        h: Math.round(maxY - minY + padTop + padBottom),
+        members,
+      };
+    }
+
+    function renderGroups() {
+      if (!framesLayerEl) return;
+      const groups = state.graph.groups || [];
+      const statusMap = effectiveStatuses();
+      framesLayerEl.innerHTML = groups
+        .map((g) => {
+          const b = computeGroupBounds(g);
+          if (!b) return '';
+          const liveCount = b.members.filter((n) => statusMap.get(n.id) === 'running').length;
+          const doneCount = b.members.filter((n) => statusMap.get(n.id) === 'completed').length;
+          const badgeText = liveCount > 0 ? `${liveCount} 运行中` : doneCount === b.members.length ? '全部就绪 ✓' : `${b.members.length} 节点`;
+          return `
+            <div class="ic-node-group is-accent-${escapeHtml(g.accent || 'sage')} ${g.collapsed ? 'is-collapsed' : ''}" data-group-id="${escapeHtml(g.id)}" style="transform:translate(${b.x}px,${b.y}px);width:${b.w}px;height:${b.h}px">
+              <div class="ic-group-head" data-group-drag="${escapeHtml(g.id)}" title="拖动标题栏可整体平移组内节点 · 点击右侧按钮折叠/拆散">
+                <div class="ic-group-title-wrap">
+                  <span class="ic-group-pip" aria-hidden="true"></span>
+                  <span class="ic-group-title mono">${escapeHtml(g.title)}</span>
+                  <span class="ic-group-count mono-xs">${escapeHtml(badgeText)}</span>
+                </div>
+                <div class="ic-group-actions">
+                  <button type="button" class="ic-group-btn" data-group-toggle="${escapeHtml(g.id)}" title="${g.collapsed ? '展开节点组 (Tab)' : '折叠为单个节点组代理 (Tab)'}">${g.collapsed ? '展开' : '折叠'}</button>
+                  <button type="button" class="ic-group-btn" data-group-ungroup="${escapeHtml(g.id)}" title="拆散此节点组">拆散</button>
+                </div>
+              </div>
+              ${
+                g.collapsed
+                  ? `<div class="ic-group-proxy-body">
+                      <div class="ic-group-proxy-members">
+                        ${b.members.map((m) => `<span class="ic-proxy-chip mono-xs">${escapeHtml(m.title)}</span>`).join('')}
+                      </div>
+                      <span class="ic-group-port is-in" aria-hidden="true"></span>
+                      <span class="ic-group-port is-out" aria-hidden="true"></span>
+                    </div>`
+                  : ''
+              }
+            </div>`;
+        })
+        .join('');
+
+      framesLayerEl.querySelectorAll('[data-group-toggle]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const g = (state.graph.groups || []).find((x) => x.id === btn.dataset.groupToggle);
+          if (!g) return;
+          pushHistory();
+          g.collapsed = !g.collapsed;
+          renderAll();
+          setStatus(g.collapsed ? `已折叠节点组「${g.title}」（双击或点展开可恢复）。` : `已展开节点组「${g.title}」。`);
+        });
+      });
+
+      framesLayerEl.querySelectorAll('[data-group-ungroup]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const gid = btn.dataset.groupUngroup;
+          pushHistory();
+          state.graph.groups = (state.graph.groups || []).filter((x) => x.id !== gid);
+          renderAll();
+          setStatus('已拆散节点组（组内节点与连线完整保留）。');
+          if (onToast) onToast('已拆散节点组');
+        });
+      });
+
+      framesLayerEl.querySelectorAll('[data-group-drag]').forEach((head) => {
+        head.addEventListener('dblclick', (e) => {
+          if (e.target.closest('button')) return;
+          e.stopPropagation();
+          const g = (state.graph.groups || []).find((x) => x.id === head.dataset.groupDrag);
+          if (!g) return;
+          pushHistory();
+          g.collapsed = !g.collapsed;
+          renderAll();
+        });
+        head.addEventListener('pointerdown', (e) => {
+          if (e.button !== 0 || e.target.closest('button') || state.spaceDown || state.panning || state.wiring) return;
+          e.stopPropagation();
+          closeContextMenu();
+          const gid = head.dataset.groupDrag;
+          const g = (state.graph.groups || []).find((x) => x.id === gid);
+          if (!g) return;
+          const startWorld = screenToWorld(e.clientX, e.clientY);
+          const origins = new Map();
+          g.nodeIds.forEach((nid) => {
+            const n = state.graph.nodes.find((x) => x.id === nid);
+            if (n) origins.set(nid, { x: n.x, y: n.y });
+          });
+          state.draggingGroup = {
+            id: gid,
+            startClientX: e.clientX,
+            startClientY: e.clientY,
+            startWorldX: startWorld.x,
+            startWorldY: startWorld.y,
+            origins,
+            moved: false,
+            captured: false,
+            pointerId: e.pointerId,
+          };
+        });
+      });
+    }
+
+    function createNodeGroup() {
+      if (!state.graph.groups) state.graph.groups = [];
+      const existingGrouped = new Set(state.graph.groups.flatMap((g) => g.nodeIds));
+      const sel = state.graph.nodes.find((n) => n.id === state.selectedId);
+      let picks = [];
+      if (sel) {
+        // Pack selected node + parallel siblings of same kind (or nearby ungrouped nodes)
+        picks = state.graph.nodes
+          .filter((n) => !existingGrouped.has(n.id) && (n.id === sel.id || (n.kind === sel.kind && Math.abs(n.x - sel.x) < 160)))
+          .map((n) => n.id);
+      }
+      if (picks.length === 0) {
+        picks = state.graph.nodes.filter((n) => !existingGrouped.has(n.id)).slice(0, 2).map((n) => n.id);
+      }
+      if (picks.length === 0) {
+        if (onToast) onToast('当前所有节点均已在节点组内，请先新增节点或拆散已有组');
+        return;
+      }
+      pushHistory();
+      const idx = state.graph.groups.length + 1;
+      const accents = ['sage', 'slate', 'amber'];
+      state.graph.groups.push({
+        id: `grp-${++state.seq}`,
+        title: `自定义节点组 #${idx}`,
+        accent: accents[(idx - 1) % accents.length],
+        nodeIds: picks,
+        collapsed: false,
+      });
+      renderAll();
+      setStatus(`已创建 Blender 风格节点组（包含 ${picks.length} 个节点），可拖动组标题整体移动或一键折叠。`);
+      if (onToast) onToast(`已打包 ${picks.length} 个节点为节点组`);
+    }
+
     function renderEdges() {
       const statusMap = effectiveStatuses();
       const motionOn = document.documentElement.dataset.motion !== 'off';
       const byId = new Map(state.graph.nodes.map((n) => [n.id, n]));
+      const groupBoundsCache = new Map();
+      (state.graph.groups || []).forEach((g) => {
+        if (g.collapsed) {
+          const b = computeGroupBounds(g);
+          if (b) groupBoundsCache.set(g.id, b);
+        }
+      });
 
       const paths = state.graph.edges
         .map((e) => {
           const src = byId.get(e.source);
           const dst = byId.get(e.target);
           if (!src || !dst) return '';
-          const x1 = src.x + NODE_WIDTH;
-          const y1 = src.y + PORT_Y;
-          const x2 = dst.x;
-          const y2 = dst.y + PORT_Y;
+          const srcGrp = getCollapsedGroupForNode(src.id);
+          const dstGrp = getCollapsedGroupForNode(dst.id);
+          if (srcGrp && dstGrp && srcGrp.id === dstGrp.id) return '';
+          const srcB = srcGrp ? groupBoundsCache.get(srcGrp.id) : null;
+          const dstB = dstGrp ? groupBoundsCache.get(dstGrp.id) : null;
+          const x1 = srcB ? srcB.x + srcB.w : src.x + NODE_WIDTH;
+          const y1 = srcB ? srcB.y + 66 : src.y + (src.collapsed ? 42 : PORT_Y);
+          const x2 = dstB ? dstB.x : dst.x;
+          const y2 = dstB ? dstB.y + 66 : dst.y + (dst.collapsed ? 42 : PORT_Y);
           const d = bezierPath(x1, y1, x2, y2);
           const srcSt = statusMap.get(src.id) || 'idle';
           const dstSt = statusMap.get(dst.id) || 'idle';
@@ -999,9 +1231,12 @@
 
           const extRole = tpl.roleCode || 'AGENT';
           const extModel = formatNodeModelLabel(n);
+          const hiddenInGroup = Boolean(getCollapsedGroupForNode(n.id));
+          const inSocketType = tpl.inType || 'spec';
+          const outSocketType = tpl.outType || 'diff';
 
           return `
-            <div class="ic-node-wrap ${sel ? 'is-selected' : ''} ${isMerge ? 'is-merge-hub' : ''} ${n.muted ? 'is-muted' : ''}" data-node-id="${escapeHtml(n.id)}" data-status="${safeSt}" style="transform:translate(${Math.round(n.x)}px,${Math.round(n.y)}px)">
+            <div class="ic-node-wrap ${sel ? 'is-selected' : ''} ${isMerge ? 'is-merge-hub' : ''} ${n.muted ? 'is-muted' : ''} ${n.collapsed ? 'is-collapsed' : ''} ${hiddenInGroup ? 'is-group-hidden' : ''}" data-node-id="${escapeHtml(n.id)}" data-status="${safeSt}" style="transform:translate(${Math.round(n.x)}px,${Math.round(n.y)}px)">
               <div class="ic-node-ext-meta mono">
                 <div class="ic-ext-left">
                   <span class="ic-ext-role">${escapeHtml(extRole)}</span>
@@ -1012,10 +1247,10 @@
                   <span>${n.muted ? '已静音' : meta.label}</span>
                 </span>
               </div>
-              <div class="agent-node ${sel ? 'is-selected' : ''}" data-status="${safeSt}">
+              <div class="agent-node ${sel ? 'is-selected' : ''} ${n.collapsed ? 'is-collapsed' : ''}" data-status="${safeSt}">
                 <div class="agent-node-surface">
                   ${running ? '<span class="agent-node-sweep-track" aria-hidden="true"><span class="agent-node-sweep"></span></span>' : ''}
-                  <header class="agent-node-head ic-drag-handle" title="拖拽自由移动 · 双击看详情 · 右键呼出菜单">
+                  <header class="agent-node-head ic-drag-handle" title="拖拽自由移动 · 双击看详情 · 按 H 折叠节点 · 右键呼出菜单">
                     <span class="agent-node-icon">
                       <svg class="thinking-orb" width="26" height="26" viewBox="0 0 26 26" data-orb-state="${orbState}" data-orb-variant="${orbVariant}" data-orb-size="26" aria-hidden="true"></svg>
                     </span>
@@ -1023,6 +1258,11 @@
                       <h3 class="agent-node-title">${escapeHtml(n.title)}</h3>
                       <p class="agent-node-sub">${escapeHtml(n.subtitle)}</p>
                     </div>
+                    <button type="button" class="ic-node-fold-btn" data-ic-fold="${escapeHtml(n.id)}" title="${n.collapsed ? '展开节点 (H)' : '折叠节点为紧凑标题栏 (H)'}" aria-expanded="${!n.collapsed}">
+                      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="${n.collapsed ? 'M6 4L10 8L6 12' : 'M4 6L8 10L12 6'}" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
                   </header>
 
                   <div class="agent-node-body">
@@ -1048,12 +1288,12 @@
 
                 ${
                   tpl.showIn
-                    ? `<button type="button" class="wf-port wf-port-left ${incomingSet.has(n.id) ? 'is-connected' : ''}" data-port-side="in" data-port-node="${escapeHtml(n.id)}" aria-label="输入端口: ${escapeHtml(tpl.inLabel)}"><span class="wf-port-dot"></span><span class="wf-port-tip">${escapeHtml(tpl.inLabel)}</span></button>`
+                    ? `<button type="button" class="wf-port wf-port-left ${incomingSet.has(n.id) ? 'is-connected' : ''} ${inSocketType === 'multi' ? 'is-multi-socket' : ''}" data-socket-type="${escapeHtml(inSocketType)}" data-port-side="in" data-port-node="${escapeHtml(n.id)}" aria-label="输入端口: ${escapeHtml(tpl.inLabel)}"><span class="wf-port-dot"></span><span class="wf-port-tip">${escapeHtml(tpl.inLabel)}</span></button>`
                     : ''
                 }
                 ${
                   tpl.showOut
-                    ? `<button type="button" class="wf-port wf-port-right ${outgoingSet.has(n.id) ? 'is-connected' : ''}" data-port-side="out" data-port-node="${escapeHtml(n.id)}" aria-label="输出端口: ${escapeHtml(tpl.outLabel)}"><span class="wf-port-dot"></span><span class="wf-port-tip">拖出连线 · ${escapeHtml(tpl.outLabel)}</span></button>`
+                    ? `<button type="button" class="wf-port wf-port-right ${outgoingSet.has(n.id) ? 'is-connected' : ''}" data-socket-type="${escapeHtml(outSocketType)}" data-port-side="out" data-port-node="${escapeHtml(n.id)}" aria-label="输出端口: ${escapeHtml(tpl.outLabel)}"><span class="wf-port-dot"></span><span class="wf-port-tip">拖出连线 · ${escapeHtml(tpl.outLabel)}</span></button>`
                     : ''
                 }
               </div>
@@ -1190,6 +1430,17 @@
         });
       });
 
+      nodesLayerEl.querySelectorAll('[data-ic-fold]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const n = state.graph.nodes.find((x) => x.id === btn.dataset.icFold);
+          if (!n) return;
+          pushHistory();
+          n.collapsed = !n.collapsed;
+          renderAll();
+        });
+      });
+
       nodesLayerEl.querySelectorAll('[data-ic-del]').forEach((btn) => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -1222,6 +1473,7 @@
 
     function renderAll() {
       renderNodes();
+      renderGroups();
       renderEdges();
       applyTransform();
       if (state.drawerOpen) renderResultDrawer();
@@ -2085,6 +2337,11 @@
       const out = state.graph.edges.filter((e) => e.source === id);
       state.graph.nodes = state.graph.nodes.filter((n) => n.id !== id);
       state.graph.edges = state.graph.edges.filter((e) => e.source !== id && e.target !== id);
+      if (Array.isArray(state.graph.groups)) {
+        state.graph.groups = state.graph.groups
+          .map((g) => ({ ...g, nodeIds: g.nodeIds.filter((nid) => nid !== id) }))
+          .filter((g) => g.nodeIds.length > 0);
+      }
       if (inc.length === 1 && out.length === 1 && canConnect(state.graph, inc[0].source, out[0].target)) {
         state.graph.edges.push({ id: `e-${++state.seq}`, source: inc[0].source, target: out[0].target });
       }
@@ -2382,7 +2639,7 @@
     viewportEl.addEventListener('pointerdown', (e) => {
       const isUi = Boolean(e.target.closest(OVERLAY_SEL));
       if (isUi || state.dragging || state.wiring) return;
-      const isBg = !e.target.closest('.ic-node-wrap');
+      const isBg = !e.target.closest('.ic-node-wrap, .ic-group-head, .ic-node-group.is-collapsed');
       if (e.button === 1 || (e.button === 0 && (isBg || state.spaceDown))) {
         if (document.activeElement instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
           document.activeElement.blur();
@@ -2434,6 +2691,40 @@
         node.y = Math.round(ny);
         const nodeEl = nodeEls.get(node.id);
         if (nodeEl) nodeEl.style.transform = `translate(${Math.round(node.x)}px,${Math.round(node.y)}px)`;
+        renderGroups();
+        renderEdges();
+        return;
+      }
+
+      if (state.draggingGroup && e.pointerId === state.draggingGroup.pointerId) {
+        const g = (state.graph.groups || []).find((x) => x.id === state.draggingGroup.id);
+        if (!g) return;
+        if (!state.draggingGroup.moved) {
+          const dist = Math.hypot(e.clientX - state.draggingGroup.startClientX, e.clientY - state.draggingGroup.startClientY);
+          if (dist < DRAG_THRESHOLD) return;
+          state.draggingGroup.moved = true;
+          pushHistory();
+          try {
+            viewportEl.setPointerCapture(e.pointerId);
+            state.draggingGroup.captured = true;
+          } catch {}
+        }
+        const pt = screenToWorld(e.clientX, e.clientY);
+        let dx = pt.x - state.draggingGroup.startWorldX;
+        let dy = pt.y - state.draggingGroup.startWorldY;
+        if (e.shiftKey) {
+          dx = Math.round(dx / GRID_SNAP) * GRID_SNAP;
+          dy = Math.round(dy / GRID_SNAP) * GRID_SNAP;
+        }
+        state.draggingGroup.origins.forEach((orig, nid) => {
+          const n = state.graph.nodes.find((x) => x.id === nid);
+          if (!n) return;
+          n.x = Math.round(orig.x + dx);
+          n.y = Math.round(orig.y + dy);
+          const wrap = nodeEls.get(nid);
+          if (wrap) wrap.style.transform = `translate(${n.x}px,${n.y}px)`;
+        });
+        renderGroups();
         renderEdges();
         return;
       }
@@ -2471,6 +2762,13 @@
           try { viewportEl.releasePointerCapture(state.dragging.pointerId); } catch {}
         }
         state.dragging = null;
+        drawMinimap();
+      }
+      if (state.draggingGroup && (cancel || e.pointerId === state.draggingGroup.pointerId)) {
+        if (state.draggingGroup.captured) {
+          try { viewportEl.releasePointerCapture(state.draggingGroup.pointerId); } catch {}
+        }
+        state.draggingGroup = null;
         drawMinimap();
       }
       if (state.wiring && (cancel || e.pointerId === state.wiring.pointerId)) {
@@ -2543,6 +2841,11 @@
         undo();
         return;
       }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && keyLower === 'g') {
+        e.preventDefault();
+        createNodeGroup();
+        return;
+      }
       if (hasMod) return;
 
       if (e.code === 'Space' && !e.repeat && tag !== 'button') {
@@ -2556,6 +2859,18 @@
       } else if (e.shiftKey && keyLower === 'd' && state.selectedId) {
         e.preventDefault();
         duplicateNode(state.selectedId);
+      } else if (!e.shiftKey && keyLower === 'h' && state.selectedId) {
+        e.preventDefault();
+        const n = state.graph.nodes.find((x) => x.id === state.selectedId);
+        if (n) { pushHistory(); n.collapsed = !n.collapsed; renderAll(); }
+      } else if (!e.shiftKey && e.key === 'Tab' && state.selectedId) {
+        const grp = (state.graph.groups || []).find((g) => g.nodeIds.includes(state.selectedId));
+        if (grp) {
+          e.preventDefault();
+          pushHistory();
+          grp.collapsed = !grp.collapsed;
+          renderAll();
+        }
       } else if (!e.shiftKey && keyLower === 'm' && state.selectedId) {
         e.preventDefault();
         const n = state.graph.nodes.find((x) => x.id === state.selectedId);
@@ -2616,6 +2931,7 @@
       zoomOut: () => zoomAt(1 / 1.18),
       resetZoom: () => { state.zoom = 1; applyTransform(); },
       addNode,
+      createNodeGroup,
       undo,
       loadPreset,
       saveCustomTemplate,
