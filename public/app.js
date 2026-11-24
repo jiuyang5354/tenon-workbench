@@ -2158,6 +2158,10 @@
           if (msg.durationMs) metaBits.push(`${(msg.durationMs / 1000).toFixed(1)}s`);
           if (!metaBits.length) metaBits.push(isStreamingMsg ? '回复中...' : ts);
 
+          const liveHint = msg.liveStep
+            ? `正在调用工具 (${msg.liveStep})...`
+            : '思考中...';
+
           parts.push(`
             <article class="agent-turn chat-turn ${isStreamingMsg ? 'is-streaming' : ''}">
               <header class="agent-turn-head">
@@ -2166,9 +2170,9 @@
                   <span class="agent-role-name">${escapeHtml(engineLabel)}</span>
                   ${msg.model ? `<span class="agent-model-tag">${escapeHtml(msg.model)}</span>` : ''}
                 </div>
-                ${isStreamingMsg ? '<span class="agent-status-pill running is-shimmer"><span>回复中...</span></span>' : ''}
+                ${isStreamingMsg ? `<span class="agent-status-pill running is-shimmer"><span>${escapeHtml(msg.liveStep ? '执行工具中...' : '回复中...')}</span></span>` : ''}
               </header>
-              ${msg.content ? `<div class="markdown-output">${renderMarkdown(msg.content)}</div>` : isStreamingMsg ? '<div class="mono-xs is-shimmer">思考中...</div>' : ''}
+              ${msg.content ? `<div class="markdown-output">${renderMarkdown(msg.content)}</div>` : isStreamingMsg ? `<div class="mono-xs is-shimmer">${escapeHtml(liveHint)}</div>` : ''}
               ${msg.error ? `<div class="error-banner">${escapeHtml(msg.error)}</div>` : ''}
               <footer class="agent-turn-foot">
                 <span class="mono-xs">${escapeHtml(metaBits.join(' · '))}</span>
