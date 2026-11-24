@@ -12,12 +12,20 @@
    */
 
   const NODE_WIDTH = 296;
+  const MIN_NODE_W = 240;
+  const MAX_NODE_W = 680;
+  const MIN_NODE_H = 190;
+  const MAX_NODE_H = 760;
   const PORT_Y = 58;
   const GRID_SNAP = 24;
   const MIN_ZOOM = 0.25;
   const MAX_ZOOM = 2.0;
   const DRAG_THRESHOLD = 4;
   const CUSTOM_STORAGE_KEY = 'conduit_custom_cluster_graph_v1';
+
+  const clampNum = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const nodeWidth = (n) => (n && Number.isFinite(Number(n.w)) ? clampNum(Math.round(Number(n.w)), MIN_NODE_W, MAX_NODE_W) : NODE_WIDTH);
+  const nodeHeight = (n) => (n && Number.isFinite(Number(n.h)) && Number(n.h) > 0 ? clampNum(Math.round(Number(n.h)), MIN_NODE_H, MAX_NODE_H) : null);
 
   const VALID_NODE_STATUS = new Set(['idle', 'running', 'completed', 'error']);
   const VALID_STEP_STATUS = new Set(['pending', 'active', 'completed', 'error']);
@@ -241,6 +249,8 @@
       effort: typeof obj.effort === 'string' ? obj.effort.trim() : '',
       x: Number.isFinite(Number(obj.x)) ? Number(obj.x) : 80,
       y: Number.isFinite(Number(obj.y)) ? Number(obj.y) : 120,
+      w: Number.isFinite(Number(obj.w)) ? clampNum(Math.round(Number(obj.w)), MIN_NODE_W, MAX_NODE_W) : NODE_WIDTH,
+      h: Number.isFinite(Number(obj.h)) && Number(obj.h) > 0 ? clampNum(Math.round(Number(obj.h)), MIN_NODE_H, MAX_NODE_H) : null,
       status: sanitizeStatus(obj.status, VALID_NODE_STATUS, 'idle'),
       muted: Boolean(obj.muted),
       collapsed: Boolean(obj.collapsed),
@@ -282,7 +292,7 @@
           title: 'Codex · 后端工位 #2',
           subtitle: '并行实现接口契约与单元测试',
           x: 460,
-          y: 472,
+          y: 516,
           params: [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Effort', dynamic: 'nodeEffort' }],
           toggles: [{ key: 'writable', label: '沙箱写权限', desc: 'workspace-write' }],
         }),
@@ -653,6 +663,7 @@
       panning: null,
       dragging: null,
       draggingGroup: null,
+      resizing: null,
       wiring: null,
       extraToggles: { autoNewDiff: true, humanReport: true },
       ctxMenu: { open: false, kind: 'menu', worldX: 200, worldY: 200, nodeId: null },
@@ -741,10 +752,10 @@
       let maxY = -Infinity;
       state.graph.nodes.forEach((n) => {
         const nodeEl = nodeEls.get(n.id);
-        const h = nodeEl ? nodeEl.offsetHeight || 260 : 260;
+        const h = nodeEl ? nodeEl.offsetHeight || (nodeHeight(n) || 260) : (nodeHeight(n) || 260);
         minX = Math.min(minX, n.x);
         minY = Math.min(minY, n.y);
-        maxX = Math.max(maxX, n.x + NODE_WIDTH);
+        maxX = Math.max(maxX, n.x + nodeWidth(n));
         maxY = Math.max(maxY, n.y + h);
       });
       const padX = 56;
@@ -846,10 +857,10 @@
       let maxY = -Infinity;
       members.forEach((n) => {
         const elWrap = nodeEls.get(n.id);
-        const h = n.collapsed ? 74 : (elWrap ? elWrap.offsetHeight || 272 : 272);
+        const h = n.collapsed ? 74 : (elWrap ? elWrap.offsetHeight || (nodeHeight(n) || 272) : (nodeHeight(n) || 272));
         minX = Math.min(minX, n.x);
         minY = Math.min(minY, n.y);
-        maxX = Math.max(maxX, n.x + NODE_WIDTH);
+        maxX = Math.max(maxX, n.x + nodeWidth(n));
         maxY = Math.max(maxY, n.y + h);
       });
       if (group.collapsed) {
@@ -1034,7 +1045,7 @@
           if (srcGrp && dstGrp && srcGrp.id === dstGrp.id) return '';
           const srcB = srcGrp ? groupBoundsCache.get(srcGrp.id) : null;
           const dstB = dstGrp ? groupBoundsCache.get(dstGrp.id) : null;
-          const x1 = srcB ? srcB.x + srcB.w : src.x + NODE_WIDTH;
+          const x1 = srcB ? srcB.x + srcB.w : src.x + nodeWidth(src);
           const y1 = srcB ? srcB.y + 66 : src.y + (src.collapsed ? 42 : PORT_Y);
           const x2 = dstB ? dstB.x : dst.x;
           const y2 = dstB ? dstB.y + 66 : dst.y + (dst.collapsed ? 42 : PORT_Y);
@@ -1078,7 +1089,7 @@
       if (state.wiring) {
         const src = byId.get(state.wiring.sourceId);
         if (src) {
-          const d = bezierPath(src.x + NODE_WIDTH, src.y + PORT_Y, state.wiring.x, state.wiring.y);
+          const d = bezierPath(src.x + nodeWidth(src), src.y + PORT_Y, state.wiring.x, state.wiring.y);
           draftWire = `
             <g class="ic-edge-draft">
               <path d="${d}" class="ic-edge-line is-flowing" style="stroke:var(--wire-active)" stroke-dasharray="5 4" />
@@ -1246,9 +1257,11 @@
           const hiddenInGroup = Boolean(getCollapsedGroupForNode(n.id));
           const inSocketType = tpl.inType || 'spec';
           const outSocketType = tpl.outType || 'diff';
+          const nw = nodeWidth(n);
+          const nh = !n.collapsed ? nodeHeight(n) : null;
 
           return `
-            <div class="ic-node-wrap ${sel ? 'is-selected' : ''} ${isMerge ? 'is-merge-hub' : ''} ${n.muted ? 'is-muted' : ''} ${n.collapsed ? 'is-collapsed' : ''} ${hiddenInGroup ? 'is-group-hidden' : ''}" data-node-id="${escapeHtml(n.id)}" data-status="${safeSt}" style="transform:translate(${Math.round(n.x)}px,${Math.round(n.y)}px)">
+            <div class="ic-node-wrap ${sel ? 'is-selected' : ''} ${isMerge ? 'is-merge-hub' : ''} ${n.muted ? 'is-muted' : ''} ${n.collapsed ? 'is-collapsed' : ''} ${hiddenInGroup ? 'is-group-hidden' : ''}" data-node-id="${escapeHtml(n.id)}" data-status="${safeSt}" style="width:${nw}px;transform:translate(${Math.round(n.x)}px,${Math.round(n.y)}px)">
               <div class="ic-node-ext-meta mono">
                 <div class="ic-ext-left">
                   <span class="ic-ext-role">${escapeHtml(extRole)}</span>
@@ -1259,8 +1272,8 @@
                   <span>${n.muted ? '已静音' : meta.label}</span>
                 </span>
               </div>
-              <div class="agent-node ${sel ? 'is-selected' : ''} ${n.collapsed ? 'is-collapsed' : ''}" data-status="${safeSt}">
-                <div class="agent-node-surface">
+              <div class="agent-node ${sel ? 'is-selected' : ''} ${n.collapsed ? 'is-collapsed' : ''} ${nh ? 'is-custom-h' : ''}" data-status="${safeSt}">
+                <div class="agent-node-surface" ${nh ? `style="min-height:${nh}px;height:${nh}px"` : ''}>
                   ${running ? '<span class="agent-node-sweep-track" aria-hidden="true"><span class="agent-node-sweep"></span></span>' : ''}
                   <header class="agent-node-head ic-drag-handle" title="拖拽空白区移动 · 点击名称或简介可直接编辑 · 按 H 折叠节点">
                     <span class="agent-node-icon">
@@ -1315,6 +1328,14 @@
                     ? `<button type="button" class="wf-port wf-port-right ${outgoingSet.has(n.id) ? 'is-connected' : ''}" data-socket-type="${escapeHtml(outSocketType)}" data-port-side="out" data-port-node="${escapeHtml(n.id)}" aria-label="输出端口: ${escapeHtml(tpl.outLabel)}"><span class="wf-port-dot"></span><span class="wf-port-tip">拖出连线 · ${escapeHtml(tpl.outLabel)}</span></button>`
                     : ''
                 }
+                ${
+                  !n.collapsed
+                    ? `<div class="ic-resize-handle is-w" data-ic-resize="w" data-resize-node="${escapeHtml(n.id)}" title="拖拽左侧边缘缩放宽度"></div>
+                       <div class="ic-resize-handle is-e" data-ic-resize="e" data-resize-node="${escapeHtml(n.id)}" title="拖拽右侧边缘缩放宽度"></div>
+                       <div class="ic-resize-handle is-s" data-ic-resize="s" data-resize-node="${escapeHtml(n.id)}" title="拖拽底边缩放高度"></div>
+                       <div class="ic-resize-handle is-se" data-ic-resize="se" data-resize-node="${escapeHtml(n.id)}" title="拖拽自由缩放宽高 · 双击恢复默认尺寸"></div>`
+                    : ''
+                }
               </div>
             </div>`;
         })
@@ -1326,8 +1347,8 @@
 
         // Delayed pointer capture (4px threshold preserves native dblclick & avoids wasted undo entries!)
         wrap.addEventListener('pointerdown', (e) => {
-          if (e.button !== 0 || state.spaceDown || state.panning || state.wiring) return;
-          if (e.target.closest('button, input, textarea, select, [role="switch"], .wf-port')) return;
+          if (e.button !== 0 || state.spaceDown || state.panning || state.wiring || state.resizing) return;
+          if (e.target.closest('button, input, textarea, select, [role="switch"], .wf-port, .ic-resize-handle')) return;
           e.stopPropagation();
           closeContextMenu();
           if (document.activeElement instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
@@ -1358,11 +1379,54 @@
         });
 
         wrap.addEventListener('dblclick', (e) => {
-          if (e.target.closest('button, input, textarea, select, [role="switch"], .wf-port')) return;
+          if (e.target.closest('button, input, textarea, select, [role="switch"], .wf-port, .ic-resize-handle')) return;
           e.stopPropagation();
           state.selectedId = nid;
           openResultDrawer('node');
         });
+      });
+
+      // Blender/Figma Free Per-Node Resize Handles (W / E / S / SE + delayed capture so dblclick reset works 100%!)
+      nodesLayerEl.querySelectorAll('[data-ic-resize]').forEach((handle) => {
+        handle.addEventListener('pointerdown', (e) => {
+          if (e.button !== 0 || state.panning || state.dragging || state.wiring) return;
+          e.stopPropagation();
+          closeContextMenu();
+          const nid = handle.dataset.resizeNode;
+          const dir = handle.dataset.icResize;
+          const node = state.graph.nodes.find((x) => x.id === nid);
+          const wrap = nodeEls.get(nid);
+          const surface = wrap?.querySelector('.agent-node-surface');
+          if (!node || !wrap || !surface) return;
+          selectNodeQuietly(nid);
+          const startW = nodeWidth(node);
+          const startH = Math.round(surface.getBoundingClientRect().height / state.zoom);
+          state.resizing = {
+            id: nid,
+            dir,
+            startClientX: e.clientX,
+            startClientY: e.clientY,
+            startX: node.x,
+            startW,
+            startH: Math.max(MIN_NODE_H, startH),
+            moved: false,
+            captured: false,
+            pointerId: e.pointerId,
+          };
+        });
+
+        if (handle.dataset.icResize === 'se') {
+          handle.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            const node = state.graph.nodes.find((x) => x.id === handle.dataset.resizeNode);
+            if (!node) return;
+            pushHistory();
+            node.w = NODE_WIDTH;
+            node.h = null;
+            renderAll();
+            if (onToast) onToast('已恢复节点默认尺寸');
+          });
+        }
       });
 
       // Inline In-Card Editors: Title, Subtitle, Task Prompt & Editable Params (IME & focus safe!)
@@ -2278,8 +2342,8 @@
       state.graph.nodes.forEach((n) => {
         minX = Math.min(minX, n.x - 80);
         minY = Math.min(minY, n.y - 80);
-        maxX = Math.max(maxX, n.x + NODE_WIDTH + 80);
-        maxY = Math.max(maxY, n.y + 260);
+        maxX = Math.max(maxX, n.x + nodeWidth(n) + 80);
+        maxY = Math.max(maxY, n.y + (nodeHeight(n) || 260));
       });
       const spanX = Math.max(400, maxX - minX);
       const spanY = Math.max(300, maxY - minY);
@@ -2297,7 +2361,7 @@
         const t = byId.get(e.target);
         if (!s || !t) return;
         ctx.beginPath();
-        ctx.moveTo(ox + (s.x + NODE_WIDTH) * scale, oy + (s.y + PORT_Y) * scale);
+        ctx.moveTo(ox + (s.x + nodeWidth(s)) * scale, oy + (s.y + PORT_Y) * scale);
         ctx.lineTo(ox + t.x * scale, oy + (t.y + PORT_Y) * scale);
         ctx.stroke();
       });
@@ -2315,7 +2379,7 @@
                 : n.id === state.selectedId
                   ? (isDark ? 'rgba(244,245,246,0.78)' : 'rgba(17,19,21,0.58)')
                   : (isDark ? 'rgba(255,255,255,0.22)' : 'rgba(17,19,21,0.18)');
-        ctx.fillRect(ox + n.x * scale, oy + n.y * scale, Math.max(7, NODE_WIDTH * scale), Math.max(5, 165 * scale));
+        ctx.fillRect(ox + n.x * scale, oy + n.y * scale, Math.max(7, nodeWidth(n) * scale), Math.max(5, (nodeHeight(n) || 180) * scale));
       });
 
       ctx.strokeStyle = vpStroke;
@@ -2680,8 +2744,8 @@
       const payload = JSON.stringify(
         {
           engine: 'CONDUIT Infinite Agent Cluster Canvas v6.1',
-          nodes: state.graph.nodes.map(({ id, kind, title, model, effort, prompt, x, y, muted }) => ({
-            id, kind, title, model: model || 'global-default', effort: effort || 'global-default', prompt, x, y, muted,
+          nodes: state.graph.nodes.map(({ id, kind, title, model, effort, prompt, x, y, w, h, muted }) => ({
+            id, kind, title, model: model || 'global-default', effort: effort || 'global-default', prompt, x, y, w: w || NODE_WIDTH, h: h || null, muted,
           })),
           edges: state.graph.edges,
         },
@@ -2719,8 +2783,8 @@
     // --- Pointer & Wheel Events on Infinite Viewport (H1, H2, H4, C2 fixes) ---
     viewportEl.addEventListener('pointerdown', (e) => {
       const isUi = Boolean(e.target.closest(OVERLAY_SEL));
-      if (isUi || state.dragging || state.wiring) return;
-      if (e.target.closest('input, textarea, select')) return;
+      if (isUi || state.dragging || state.wiring || state.resizing) return;
+      if (e.target.closest('input, textarea, select, .ic-resize-handle')) return;
       const isBg = !e.target.closest('.ic-node-wrap, .ic-group-head, .ic-node-group.is-collapsed');
       if (e.button === 1 || (e.button === 0 && (isBg || state.spaceDown))) {
         if (document.activeElement instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
@@ -2744,6 +2808,54 @@
         state.panX = state.panning.originPanX + (e.clientX - state.panning.startX);
         state.panY = state.panning.originPanY + (e.clientY - state.panning.startY);
         applyTransform();
+        return;
+      }
+
+      if (state.resizing && e.pointerId === state.resizing.pointerId) {
+        const rs = state.resizing;
+        const node = state.graph.nodes.find((n) => n.id === rs.id);
+        const wrap = nodeEls.get(rs.id);
+        const card = wrap?.querySelector('.agent-node');
+        const surface = wrap?.querySelector('.agent-node-surface');
+        if (!node || !wrap || !surface) return;
+        if (!rs.moved) {
+          if (Math.hypot(e.clientX - rs.startClientX, e.clientY - rs.startClientY) < 3) return;
+          rs.moved = true;
+          pushHistory();
+          wrap.classList.add('is-resizing');
+          try {
+            viewportEl.setPointerCapture(e.pointerId);
+            rs.captured = true;
+          } catch {}
+        }
+        const dx = (e.clientX - rs.startClientX) / state.zoom;
+        const dy = (e.clientY - rs.startClientY) / state.zoom;
+
+        if (rs.dir === 'e' || rs.dir === 'se') {
+          let nextW = clampNum(Math.round(rs.startW + dx), MIN_NODE_W, MAX_NODE_W);
+          if (e.shiftKey) nextW = clampNum(Math.round(nextW / GRID_SNAP) * GRID_SNAP, MIN_NODE_W, MAX_NODE_W);
+          node.w = nextW;
+          wrap.style.width = `${nextW}px`;
+        } else if (rs.dir === 'w') {
+          let nextW = clampNum(Math.round(rs.startW - dx), MIN_NODE_W, MAX_NODE_W);
+          if (e.shiftKey) nextW = clampNum(Math.round(nextW / GRID_SNAP) * GRID_SNAP, MIN_NODE_W, MAX_NODE_W);
+          node.x = Math.round(rs.startX + (rs.startW - nextW));
+          node.w = nextW;
+          wrap.style.width = `${nextW}px`;
+          wrap.style.transform = `translate(${node.x}px,${Math.round(node.y)}px)`;
+        }
+
+        if (rs.dir === 's' || rs.dir === 'se') {
+          let nextH = clampNum(Math.round(rs.startH + dy), MIN_NODE_H, MAX_NODE_H);
+          if (e.shiftKey) nextH = clampNum(Math.round(nextH / GRID_SNAP) * GRID_SNAP, MIN_NODE_H, MAX_NODE_H);
+          node.h = nextH;
+          surface.style.minHeight = `${nextH}px`;
+          surface.style.height = `${nextH}px`;
+          if (card) card.classList.add('is-custom-h');
+        }
+
+        renderGroups();
+        renderEdges();
         return;
       }
 
@@ -2836,6 +2948,15 @@
         try { viewportEl.releasePointerCapture(state.panning.pointerId); } catch {}
         state.panning = null;
         viewportEl.classList.remove('is-panning');
+      }
+      if (state.resizing && (cancel || e.pointerId === state.resizing.pointerId)) {
+        const wrap = nodeEls.get(state.resizing.id);
+        if (wrap) wrap.classList.remove('is-resizing');
+        if (state.resizing.captured) {
+          try { viewportEl.releasePointerCapture(state.resizing.pointerId); } catch {}
+        }
+        state.resizing = null;
+        drawMinimap();
       }
       if (state.dragging && (cancel || e.pointerId === state.dragging.pointerId)) {
         const wrap = nodeEls.get(state.dragging.id);
