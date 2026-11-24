@@ -391,7 +391,8 @@
     function resizeCanvases() {
       const rect = trackEl.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const userScale = Number(document.documentElement.dataset.canvasScale || 2);
+      const dpr = Math.min(3, Math.max(window.devicePixelRatio || 1, userScale));
       const w = Math.round(rect.width);
       const h = Math.round(rect.height);
       if (dotsCanvas.width !== Math.round(w * dpr) || dotsCanvas.height !== Math.round(h * dpr)) {

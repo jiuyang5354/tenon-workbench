@@ -46,6 +46,7 @@
     accent: 'lime',
     inspector: 'standard',
     metal: 'off',
+    canvasScale: '2',
     fontSize: 14,
     waveAmplitude: 55,
     crosshairs: false,
@@ -63,6 +64,8 @@
     workspaceFiles: [],
     activeAsset: 'GEMINI.md',
     stageView: 'chat',
+    lastWorkView: 'chat',
+    settingsSection: 'appearance',
     activePicker: null,
     geminiSearch: '',
     inspectorOpen: false,
@@ -128,6 +131,7 @@
     root.dataset.accent = t.accent;
     root.dataset.inspector = t.inspector;
     root.dataset.metal = t.metal || 'off';
+    root.dataset.canvasScale = String(t.canvasScale || '2');
     root.dataset.crosshairs = t.crosshairs ? 'on' : 'off';
     root.dataset.hatch = t.hatch ? 'on' : 'off';
     root.dataset.motion = t.motion ? 'on' : 'off';
@@ -156,13 +160,55 @@
     requestAnimationFrame(syncAllFluidTracks);
   }
 
-  function showToast(message) {
+  const TOAST_ICONS = {
+    success: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="m8.5 12.5 2.4 2.4 4.8-5.2"/></svg>',
+    info: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M12 16v-4"/><circle cx="12" cy="8.2" r="0.6" fill="currentColor" stroke="none"/></svg>',
+    warning: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m10.3 3.8-7.4 13A2 2 0 0 0 4.6 20h14.8a2 2 0 0 0 1.7-3.2l-7.4-13a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><circle cx="12" cy="16.6" r="0.6" fill="currentColor" stroke="none"/></svg>',
+    error: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M12 8v4.5"/><circle cx="12" cy="16" r="0.6" fill="currentColor" stroke="none"/></svg>',
+  };
+
+  function inferToastVariant(msg) {
+    const s = String(msg || '');
+    if (/失败|错误|拦截|拒绝|异常/.test(s)) return 'error';
+    if (/警告|高危|中止|停止|注意|取消/.test(s)) return 'warning';
+    if (/已保存|已复制|已完成|已恢复|已激活|已切换|已刷新|已写入|已新建|已附加|放行|通过/.test(s)) return 'success';
+    return 'info';
+  }
+
+  function showToast(message, opts = {}) {
     const rack = el('toastRack');
+    if (!rack) return;
+    const isObj = message && typeof message === 'object';
+    const rawText = isObj ? (message.title || '') : String(message || '');
+    const variant = (isObj ? message.variant : opts.variant) || inferToastVariant(rawText);
+    const title = isObj ? message.title : rawText;
+    const body = isObj ? (message.body || '') : (opts.body || '');
+
     const node = document.createElement('div');
-    node.className = 'toast';
-    node.textContent = message;
+    node.className = `toast is-${variant}`;
+    node.setAttribute('role', 'status');
+    node.innerHTML = `
+      <span class="toast-ico" aria-hidden="true">${TOAST_ICONS[variant] || TOAST_ICONS.info}</span>
+      <div class="toast-copy">
+        <span class="toast-title">${escapeHtml(title)}</span>
+        ${body ? `<span class="toast-body">${escapeHtml(body)}</span>` : ''}
+      </div>
+      <button type="button" class="toast-close" aria-label="关闭通知">
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      </button>`;
+
+    let removed = false;
+    const dismiss = () => {
+      if (removed) return;
+      removed = true;
+      node.classList.add('is-leaving');
+      setTimeout(() => node.remove(), 160);
+    };
+    node.querySelector('.toast-close')?.addEventListener('click', dismiss);
+
+    while (rack.children.length >= 4) rack.firstElementChild?.remove();
     rack.appendChild(node);
-    setTimeout(() => node.remove(), 2600);
+    setTimeout(dismiss, 3400);
   }
 
   function escapeHtml(str) {
@@ -682,7 +728,8 @@
       if (!miniCanvas) return;
       const rect = miniCanvas.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const userScale = Number(document.documentElement.dataset.canvasScale || 2);
+      const dpr = Math.min(3, Math.max(window.devicePixelRatio || 1, userScale));
       miniCanvas.width = Math.max(1, Math.floor(rect.width * dpr));
       miniCanvas.height = Math.max(1, Math.floor(rect.height * dpr));
       const ctx = miniCanvas.getContext('2d');
@@ -2416,7 +2463,7 @@
 
     if (!isVideo) {
       const rendered = [0, 1, 2, 3].map((idx) =>
-        window.ConduitMediaGen.createArchitecturalImage(cleanPrompt, idx, 768, 576, salt)
+        window.ConduitMediaGen.createArchitecturalImage(cleanPrompt, idx, undefined, undefined, salt)
       );
       const rates = [1.06, 0.94, 1.0, 0.88];
       at(420, () => {
@@ -2514,6 +2561,7 @@
     });
     el('inspectorDiffBox').classList.toggle('hidden', tab !== 'diff');
     el('inspectorReviewBox').classList.toggle('hidden', tab !== 'review');
+    el('inspectorPreviewBox')?.classList.toggle('hidden', tab !== 'preview');
     el('inspectorRunsBox')?.classList.toggle('hidden', tab !== 'runs');
     el('inspectorEventsBox').classList.toggle('hidden', tab !== 'events');
     syncAllFluidTracks();
@@ -2591,6 +2639,18 @@
           html += `<div class="verdict-section-title">完整审查原文</div><div class="markdown-output">${renderMarkdown(raw)}</div>`;
         }
         box.innerHTML = html;
+      }
+    } else if (appState.inspectorTab === 'preview') {
+      const box = el('inspectorPreviewBox');
+      if (box && window.ConduitMediaGen) {
+        const text = [run?.codex?.execText, run?.gemini?.planText, run?.gemini?.summaryText].filter(Boolean).join('\n');
+        const htmlMatch = text.match(/```html\s*([\s\S]*?)```/i);
+        const urlMatch = text.match(/https?:\/\/(?:127\.0\.0\.1|localhost):\d+[^\s)"'`]*/i);
+        window.ConduitMediaGen.mountSafariPreview(box, {
+          url: urlMatch ? urlMatch[0] : '',
+          htmlSnippet: htmlMatch ? htmlMatch[1] : '',
+          onToast: showToast,
+        });
       }
     } else if (appState.inspectorTab === 'runs') {
       renderAgentRunsMonitor(el('inspectorRunsBox'));
@@ -3252,15 +3312,59 @@
     });
   }
 
-  function switchStageView(view) {
-    const next = view === 'workflow' ? 'workflow' : 'chat';
+  function openSettingsSection(section = 'appearance') {
+    const valid = new Set(['appearance', 'telemetry', 'instructions', 'memory', 'env', 'scripts', 'shortcuts']);
+    const sec = valid.has(section) ? section : 'appearance';
+    appState.settingsSection = sec;
+
+    document.querySelectorAll('[data-settings-sec]').forEach((btn) => {
+      const active = btn.dataset.settingsSec === sec;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', String(active));
+    });
+    document.querySelectorAll('[data-settings-pane]').forEach((pane) => {
+      pane.classList.toggle('hidden', pane.dataset.settingsPane !== sec);
+    });
+    document.querySelectorAll('[data-sidebar-sec]').forEach((btn) => {
+      const isSettings = appState.stageView === 'settings';
+      const match =
+        btn.dataset.sidebarSec === sec ||
+        (btn.dataset.sidebarSec === 'instructions' && sec === 'memory');
+      btn.classList.toggle('is-active', isSettings && match);
+    });
+
+    if (sec === 'scripts' && !appState.assets) loadAssets();
+    if (sec === 'env') loadHealth();
+    if (sec === 'telemetry') renderSettingsTelemetry();
+    if (sec === 'instructions') workspacePanels?.renderInstructionsInto(el('settingsInstructionsMount'));
+    if (sec === 'memory') workspacePanels?.renderMemoryInto(el('settingsMemoryMount'));
+    if (sec === 'shortcuts') workspacePanels?.renderShortcutsInto(el('settingsShortcutsMount'));
+  }
+
+  function renderSettingsTelemetry() {
+    workspacePanels?.renderTelemetryInto(el('settingsTelemetryMount'), {
+      runs: appState.runs,
+      health: appState.health,
+      geminiModels: appState.models?.agy?.models || [],
+      codexModels: appState.models?.codex || [],
+      workspaceDir: el('inputWorkspace')?.value.trim() || '',
+    });
+  }
+
+  function switchStageView(view, settingsSection = null) {
+    const next = view === 'workflow' ? 'workflow' : view === 'settings' ? 'settings' : 'chat';
+    if (appState.stageView === 'chat' || appState.stageView === 'workflow') {
+      appState.lastWorkView = appState.stageView;
+    }
     appState.stageView = next;
     el('conversationViewport').classList.toggle('hidden', next !== 'chat');
     el('workflowStage').classList.toggle('hidden', next !== 'workflow');
+    el('settingsStage')?.classList.toggle('hidden', next !== 'settings');
     const topbar = document.querySelector('.stage-topbar');
     if (topbar) topbar.classList.toggle('is-workflow-mode', next === 'workflow');
     const composerDock = document.querySelector('.composer-dock');
-    if (composerDock) composerDock.classList.toggle('hidden', next === 'workflow');
+    if (composerDock) composerDock.classList.toggle('hidden', next !== 'chat');
+    closeAllPopovers();
     closePickers();
     closePromptPalette();
 
@@ -3272,6 +3376,13 @@
         b.setAttribute('aria-selected', String(active));
       });
     }
+
+    if (next === 'settings') {
+      openSettingsSection(settingsSection || appState.settingsSection || 'appearance');
+    } else {
+      document.querySelectorAll('[data-sidebar-sec]').forEach((b) => b.classList.remove('is-active'));
+    }
+
     requestAnimationFrame(() => {
       syncAllFluidTracks();
       if (next === 'workflow' && canvasEngine) {
@@ -3569,26 +3680,30 @@
      ========================================================================= */
   function closeAllPopovers(exceptId = '') {
     closeArchSelect();
-    ['wsPopover', 'guardrailsPopover', 'envPopover'].forEach((id) => {
-      if (id !== exceptId) el(id).classList.add('hidden');
+    ['wsPopover', 'guardrailsPopover'].forEach((id) => {
+      if (id !== exceptId) el(id)?.classList.add('hidden');
     });
     if (exceptId !== 'guardrailsPopover') {
-      el('btnGuardrailsPopover').setAttribute('aria-expanded', 'false');
+      el('btnGuardrailsPopover')?.setAttribute('aria-expanded', 'false');
     }
     if (!exceptId) closePickers();
   }
 
   function closeMobileDrawers() {
-    el('sidebar').classList.remove('is-mobile-open');
-    el('studioDrawer').classList.add('hidden');
-    el('drawerBackdrop').classList.add('hidden');
+    el('sidebar')?.classList.remove('is-mobile-open');
+    el('drawerBackdrop')?.classList.add('hidden');
   }
 
   function toggleTweaks(forceOpen = null) {
-    const panel = el('tweaksPanel');
-    const willOpen = forceOpen === null ? panel.classList.contains('hidden') : forceOpen;
-    panel.classList.toggle('hidden', !willOpen);
-    el('btnToggleTweaks').setAttribute('aria-expanded', String(willOpen));
+    if (forceOpen === false) {
+      if (appState.stageView === 'settings') switchStageView(appState.lastWorkView || 'chat');
+      return;
+    }
+    if (appState.stageView === 'settings' && appState.settingsSection === 'appearance' && forceOpen === null) {
+      switchStageView(appState.lastWorkView || 'chat');
+    } else {
+      switchStageView('settings', 'appearance');
+    }
   }
 
   function bindEvents() {
@@ -3780,25 +3895,36 @@
     });
 
     el('btnCommandPalette')?.addEventListener('click', () => workspacePanels?.openPalette());
-    el('btnOpenPreferences')?.addEventListener('click', () => workspacePanels?.openSettings('instructions'));
-    el('btnOpenShortcuts')?.addEventListener('click', () => workspacePanels?.openShortcuts());
-
-    el('btnEnvPopover').addEventListener('click', () => {
-      const open = el('envPopover').classList.contains('hidden');
-      closeAllPopovers(open ? 'envPopover' : '');
-      el('envPopover').classList.toggle('hidden', !open);
+    el('btnOpenPreferences')?.addEventListener('click', () => {
+      closeMobileDrawers();
+      switchStageView('settings', 'instructions');
     });
-    el('btnRefreshHealth').addEventListener('click', loadHealth);
-    el('btnRefreshModels').addEventListener('click', () => loadModels(true));
-
-    // Studio Slide-Over Drawer
-    el('btnOpenStudio').addEventListener('click', () => {
-      closeAllPopovers();
-      el('studioDrawer').classList.remove('hidden');
-      el('drawerBackdrop').classList.remove('hidden');
-      if (!appState.assets) loadAssets();
+    el('btnOpenShortcuts')?.addEventListener('click', () => {
+      closeMobileDrawers();
+      switchStageView('settings', 'shortcuts');
     });
-    el('btnCloseStudio').addEventListener('click', closeMobileDrawers);
+    el('btnEnvPopover')?.addEventListener('click', () => {
+      closeMobileDrawers();
+      switchStageView('settings', 'env');
+    });
+    el('btnOpenStudio')?.addEventListener('click', () => {
+      closeMobileDrawers();
+      switchStageView('settings', 'scripts');
+    });
+    el('btnSettingsBack')?.addEventListener('click', () => {
+      switchStageView(appState.lastWorkView || 'chat');
+    });
+    document.querySelectorAll('[data-settings-sec]').forEach((btn) => {
+      btn.addEventListener('click', () => openSettingsSection(btn.dataset.settingsSec));
+    });
+    el('btnRefreshHealth')?.addEventListener('click', loadHealth);
+    el('btnRefreshModels')?.addEventListener('click', () => loadModels(true));
+    el('btnSettingsRefreshModels')?.addEventListener('click', () => loadModels(true));
+    el('btnRefreshTelemetry')?.addEventListener('click', () => {
+      loadRunsList();
+      renderSettingsTelemetry();
+      showToast('已刷新协同遥测指标');
+    });
 
     el('assetTabs').querySelectorAll('.subtab').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -3905,9 +4031,11 @@
       el('resumeIndicator').classList.add('hidden');
     });
 
-    // Tweaks Panel
-    el('btnToggleTweaks').addEventListener('click', () => toggleTweaks());
-    el('btnCloseTweaks').addEventListener('click', () => toggleTweaks(false));
+    // Dedicated Settings Page Appearance & Canvas Resolution Controls
+    el('btnToggleTweaks')?.addEventListener('click', () => {
+      closeMobileDrawers();
+      toggleTweaks();
+    });
 
     document.querySelectorAll('.tweak-pills').forEach((group) => {
       const key = group.dataset.tweak;
@@ -3916,6 +4044,9 @@
           appState.tweaks[key] = btn.dataset.val;
           applyTweaks();
           saveTweaks();
+          if (key === 'canvasScale') {
+            showToast(`画布渲染分辨率已切换至 ${btn.textContent}`);
+          }
         });
       });
     });
@@ -3982,12 +4113,11 @@
       const pairs = [
         ['wsPopover', 'btnWsPopover'],
         ['guardrailsPopover', 'btnGuardrailsPopover'],
-        ['envPopover', 'btnEnvPopover'],
       ];
       pairs.forEach(([popId, btnId]) => {
         const pop = el(popId);
         const btn = el(btnId);
-        if (!pop.classList.contains('hidden') && !pop.contains(e.target) && !btn.contains(e.target)) {
+        if (pop && btn && !pop.classList.contains('hidden') && !pop.contains(e.target) && !btn.contains(e.target)) {
           pop.classList.add('hidden');
           if (btnId === 'btnGuardrailsPopover') btn.setAttribute('aria-expanded', 'false');
         }
@@ -4051,7 +4181,8 @@
         runLocalMediaGeneration(kind === 'video' ? 'video-gen' : 'image-gen', '');
       },
       onOpenInspector: (tab) => openInspector(tab),
-      onToggleTweaks: () => toggleTweaks(),
+      onNavigateSettings: (sec) => switchStageView('settings', sec),
+      onToggleTweaks: () => switchStageView('settings', 'appearance'),
       onSelectRun: (rid) => openRunById(rid),
       onPickGemini: (id) => {
         setGeminiModelValue(id);

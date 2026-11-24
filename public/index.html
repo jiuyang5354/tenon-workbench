@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-surface="weave" data-accent="lime" data-inspector="standard" data-crosshairs="off" data-hatch="off" data-metal="off">
+<html lang="zh-CN" data-surface="weave" data-accent="lime" data-inspector="standard" data-crosshairs="off" data-hatch="off" data-metal="off" data-canvas-scale="2">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -97,14 +97,14 @@
         </div>
 
         <div class="sidebar-foot-btns">
-          <button type="button" class="foot-nav-btn" id="btnOpenStudio" title="独立 CLI 脚本与规则模板">
+          <button type="button" class="foot-nav-btn" id="btnOpenStudio" data-sidebar-sec="scripts" title="前往设置中心 · 脚本与规则模板">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path d="M4.5 5.5L2 8L4.5 10.5M11.5 5.5L14 8L11.5 10.5M9.5 3.5L6.5 12.5" stroke="currentColor" stroke-width="1.25" />
             </svg>
             <span class="sidebar-label">脚本与规则</span>
           </button>
 
-          <button type="button" class="foot-nav-btn" id="btnOpenPreferences" title="偏好指令与持久记忆库">
+          <button type="button" class="foot-nav-btn" id="btnOpenPreferences" data-sidebar-sec="instructions" title="前往设置中心 · 偏好指令与持久记忆">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <circle cx="8" cy="5.5" r="2.75" stroke="currentColor" stroke-width="1.25" />
               <path d="M3 13.5C3.5 10.9 5.5 9.5 8 9.5C10.5 9.5 12.5 10.9 13 13.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" />
@@ -112,7 +112,7 @@
             <span class="sidebar-label">偏好与记忆</span>
           </button>
 
-          <button type="button" class="foot-nav-btn" id="btnEnvPopover" title="本机 Gemini (agy) 与 Codex CLI 健康状态">
+          <button type="button" class="foot-nav-btn" id="btnEnvPopover" data-sidebar-sec="env" title="前往设置中心 · 本机 Gemini (agy) 与 Codex CLI 状态">
             <span class="dual-dots" aria-hidden="true">
               <span class="status-dot" id="dotAgy"></span>
               <span class="status-dot" id="dotCodex"></span>
@@ -121,16 +121,16 @@
           </button>
 
           <div class="sidebar-foot-pair">
-            <button type="button" class="foot-nav-btn" id="btnToggleTweaks" aria-expanded="false" aria-controls="tweaksPanel" title="实时调参面板 (T)">
+            <button type="button" class="foot-nav-btn" id="btnToggleTweaks" data-sidebar-sec="appearance" title="前往设置中心 · 画布清晰度与外观 (T)">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <line x1="2" y1="4.5" x2="14" y2="4.5" stroke="currentColor" stroke-width="1.25" />
                 <circle cx="5.5" cy="4.5" r="1.5" fill="var(--bg-surface-1)" stroke="currentColor" stroke-width="1.25" />
                 <line x1="2" y1="11.5" x2="14" y2="11.5" stroke="currentColor" stroke-width="1.25" />
                 <circle cx="10.5" cy="11.5" r="1.5" fill="var(--bg-surface-1)" stroke="currentColor" stroke-width="1.25" />
               </svg>
-              <span class="sidebar-label">Tweaks</span>
+              <span class="sidebar-label">外观与设置</span>
             </button>
-            <button type="button" class="foot-nav-btn is-icon-pill" id="btnOpenShortcuts" title="键盘快捷键一览 (?)">
+            <button type="button" class="foot-nav-btn is-icon-pill" id="btnOpenShortcuts" data-sidebar-sec="shortcuts" title="前往设置中心 · 键盘快捷键一览 (?)">
               <span class="mono-xs">?</span>
             </button>
           </div>
@@ -167,6 +167,7 @@
             <span class="fluid-active-pill" aria-hidden="true"></span>
             <button type="button" class="stage-view-tab active" role="tab" aria-selected="true" data-stage-view="chat">对话流</button>
             <button type="button" class="stage-view-tab" role="tab" aria-selected="false" data-stage-view="workflow">节点画布</button>
+            <button type="button" class="stage-view-tab" role="tab" aria-selected="false" data-stage-view="settings">设置</button>
           </div>
           <button type="button" class="inspector-toggle-btn" id="btnToggleInspector" aria-expanded="false">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -327,6 +328,243 @@
         </div>
       </section>
 
+      <!-- =====================================================================
+           DEDICATED FULL-PAGE SETTINGS STUDIO (Zero sudden bottom-left popups!)
+           ===================================================================== -->
+      <section class="settings-stage hidden" id="settingsStage" aria-label="工作台独立设置与控制台">
+        <div class="settings-layout">
+          <nav class="settings-nav" aria-label="设置分类导航">
+            <div class="settings-nav-head">
+              <button type="button" class="settings-back-btn" id="btnSettingsBack">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M10 3.5L5.5 8L10 12.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                <span>返回工作区</span>
+              </button>
+              <span class="settings-nav-kicker mono-xs">SETTINGS STUDIO</span>
+            </div>
+            <div class="settings-nav-list" id="settingsNavList" role="tablist" aria-orientation="vertical">
+              <button type="button" class="settings-nav-item active" role="tab" aria-selected="true" data-settings-sec="appearance">外观与画布清晰度</button>
+              <button type="button" class="settings-nav-item" role="tab" aria-selected="false" data-settings-sec="telemetry">协同遥测与指标</button>
+              <button type="button" class="settings-nav-item" role="tab" aria-selected="false" data-settings-sec="instructions">偏好指令</button>
+              <button type="button" class="settings-nav-item" role="tab" aria-selected="false" data-settings-sec="memory">
+                <span>持久记忆库</span>
+                <span class="c-tab-count mono-xs" id="settingsMemCount">3</span>
+              </button>
+              <button type="button" class="settings-nav-item" role="tab" aria-selected="false" data-settings-sec="env">本机 CLI 环境</button>
+              <button type="button" class="settings-nav-item" role="tab" aria-selected="false" data-settings-sec="scripts">脚本与规则模板</button>
+              <button type="button" class="settings-nav-item" role="tab" aria-selected="false" data-settings-sec="shortcuts">键盘快捷键</button>
+            </div>
+          </nav>
+
+          <div class="settings-content" id="settingsContent">
+            <!-- Section 1: Appearance & Canvas Resolution (Replaces floating Tweaks!) -->
+            <div class="settings-pane" data-settings-pane="appearance">
+              <header class="settings-pane-head">
+                <div>
+                  <span class="mono-xs settings-kicker">DISPLAY &amp; CANVAS RENDERING</span>
+                  <h2>外观与画布清晰度</h2>
+                  <p>独立调节无限画布 HiDPI 渲染分辨率、建筑纸面质感、强调色与动效细节。</p>
+                </div>
+                <button type="button" class="btn-secondary-sm" id="btnResetTweaks">恢复默认值</button>
+              </header>
+
+              <div class="settings-card">
+                <div class="settings-row">
+                  <div class="settings-row-info">
+                    <strong>画布渲染分辨率（HiDPI / Retina）</strong>
+                    <span>同步提升节点画布、缩略图、声学遥测波形、EffortSlider 及图像/视频生成的渲染精度。</span>
+                  </div>
+                  <div class="tweak-pills settings-pills" data-tweak="canvasScale">
+                    <button type="button" data-val="1">1× 标准</button>
+                    <button type="button" data-val="2" class="active">2× Retina</button>
+                    <button type="button" data-val="3">3× 超清</button>
+                  </div>
+                </div>
+
+                <div class="settings-row">
+                  <div class="settings-row-info">
+                    <strong>建筑画布纸面</strong>
+                    <span>锁定 Figma Weave 建筑语法，支持昼间冷矿物纸面、暖石膏纸与建筑暗房。</span>
+                  </div>
+                  <div class="tweak-pills settings-pills" data-tweak="surface">
+                    <button type="button" data-val="weave" class="active">建筑白昼</button>
+                    <button type="button" data-val="paper">暖石膏纸</button>
+                    <button type="button" data-val="charcoal">建筑暗房</button>
+                  </div>
+                </div>
+
+                <div class="settings-row">
+                  <div class="settings-row-info">
+                    <strong>主强调色</strong>
+                    <span>控制主执行按钮与 Ultracode 档位的点阵强调色系。</span>
+                  </div>
+                  <div class="tweak-pills settings-pills" data-tweak="accent">
+                    <button type="button" data-val="lime" class="active">柠黄高亮</button>
+                    <button type="button" data-val="ink">极简纯墨</button>
+                    <button type="button" data-val="sage">雾森绿</button>
+                  </div>
+                </div>
+
+                <div class="settings-row">
+                  <div class="settings-row-info">
+                    <strong>右侧审查与 Diff 面板宽度</strong>
+                    <span>调整 Git Diff、审查门禁与运行队列抽屉的默认展开宽度。</span>
+                  </div>
+                  <div class="tweak-pills settings-pills" data-tweak="inspector">
+                    <button type="button" data-val="compact">紧凑</button>
+                    <button type="button" data-val="standard" class="active">标准</button>
+                    <button type="button" data-val="wide">宽幅</button>
+                  </div>
+                </div>
+
+                <div class="settings-row">
+                  <div class="settings-row-info">
+                    <strong>液态金属边环（可选装饰）</strong>
+                    <span>默认关闭保持建筑克制感；按需可开启冷晶银或虹彩铬 WebGL 细边环。</span>
+                  </div>
+                  <div class="tweak-pills settings-pills" data-tweak="metal">
+                    <button type="button" data-val="off" class="active">关闭</button>
+                    <button type="button" data-val="silver">冷晶银</button>
+                    <button type="button" data-val="chromatic">虹彩铬</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="settings-card">
+                <div class="settings-row">
+                  <div class="settings-row-info">
+                    <strong>界面基础字号</strong>
+                    <span>当前值：<span class="mono" id="tweakFontVal">14px</span>（范围 13px – 16px）</span>
+                  </div>
+                  <input type="range" class="settings-range" id="tweakFontRange" min="13" max="16" step="1" value="14" />
+                </div>
+
+                <div class="settings-row">
+                  <div class="settings-row-info">
+                    <strong>声学遥测波形振幅</strong>
+                    <span>当前值：<span class="mono" id="tweakWaveVal">55%</span>（控制左下角信号波形动态幅度）</span>
+                  </div>
+                  <input type="range" class="settings-range" id="tweakWaveRange" min="0" max="100" step="5" value="55" />
+                </div>
+
+                <div class="settings-row">
+                  <div class="settings-row-info">
+                    <strong>图纸装饰与动效开关</strong>
+                    <span>按需开关图纸折角护框、背景斜线底纹及思维球/波形动态脉动。</span>
+                  </div>
+                  <div class="settings-checks">
+                    <label class="check-item"><input type="checkbox" id="tweakCrosshairs" /><span>折角护框</span></label>
+                    <label class="check-item"><input type="checkbox" id="tweakHatch" /><span>斜线底纹</span></label>
+                    <label class="check-item"><input type="checkbox" id="tweakMotion" checked /><span>动态脉动</span></label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Section 1.5: Telemetry & Metrics Dashboard (Native Port of shadcn-studio-chart-component-01) -->
+            <div class="settings-pane hidden" data-settings-pane="telemetry">
+              <header class="settings-pane-head">
+                <div>
+                  <span class="mono-xs settings-kicker">ORCHESTRATION TELEMETRY</span>
+                  <h2>协同遥测与指标总览</h2>
+                  <p>实时聚合本机 Gemini × Codex 运行分布、Pre-CI 门禁完成度与本地订阅额度状态。</p>
+                </div>
+                <button type="button" class="btn-secondary-sm" id="btnRefreshTelemetry">刷新指标</button>
+              </header>
+              <div id="settingsTelemetryMount"></div>
+            </div>
+
+            <!-- Section 2: Custom Instructions (21st #46412) -->
+            <div class="settings-pane hidden" data-settings-pane="instructions">
+              <header class="settings-pane-head">
+                <div>
+                  <span class="mono-xs settings-kicker">CUSTOM INSTRUCTIONS</span>
+                  <h2>偏好指令</h2>
+                  <p>定制 Gemini 与 Codex 的默认答复风格与跨会话规则，保存后自动注入协作上下文。</p>
+                </div>
+              </header>
+              <div class="settings-card" id="settingsInstructionsMount"></div>
+            </div>
+
+            <!-- Section 3: Memory Manager (21st #46393) -->
+            <div class="settings-pane hidden" data-settings-pane="memory">
+              <header class="settings-pane-head">
+                <div>
+                  <span class="mono-xs settings-kicker">PERSISTENT MEMORY</span>
+                  <h2>持久记忆库</h2>
+                  <p>管理助手在会话间保留的工程偏好与架构约定，支持检索、编辑、删除与撤销。</p>
+                </div>
+              </header>
+              <div class="settings-card" id="settingsMemoryMount"></div>
+            </div>
+
+            <!-- Section 4: Local CLI Telemetry (Replaces floating envPopover!) -->
+            <div class="settings-pane hidden" data-settings-pane="env">
+              <header class="settings-pane-head">
+                <div>
+                  <span class="mono-xs settings-kicker">LOCAL CLI TELEMETRY</span>
+                  <h2>本机 CLI 环境状态</h2>
+                  <p>工作台全部直连本机官方 agy 与 codex CLI 订阅额度，零反代、零云端上传。</p>
+                </div>
+                <div class="settings-head-actions">
+                  <button type="button" class="btn-secondary-sm" id="btnSettingsRefreshModels">刷新模型</button>
+                  <button type="button" class="btn-primary-sm" id="btnRefreshHealth">重新探测</button>
+                </div>
+              </header>
+              <div class="settings-card">
+                <div class="env-grid" id="envDetails">
+                  <div class="env-row"><span>状态</span><span class="mono">正在探测...</span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Section 5: Scripts & Rule Templates (Replaces cramped studioDrawer!) -->
+            <div class="settings-pane hidden" data-settings-pane="scripts">
+              <header class="settings-pane-head">
+                <div>
+                  <span class="mono-xs settings-kicker">CLI SCRIPTS &amp; RULE TEMPLATES</span>
+                  <h2>独立脚本与规则模板库</h2>
+                  <p>直接复制绑定当前工程目录的终端命令，或在线编辑 GEMINI.md / CODEX.md 工程约束。</p>
+                </div>
+              </header>
+              <div class="settings-card">
+                <div class="section-cap mono-label">可执行 CLI 命令（自动绑定当前工程路径）</div>
+                <div class="cli-cards" id="cliCommandCards"></div>
+              </div>
+              <div class="settings-card">
+                <div class="section-head-row">
+                  <div class="pane-subtabs" id="assetTabs" role="tablist">
+                    <button type="button" class="subtab active" role="tab" aria-selected="true" data-asset="GEMINI.md">GEMINI.md</button>
+                    <button type="button" class="subtab" role="tab" aria-selected="false" data-asset="CODEX.md">CODEX.md</button>
+                    <button type="button" class="subtab" role="tab" aria-selected="false" data-asset="scripts/gemini-ask.mjs">gemini-ask.mjs</button>
+                    <button type="button" class="subtab" role="tab" aria-selected="false" data-asset="scripts/codex-worker.mjs">codex-worker.mjs</button>
+                    <button type="button" class="subtab" role="tab" aria-selected="false" data-asset="scripts/codex-review.mjs">codex-review.mjs</button>
+                  </div>
+                  <div class="studio-actions">
+                    <button type="button" class="btn-secondary-sm hidden" id="btnSaveTemplate">保存模板</button>
+                    <button type="button" class="btn-secondary-sm" id="btnCopyAsset">复制</button>
+                  </div>
+                </div>
+                <textarea id="assetEditor" class="asset-editor mono" spellcheck="false"></textarea>
+              </div>
+            </div>
+
+            <!-- Section 6: Keyboard Shortcuts (21st #46395) -->
+            <div class="settings-pane hidden" data-settings-pane="shortcuts">
+              <header class="settings-pane-head">
+                <div>
+                  <span class="mono-xs settings-kicker">KEYBOARD SHORTCUTS</span>
+                  <h2>键盘快捷键一览</h2>
+                  <p>随时按 ? 打开此页，或按 Ctrl+K / ⌘K 呼出全局命令面板。</p>
+                </div>
+              </header>
+              <div class="settings-card" id="settingsShortcutsMount"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Bottom Pinned Codex-Style Continuous-Curvature Composer -->
       <div class="composer-dock">
         <div class="composer-shell" id="composerShell">
@@ -442,6 +680,7 @@
           <span class="fluid-active-pill" aria-hidden="true"></span>
           <button type="button" class="insp-tab active" role="tab" aria-selected="true" data-insp="diff">Git Diff</button>
           <button type="button" class="insp-tab" role="tab" aria-selected="false" data-insp="review">审查门禁</button>
+          <button type="button" class="insp-tab" role="tab" aria-selected="false" data-insp="preview">实时预览</button>
           <button type="button" class="insp-tab" role="tab" aria-selected="false" data-insp="runs">运行队列</button>
           <button type="button" class="insp-tab" role="tab" aria-selected="false" data-insp="events">事件终端</button>
         </div>
@@ -472,6 +711,7 @@
             <p>运行全链路或审查门禁模式后，这里会展示 BLOCKING 与 SUGGESTION 两级裁决明细。</p>
           </div>
         </div>
+        <div class="preview-panel hidden" id="inspectorPreviewBox"></div>
         <div class="runs-panel hidden" id="inspectorRunsBox">
           <div class="empty-inline">
             <span class="mono-xs">AGENT RUNS / IDLE</span>
@@ -565,127 +805,6 @@
           <span>使用独立 Git Worktree 隔离施工与审查</span>
         </label>
       </div>
-    </div>
-  </aside>
-
-  <!-- Environment Inspector Popover -->
-  <aside class="floating-popover env-popover hidden" id="envPopover" aria-label="本地 CLI 环境状态">
-    <div class="popover-head">
-      <span class="mono-label">LOCAL CLI TELEMETRY</span>
-      <button type="button" class="link-btn" id="btnRefreshHealth">重新探测</button>
-    </div>
-    <div class="env-grid" id="envDetails">
-      <div class="env-row"><span>状态</span><span class="mono">正在探测...</span></div>
-    </div>
-  </aside>
-
-  <!-- Scripts & Rules Slide-Over Studio Drawer -->
-  <aside class="studio-drawer hidden" id="studioDrawer" aria-label="独立 CLI 脚本与规则模板库">
-    <header class="studio-head">
-      <div class="studio-title-wrap">
-        <span class="channel-code">CLI / SPEC</span>
-        <h2>独立脚本与规则模板库</h2>
-      </div>
-      <button type="button" class="rail-icon-btn" id="btnCloseStudio" title="关闭抽屉 [Esc]">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.35" />
-        </svg>
-      </button>
-    </header>
-    <div class="studio-body">
-      <section class="studio-section">
-        <div class="section-cap mono-label">可执行 CLI 命令（自动绑定当前工程路径）</div>
-        <div class="cli-cards" id="cliCommandCards"></div>
-      </section>
-      <section class="studio-section">
-        <div class="section-head-row">
-          <div class="pane-subtabs" id="assetTabs" role="tablist">
-            <button type="button" class="subtab active" role="tab" aria-selected="true" data-asset="GEMINI.md">GEMINI.md</button>
-            <button type="button" class="subtab" role="tab" aria-selected="false" data-asset="CODEX.md">CODEX.md</button>
-            <button type="button" class="subtab" role="tab" aria-selected="false" data-asset="scripts/gemini-ask.mjs">gemini-ask.mjs</button>
-            <button type="button" class="subtab" role="tab" aria-selected="false" data-asset="scripts/codex-worker.mjs">codex-worker.mjs</button>
-            <button type="button" class="subtab" role="tab" aria-selected="false" data-asset="scripts/codex-review.mjs">codex-review.mjs</button>
-          </div>
-          <div class="studio-actions">
-            <button type="button" class="btn-secondary-sm hidden" id="btnSaveTemplate">保存模板</button>
-            <button type="button" class="btn-secondary-sm" id="btnCopyAsset">复制</button>
-          </div>
-        </div>
-        <textarea id="assetEditor" class="asset-editor mono" spellcheck="false"></textarea>
-      </section>
-    </div>
-  </aside>
-
-  <!-- Floating Tweaks Panel (Completely hidden when closed, hotkey T) -->
-  <aside class="tweaks-panel hidden" id="tweaksPanel" aria-label="实时调参控制台">
-    <div class="tweaks-head">
-      <span class="tweaks-title">Tweaks</span>
-      <button type="button" class="link-btn" id="btnCloseTweaks">收起 [Esc]</button>
-    </div>
-
-    <div class="tweak-group">
-      <span class="tweak-label">建筑画布纸面</span>
-      <div class="tweak-pills" data-tweak="surface">
-        <button type="button" data-val="weave" class="active">建筑白昼</button>
-        <button type="button" data-val="paper">暖石膏纸</button>
-        <button type="button" data-val="charcoal">建筑暗房</button>
-      </div>
-    </div>
-
-    <div class="tweak-group">
-      <span class="tweak-label">主强调色</span>
-      <div class="tweak-pills" data-tweak="accent">
-        <button type="button" data-val="lime" class="active">柠黄高亮</button>
-        <button type="button" data-val="ink">极简纯墨</button>
-        <button type="button" data-val="sage">雾森绿</button>
-      </div>
-    </div>
-
-    <div class="tweak-group">
-      <span class="tweak-label">右侧 Diff 面板宽度</span>
-      <div class="tweak-pills" data-tweak="inspector">
-        <button type="button" data-val="compact">紧凑</button>
-        <button type="button" data-val="standard" class="active">标准</button>
-        <button type="button" data-val="wide">宽幅</button>
-      </div>
-    </div>
-
-    <div class="tweak-group">
-      <span class="tweak-label">液态金属边环 (可选装饰)</span>
-      <div class="tweak-pills" data-tweak="metal">
-        <button type="button" data-val="off" class="active">关闭</button>
-        <button type="button" data-val="silver">冷晶银</button>
-        <button type="button" data-val="chromatic">虹彩铬</button>
-      </div>
-    </div>
-
-    <div class="tweak-group">
-      <span class="tweak-label">基础字号：<span class="mono" id="tweakFontVal">14px</span></span>
-      <input type="range" id="tweakFontRange" min="13" max="16" step="1" value="14" />
-    </div>
-
-    <div class="tweak-group">
-      <span class="tweak-label">遥测波形振幅：<span class="mono" id="tweakWaveVal">55%</span></span>
-      <input type="range" id="tweakWaveRange" min="0" max="100" step="5" value="55" />
-    </div>
-
-    <div class="tweak-group tweak-row-check">
-      <label class="check-item">
-        <input type="checkbox" id="tweakCrosshairs" />
-        <span>折角护框</span>
-      </label>
-      <label class="check-item">
-        <input type="checkbox" id="tweakHatch" />
-        <span>斜线底纹</span>
-      </label>
-      <label class="check-item">
-        <input type="checkbox" id="tweakMotion" checked />
-        <span>动态脉动</span>
-      </label>
-    </div>
-
-    <div class="tweaks-foot">
-      <button type="button" class="btn-secondary-sm full-w" id="btnResetTweaks">恢复 Figma Weave 默认值</button>
     </div>
   </aside>
 

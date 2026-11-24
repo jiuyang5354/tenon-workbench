@@ -222,122 +222,117 @@
       return settingsModal;
     }
 
-    function renderSettingsModal() {
-      ensureSettingsModal();
-      const body = settingsModal.querySelector('#cSettingsBody');
-      const cntEl = settingsModal.querySelector('#cMemTabCount');
-      if (cntEl) cntEl.textContent = String(memories.length);
+    function syncMemCountBadge() {
+      const sideBadge = document.getElementById('settingsMemCount');
+      if (sideBadge) sideBadge.textContent = String(memories.length);
+      const modalBadge = settingsModal?.querySelector('#cMemTabCount');
+      if (modalBadge) modalBadge.textContent = String(memories.length);
+    }
 
-      settingsModal.querySelectorAll('[data-stab]').forEach((b) => {
-        const active = b.dataset.stab === settingsTab;
-        b.classList.toggle('active', active);
-        b.setAttribute('aria-selected', String(active));
+    function renderInstructionsInto(body) {
+      if (!body) return;
+      const draft = { ...instrState };
+      const activeP = PERSONALITIES.find((p) => p.id === draft.personality) || PERSONALITIES[0];
+
+      body.innerHTML = `
+        <div class="ci-wrap" data-slot="custom-instructions">
+          <section class="ci-section">
+            <div class="ci-label-row">
+              <strong class="ci-title">回复风格（Response Style）</strong>
+              <span class="mono-xs ci-sub">自动附加到本机 Gemini / Codex 协同上下文</span>
+            </div>
+            <div class="ci-personality-grid" data-slot="personality-picker" role="radiogroup" aria-label="回复风格">
+              ${PERSONALITIES.map(
+                (p) => `
+                <button type="button" class="ci-style-card ${p.id === draft.personality ? 'is-selected' : ''}" role="radio" aria-checked="${p.id === draft.personality}" data-ci-style="${p.id}">
+                  <span class="ci-radio-dot" aria-hidden="true"></span>
+                  <div class="ci-style-text">
+                    <span class="ci-style-name">${escapeHtml(p.name)}</span>
+                    <span class="ci-style-desc">${escapeHtml(p.desc)}</span>
+                  </div>
+                </button>`
+              ).join('')}
+            </div>
+            <div class="ci-sample-box" data-slot="personality-sample">
+              <span class="mono-xs ci-sample-kicker">示例输出效果</span>
+              <p class="ci-sample-text">${escapeHtml(activeP.sample)}</p>
+            </div>
+          </section>
+
+          <section class="ci-section" data-slot="instructions-field">
+            <div class="ci-label-row">
+              <label class="ci-title">模型应如何配合你？</label>
+              <span class="mono-xs ci-counter">${draft.instructions.length} / ${MAX_INSTR_LEN}</span>
+            </div>
+            <textarea class="gate-editor ci-textarea" rows="4" maxlength="${MAX_INSTR_LEN}" placeholder="输入跨会话生效的协作约定、代码风格或交付偏好...">${escapeHtml(draft.instructions)}</textarea>
+            <div class="ci-chips" role="group" aria-label="一键追加偏好">
+              ${INSTR_SUGGESTIONS.map(
+                (s) => `<button type="button" class="ci-chip" data-ci-chip="${escapeHtml(s)}">+ ${escapeHtml(s)}</button>`
+              ).join('')}
+            </div>
+          </section>
+
+          <footer class="ci-footer" data-slot="custom-instructions-footer">
+            <span class="mono-xs ci-saved-hint">更改将自动应用于后续对话派发</span>
+            <div class="ci-footer-btns">
+              <button type="button" class="btn-secondary-sm" data-ci-reset>恢复默认</button>
+              <button type="button" class="btn-primary-sm" data-ci-save>保存偏好</button>
+            </div>
+          </footer>
+        </div>`;
+
+      let currentStyle = draft.personality;
+      const ta = body.querySelector('.ci-textarea');
+      const counter = body.querySelector('.ci-counter');
+      const sampleEl = body.querySelector('.ci-sample-text');
+      const savedHint = body.querySelector('.ci-saved-hint');
+
+      body.querySelectorAll('[data-ci-style]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          currentStyle = btn.dataset.ciStyle;
+          body.querySelectorAll('[data-ci-style]').forEach((b) => {
+            const sel = b.dataset.ciStyle === currentStyle;
+            b.classList.toggle('is-selected', sel);
+            b.setAttribute('aria-checked', String(sel));
+          });
+          const found = PERSONALITIES.find((p) => p.id === currentStyle);
+          if (found && sampleEl) sampleEl.textContent = found.sample;
+        });
       });
 
-      if (settingsTab === 'instructions') {
-        const draft = { ...instrState };
-        const activeP = PERSONALITIES.find((p) => p.id === draft.personality) || PERSONALITIES[0];
+      ta.addEventListener('input', () => {
+        counter.textContent = `${ta.value.length} / ${MAX_INSTR_LEN}`;
+      });
 
-        body.innerHTML = `
-          <div class="ci-wrap" data-slot="custom-instructions">
-            <section class="ci-section">
-              <div class="ci-label-row">
-                <strong class="ci-title">回复风格（Response Style）</strong>
-                <span class="mono-xs ci-sub">自动附加到本机 Gemini / Codex 协同上下文</span>
-              </div>
-              <div class="ci-personality-grid" data-slot="personality-picker" role="radiogroup" aria-label="回复风格">
-                ${PERSONALITIES.map(
-                  (p) => `
-                  <button type="button" class="ci-style-card ${p.id === draft.personality ? 'is-selected' : ''}" role="radio" aria-checked="${p.id === draft.personality}" data-ci-style="${p.id}">
-                    <span class="ci-radio-dot" aria-hidden="true"></span>
-                    <div class="ci-style-text">
-                      <span class="ci-style-name">${escapeHtml(p.name)}</span>
-                      <span class="ci-style-desc">${escapeHtml(p.desc)}</span>
-                    </div>
-                  </button>`
-                ).join('')}
-              </div>
-              <div class="ci-sample-box" data-slot="personality-sample">
-                <span class="mono-xs ci-sample-kicker">示例输出效果</span>
-                <p id="ciSampleText">${escapeHtml(activeP.sample)}</p>
-              </div>
-            </section>
-
-            <section class="ci-section" data-slot="instructions-field">
-              <div class="ci-label-row">
-                <label class="ci-title" for="ciTextarea">模型应如何配合你？</label>
-                <span class="mono-xs ci-counter" id="ciCharCounter">${draft.instructions.length} / ${MAX_INSTR_LEN}</span>
-              </div>
-              <textarea id="ciTextarea" class="gate-editor ci-textarea" rows="4" maxlength="${MAX_INSTR_LEN}" placeholder="输入跨会话生效的协作约定、代码风格或交付偏好...">${escapeHtml(draft.instructions)}</textarea>
-              <div class="ci-chips" role="group" aria-label="一键追加偏好">
-                ${INSTR_SUGGESTIONS.map(
-                  (s) => `<button type="button" class="ci-chip" data-ci-chip="${escapeHtml(s)}">+ ${escapeHtml(s)}</button>`
-                ).join('')}
-              </div>
-            </section>
-
-            <footer class="ci-footer" data-slot="custom-instructions-footer">
-              <span class="mono-xs ci-saved-hint" id="ciSavedHint">更改将自动应用于后续对话派发</span>
-              <div class="ci-footer-btns">
-                <button type="button" class="btn-secondary-sm" id="ciBtnReset">恢复默认</button>
-                <button type="button" class="btn-primary-sm" id="ciBtnSave">保存偏好</button>
-              </div>
-            </footer>
-          </div>`;
-
-        let currentStyle = draft.personality;
-        const ta = body.querySelector('#ciTextarea');
-        const counter = body.querySelector('#ciCharCounter');
-        const sampleEl = body.querySelector('#ciSampleText');
-        const savedHint = body.querySelector('#ciSavedHint');
-
-        body.querySelectorAll('[data-ci-style]').forEach((btn) => {
-          btn.addEventListener('click', () => {
-            currentStyle = btn.dataset.ciStyle;
-            body.querySelectorAll('[data-ci-style]').forEach((b) => {
-              const sel = b.dataset.ciStyle === currentStyle;
-              b.classList.toggle('is-selected', sel);
-              b.setAttribute('aria-checked', String(sel));
-            });
-            const found = PERSONALITIES.find((p) => p.id === currentStyle);
-            if (found && sampleEl) sampleEl.textContent = found.sample;
-          });
+      body.querySelectorAll('[data-ci-chip]').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          const line = chip.dataset.ciChip;
+          if (!ta.value.includes(line)) {
+            ta.value = ta.value.trim() ? `${ta.value.trim()}\n${line}` : line;
+            ta.dispatchEvent(new Event('input'));
+          }
+          ta.focus();
         });
+      });
 
-        ta.addEventListener('input', () => {
-          counter.textContent = `${ta.value.length} / ${MAX_INSTR_LEN}`;
-        });
+      body.querySelector('[data-ci-reset]').addEventListener('click', () => {
+        instrState = { personality: 'default', instructions: '' };
+        saveInstructions(instrState);
+        renderInstructionsInto(body);
+        if (hooks.onToast) hooks.onToast('已重置偏好指令');
+      });
 
-        body.querySelectorAll('[data-ci-chip]').forEach((chip) => {
-          chip.addEventListener('click', () => {
-            const line = chip.dataset.ciChip;
-            if (!ta.value.includes(line)) {
-              ta.value = ta.value.trim() ? `${ta.value.trim()}\n${line}` : line;
-              ta.dispatchEvent(new Event('input'));
-            }
-            ta.focus();
-          });
-        });
+      body.querySelector('[data-ci-save]').addEventListener('click', () => {
+        instrState = { personality: currentStyle, instructions: ta.value.trim() };
+        saveInstructions(instrState);
+        savedHint.textContent = '✓ 已保存并生效';
+        if (hooks.onToast) hooks.onToast('个性化偏好指令已保存');
+      });
+    }
 
-        body.querySelector('#ciBtnReset').addEventListener('click', () => {
-          currentStyle = 'default';
-          ta.value = '';
-          instrState = { personality: 'default', instructions: '' };
-          saveInstructions(instrState);
-          renderSettingsModal();
-          if (hooks.onToast) hooks.onToast('已重置偏好指令');
-        });
-
-        body.querySelector('#ciBtnSave').addEventListener('click', () => {
-          instrState = { personality: currentStyle, instructions: ta.value.trim() };
-          saveInstructions(instrState);
-          savedHint.textContent = '✓ 已保存并生效';
-          if (hooks.onToast) hooks.onToast('个性化偏好指令已保存');
-        });
-        return;
-      }
-
-      // Tab 2: Memory Manager (#46393)
+    function renderMemoryInto(body) {
+      if (!body) return;
+      syncMemCountBadge();
       const q = memSearch.trim().toLowerCase();
       const filtered = memories.filter(
         (m) => !q || m.text.toLowerCase().includes(q) || (m.topic || '').toLowerCase().includes(q)
@@ -367,7 +362,7 @@
                         if (editingMemId === m.id) {
                           return `
                             <div class="mm-editor" data-slot="memory-editor">
-                              <textarea class="gate-editor mm-edit-input" id="mmEditInput" rows="2">${escapeHtml(m.text)}</textarea>
+                              <textarea class="gate-editor mm-edit-input" rows="2">${escapeHtml(m.text)}</textarea>
                               <div class="mm-edit-actions">
                                 <button type="button" class="btn-secondary-sm" data-mm-cancel>取消</button>
                                 <button type="button" class="btn-primary-sm" data-mm-save="${escapeHtml(m.id)}">保存修改</button>
@@ -395,7 +390,7 @@
       body.innerHTML = `
         <div class="mm-wrap" data-slot="memory-manager">
           <div class="mm-top-bar">
-            <input type="text" class="text-input mm-search" id="mmSearchInput" value="${escapeHtml(memSearch)}" placeholder="搜索跨会话记忆..." autocomplete="off" />
+            <input type="text" class="text-input mm-search" value="${escapeHtml(memSearch)}" placeholder="搜索跨会话记忆..." autocomplete="off" />
             <div class="mm-capacity" aria-label="记忆容量">
               <span class="mono-xs">${memories.length} 条记忆</span>
               <span class="mm-cap-bar"><span class="mm-cap-fill" style="width:${pct}%"></span></span>
@@ -407,51 +402,51 @@
             lastDeleted
               ? `<div class="mm-undo-bar" data-slot="memory-undo">
                   <span>已删除「${escapeHtml(lastDeleted.text.slice(0, 26))}${lastDeleted.text.length > 26 ? '…' : ''}」</span>
-                  <button type="button" class="link-btn" id="mmBtnUndo">撤销删除</button>
+                  <button type="button" class="link-btn" data-mm-undo>撤销删除</button>
                 </div>`
               : ''
           }
 
-          <div class="mm-list">${groupsHtml}</div>
+          <div class="mm-list is-fullpage">${groupsHtml}</div>
 
-          <form class="mm-add-form" id="mmAddForm">
-            <input type="text" class="text-input mm-add-topic mono" id="mmAddTopic" placeholder="分类（如 工程偏好）" value="工程偏好" />
-            <input type="text" class="text-input mm-add-text" id="mmAddText" placeholder="新增一条助手应记住的跨会话偏好..." autocomplete="off" />
+          <form class="mm-add-form">
+            <input type="text" class="text-input mm-add-topic mono" placeholder="分类（如 工程偏好）" value="工程偏好" />
+            <input type="text" class="text-input mm-add-text" placeholder="新增一条助手应记住的跨会话偏好..." autocomplete="off" />
             <button type="submit" class="btn-primary-sm">记住</button>
           </form>
         </div>`;
 
-      const searchInp = body.querySelector('#mmSearchInput');
+      const searchInp = body.querySelector('.mm-search');
       searchInp.addEventListener('input', (e) => {
         memSearch = e.target.value;
         const pos = e.target.selectionStart || memSearch.length;
-        renderSettingsModal();
-        const nextInp = settingsModal.querySelector('#mmSearchInput');
+        renderMemoryInto(body);
+        const nextInp = body.querySelector('.mm-search');
         if (nextInp) { nextInp.focus(); nextInp.setSelectionRange(pos, pos); }
       });
 
       body.querySelectorAll('[data-mm-edit]').forEach((btn) => {
         btn.addEventListener('click', () => {
           editingMemId = btn.dataset.mmEdit;
-          renderSettingsModal();
-          settingsModal.querySelector('#mmEditInput')?.focus();
+          renderMemoryInto(body);
+          body.querySelector('.mm-edit-input')?.focus();
         });
       });
 
       body.querySelector('[data-mm-cancel]')?.addEventListener('click', () => {
         editingMemId = null;
-        renderSettingsModal();
+        renderMemoryInto(body);
       });
 
       body.querySelector('[data-mm-save]')?.addEventListener('click', (e) => {
         const id = e.currentTarget.dataset.mmSave;
-        const val = (body.querySelector('#mmEditInput')?.value || '').trim();
+        const val = (body.querySelector('.mm-edit-input')?.value || '').trim();
         if (val) {
           memories = memories.map((m) => (m.id === id ? { ...m, text: val, updatedAt: '刚刚' } : m));
           saveMemories(memories);
         }
         editingMemId = null;
-        renderSettingsModal();
+        renderMemoryInto(body);
         if (hooks.onToast) hooks.onToast('记忆条目已更新');
       });
 
@@ -464,25 +459,25 @@
           memories.splice(idx, 1);
           saveMemories(memories);
           clearTimeout(undoTimer);
-          undoTimer = setTimeout(() => { lastDeleted = null; if (!settingsModal.classList.contains('hidden') && settingsTab === 'memory') renderSettingsModal(); }, 6000);
-          renderSettingsModal();
+          undoTimer = setTimeout(() => { lastDeleted = null; renderMemoryInto(body); }, 6000);
+          renderMemoryInto(body);
         });
       });
 
-      body.querySelector('#mmBtnUndo')?.addEventListener('click', () => {
+      body.querySelector('[data-mm-undo]')?.addEventListener('click', () => {
         if (!lastDeleted) return;
         const { _idx, ...item } = lastDeleted;
         memories.splice(Math.min(_idx, memories.length), 0, item);
         lastDeleted = null;
         saveMemories(memories);
-        renderSettingsModal();
+        renderMemoryInto(body);
         if (hooks.onToast) hooks.onToast('已恢复删除的记忆');
       });
 
-      body.querySelector('#mmAddForm').addEventListener('submit', (e) => {
+      body.querySelector('.mm-add-form').addEventListener('submit', (e) => {
         e.preventDefault();
-        const topic = (body.querySelector('#mmAddTopic').value || '').trim() || '工程偏好';
-        const text = (body.querySelector('#mmAddText').value || '').trim();
+        const topic = (body.querySelector('.mm-add-topic').value || '').trim() || '工程偏好';
+        const text = (body.querySelector('.mm-add-text').value || '').trim();
         if (!text) return;
         memories.unshift({
           id: `mem-${Date.now()}`,
@@ -492,9 +487,247 @@
           updatedAt: '刚刚',
         });
         saveMemories(memories);
-        renderSettingsModal();
+        renderMemoryInto(body);
         if (hooks.onToast) hooks.onToast('已写入持久记忆库');
       });
+    }
+
+    function renderShortcutsInto(mount) {
+      if (!mount) return;
+      mount.innerHTML = `
+        <div class="ks-inline-wrap" data-slot="keyboard-shortcuts">
+          <input type="text" class="text-input ks-inline-search" value="${escapeHtml(shortcutQuery)}" placeholder="搜索快捷键或操作..." autocomplete="off" />
+          <div class="ks-grid" data-ks-grid></div>
+        </div>`;
+      const gridEl = mount.querySelector('[data-ks-grid]');
+      const paint = () => {
+        const q = shortcutQuery.trim().toLowerCase();
+        const blocks = SHORTCUT_GROUPS.map((g) => {
+          const items = g.items.filter(
+            (it) => !q || it.label.toLowerCase().includes(q) || it.keys.join(' ').toLowerCase().includes(q)
+          );
+          if (!items.length) return '';
+          return `
+            <section class="ks-section" aria-label="${escapeHtml(g.group)}">
+              <h4 class="ks-group-title mono-xs">${escapeHtml(g.group)}</h4>
+              <div class="ks-list">
+                ${items
+                  .map(
+                    (it) => `
+                    <div class="ks-row" data-slot="keyboard-shortcut">
+                      <span class="ks-label">${highlightMatch(it.label, shortcutQuery)}</span>
+                      <span class="ks-keys">${it.keys.map((k) => `<kbd class="c-kbd">${escapeHtml(k)}</kbd>`).join('')}</span>
+                    </div>`
+                  )
+                  .join('')}
+              </div>
+            </section>`;
+        }).filter(Boolean);
+        gridEl.innerHTML = blocks.length ? blocks.join('') : '<div class="mm-empty mono-xs">没有匹配的快捷键</div>';
+      };
+      mount.querySelector('.ks-inline-search').addEventListener('input', (e) => {
+        shortcutQuery = e.target.value;
+        paint();
+      });
+      paint();
+    }
+
+    function renderTelemetryInto(mount, ctx = {}) {
+      if (!mount) return;
+      const runs = Array.isArray(ctx.runs) ? ctx.runs : [];
+      const health = ctx.health || {};
+      const agyCount = (ctx.geminiModels || []).length;
+      const codexCount = (ctx.codexModels || []).length;
+      const canvasScale = Number(document.documentElement.dataset.canvasScale || 2);
+
+      const totalRuns = runs.length;
+      const doneRuns = runs.filter((r) => r.status === 'completed').length;
+      const activeRuns = runs.filter((r) => r.status === 'running' || r.status === 'awaiting_approval').length;
+      const blockedRuns = runs.filter((r) => r.status === 'failed' || r.status === 'blocked' || r.status === 'cancelled').length;
+
+      const planRuns = runs.filter((r) => r.mode === 'plan-only' || r.mode === 'copy-polish').length;
+      const pipeRuns = runs.filter((r) => r.mode === 'full-pipeline' || r.mode === 'codex-exec' || r.mode === 'codex-review').length;
+      const mediaRuns = runs.filter((r) => r.mode === 'image-gen' || r.mode === 'video-gen').length;
+
+      const completionPct = totalRuns > 0 ? Math.round((doneRuns / totalRuns) * 100) : 100;
+      const healthScore =
+        (health.agy?.installed ? 40 : 0) +
+        (health.codex?.installed ? 40 : 0) +
+        (health.git?.installed ? 20 : 0);
+      const planPct = totalRuns > 0 ? completionPct : (healthScore || 88);
+
+      const rawSlices =
+        totalRuns > 0
+          ? [
+              { id: 'pipeline', label: '全链路与施工', value: pipeRuns, opacity: 1 },
+              { id: 'planning', label: '架构规划与文案', value: planRuns, opacity: 0.58 },
+              { id: 'media', label: '图像与视频输出', value: mediaRuns, opacity: 0.24 },
+            ].filter((s) => s.value > 0)
+          : [
+              { id: 'pipeline', label: '全链路与施工', value: 52, opacity: 1 },
+              { id: 'planning', label: '架构规划与文案', value: 30, opacity: 0.58 },
+              { id: 'media', label: '图像与视频输出', value: 18, opacity: 0.24 },
+            ];
+      const sliceSum = rawSlices.reduce((acc, s) => acc + s.value, 0) || 1;
+
+      // Build crisp SVG Donut Arcs (r=64, strokeWidth=16, circumference=402.12, gap=3)
+      const r = 64;
+      const C = 2 * Math.PI * r;
+      let offset = 0;
+      const gap = rawSlices.length > 1 ? 3 : 0;
+      const arcsHtml = rawSlices
+        .map((s) => {
+          const frac = s.value / sliceSum;
+          const dash = Math.max(2, frac * C - gap);
+          const seg = `<circle class="tm-donut-seg" cx="84" cy="84" r="${r}" fill="none" stroke="currentColor" stroke-opacity="${s.opacity}" stroke-width="16" stroke-dasharray="${dash.toFixed(2)} ${(C - dash).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" data-slice-label="${escapeHtml(s.label)}" data-slice-val="${s.value}" data-slice-pct="${Math.round(frac * 100)}" />`;
+          offset += frac * C;
+          return seg;
+        })
+        .join('');
+
+      const TOTAL_BARS = 24;
+      const filledBars = Math.round((planPct * TOTAL_BARS) / 100);
+      const barsHtml = Array.from({ length: TOTAL_BARS }, (_, i) => {
+        const filled = i < filledBars;
+        return `<span class="tm-bar-pill ${filled ? 'is-filled' : ''}" title="${planPct}% (${i + 1}/${TOTAL_BARS})"></span>`;
+      }).join('');
+
+      const metrics = [
+        {
+          title: '累计协同会话',
+          value: String(totalRuns),
+          icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>',
+        },
+        {
+          title: '活跃 / 待拍板',
+          value: `${activeRuns} 项`,
+          icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+        },
+        {
+          title: '本机已检出模型',
+          value: `${agyCount + codexCount} 个`,
+          icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>',
+        },
+        {
+          title: '持久记忆条目',
+          value: `${memories.length} / ${MAX_MEMORIES}`,
+          icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
+        },
+      ];
+
+      mount.innerHTML = `
+        <div class="tm-card" data-slot="telemetry-metrics-card">
+          <div class="tm-top-grid">
+            <div class="tm-left-col">
+              <div class="tm-identity">
+                <span class="tm-logo-tile" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 18 18" fill="none">
+                    <rect x="1" y="1" width="16" height="16" stroke="currentColor" stroke-width="1.3" />
+                    <path d="M5 13V5H10.5L13 7.5V13" stroke="var(--cta-bg)" stroke-width="1.6" />
+                    <rect x="8" y="8" width="2.5" height="2.5" fill="currentColor" />
+                  </svg>
+                </span>
+                <div class="tm-identity-text">
+                  <strong>CONDUIT 本地协同引擎</strong>
+                  <span class="mono-xs">${escapeHtml(ctx.workspaceDir || '本机直连工作区')} · 官方 CLI 订阅额度</span>
+                </div>
+              </div>
+
+              <ul class="tm-metrics-grid">
+                ${metrics
+                  .map(
+                    (m) => `
+                    <li class="tm-metric-tile">
+                      <span class="tm-metric-ico" aria-hidden="true">${m.icon}</span>
+                      <div class="tm-metric-meta">
+                        <span class="tm-metric-label">${escapeHtml(m.title)}</span>
+                        <strong class="tm-metric-val mono">${escapeHtml(m.value)}</strong>
+                      </div>
+                    </li>`
+                  )
+                  .join('')}
+              </ul>
+            </div>
+
+            <div class="tm-donut-card">
+              <div class="tm-subhead">
+                <h3>任务模式分布</h3>
+                <span class="mono-xs">${totalRuns > 0 ? '实时统计' : '基准视图'}</span>
+              </div>
+              <div class="tm-donut-wrap">
+                <svg class="tm-donut-svg" viewBox="0 0 168 168" role="img" aria-label="任务模式分布环形图">
+                  <g transform="rotate(-90 84 84)">${arcsHtml}</g>
+                  <text x="84" y="79" text-anchor="middle" class="tm-donut-big">${totalRuns > 0 ? totalRuns : 'READY'}</text>
+                  <text x="84" y="100" text-anchor="middle" class="tm-donut-sub">${totalRuns > 0 ? '总协同任务' : 'CLI 已就绪'}</text>
+                </svg>
+                <div class="tm-donut-tip hidden mono-xs" id="tmDonutTip"></div>
+              </div>
+              <div class="tm-legend-row">
+                ${rawSlices
+                  .map(
+                    (s) => `
+                    <span class="tm-legend-item">
+                      <span class="tm-legend-swatch" style="opacity:${s.opacity}"></span>
+                      <span>${escapeHtml(s.label)}</span>
+                    </span>`
+                  )
+                  .join('')}
+              </div>
+              <div class="tm-donut-foot">
+                <span>交付完成度</span>
+                <strong class="mono">${completionPct}%</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="tm-bottom-card">
+            <div class="tm-plan-left">
+              <h3>协同就绪度</h3>
+              <span class="tm-plan-big mono">${planPct}%</span>
+              <span class="tm-plan-cap">100% 本地 CLI 直连 · ${blockedRuns} 项拦截或中止</span>
+            </div>
+            <div class="tm-plan-right">
+              <h3>集群与渲染健康指标</h3>
+              <p>实时跟踪本机 Gemini (agy) 与 Codex 沙箱执行效率、画布 HiDPI 精度与工作区风险状态。</p>
+              <ul class="tm-indicators">
+                <li>
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>
+                  <span>本地官方 CLI 直连率 · 100%</span>
+                </li>
+                <li>
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M9 15l6-6"/><circle cx="9.5" cy="9.5" r="1" fill="currentColor"/><circle cx="14.5" cy="14.5" r="1" fill="currentColor"/></svg>
+                  <span>画布清晰度 · ${canvasScale}× ${canvasScale >= 3 ? 'Ultra HD' : canvasScale === 2 ? 'Retina' : '标准'}</span>
+                </li>
+              </ul>
+              <div class="tm-bars-track" role="img" aria-label="协同就绪度 ${planPct}%">
+                ${barsHtml}
+              </div>
+            </div>
+          </div>
+        </div>`;
+
+      const tip = mount.querySelector('#tmDonutTip');
+      mount.querySelectorAll('.tm-donut-seg').forEach((seg) => {
+        seg.addEventListener('pointerenter', () => {
+          if (!tip) return;
+          tip.textContent = `${seg.dataset.sliceLabel} · ${seg.dataset.sliceVal} (${seg.dataset.slicePct}%)`;
+          tip.classList.remove('hidden');
+        });
+        seg.addEventListener('pointerleave', () => tip?.classList.add('hidden'));
+      });
+    }
+
+    function renderSettingsModal() {
+      ensureSettingsModal();
+      const body = settingsModal.querySelector('#cSettingsBody');
+      syncMemCountBadge();
+      settingsModal.querySelectorAll('[data-stab]').forEach((b) => {
+        const active = b.dataset.stab === settingsTab;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', String(active));
+      });
+      if (settingsTab === 'instructions') renderInstructionsInto(body);
+      else renderMemoryInto(body);
     }
 
     /* =======================================================================
@@ -635,6 +868,7 @@
         { title: '切换至对话流视图', sub: 'Gemini × Codex 流式协作主界面', keys: [], run: () => hooks.onSwitchView?.('chat') },
         { title: '生成图像变体预览 (/image)', sub: '打开图像多变体渐进渲染与 Lightbox 预览', keys: ['/image'], run: () => hooks.onQuickMedia?.('image') },
         { title: '生成视频渲染预览 (/video)', sub: '打开视频渐进揭示与自定义视频播放器', keys: ['/video'], run: () => hooks.onQuickMedia?.('video') },
+        { title: '打开协同遥测与指标总览', sub: '查看实时会话统计、环形分布图与 24 段进度条', keys: [], run: () => openSettings('telemetry') },
         { title: '偏好指令（Custom Instructions）', sub: '配置回复风格与跨会话规则', keys: [], run: () => openSettings('instructions') },
         { title: '持久记忆库（Memory Manager）', sub: `查看、编辑或检索 ${memories.length} 条工作记忆`, keys: [], run: () => openSettings('memory') },
         { title: '打开 Agent 运行队列监控', sub: '查看运行中、待拍板与历史任务耗时', keys: [], run: () => hooks.onOpenInspector?.('runs') },
@@ -717,6 +951,10 @@
 
     function openSettings(tab = 'instructions') {
       closeAllModals();
+      if (hooks.onNavigateSettings) {
+        hooks.onNavigateSettings(tab);
+        return;
+      }
       settingsTab = tab;
       ensureSettingsModal();
       renderSettingsModal();
@@ -725,6 +963,10 @@
 
     function openShortcuts() {
       closeAllModals();
+      if (hooks.onNavigateSettings) {
+        hooks.onNavigateSettings('shortcuts');
+        return;
+      }
       shortcutQuery = '';
       ensureShortcutsModal();
       const inp = shortcutsModal.querySelector('#ksSearchInput');
@@ -787,6 +1029,10 @@
       openShortcuts,
       openPalette,
       closeAllModals,
+      renderInstructionsInto,
+      renderMemoryInto,
+      renderShortcutsInto,
+      renderTelemetryInto,
       getInstructionContext,
       getMemories: () => memories,
     };

@@ -1007,7 +1007,17 @@
     return h >>> 0;
   }
 
-  function createArchitecturalImage(prompt, variationIdx = 0, width = 768, height = 576, salt = 0) {
+  function getCanvasResolutionPreset() {
+    const scale = Number(document.documentElement.dataset.canvasScale || 2);
+    if (scale >= 3) return { imgW: 1600, imgH: 1200, vidW: 1920, vidH: 1080, label: '3× Ultra' };
+    if (scale >= 2) return { imgW: 1280, imgH: 960, vidW: 1280, vidH: 720, label: '2× Retina' };
+    return { imgW: 768, imgH: 576, vidW: 768, vidH: 432, label: '1× 标准' };
+  }
+
+  function createArchitecturalImage(prompt, variationIdx = 0, width, height, salt = 0) {
+    const preset = getCanvasResolutionPreset();
+    width = width || preset.imgW;
+    height = height || preset.imgH;
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
@@ -1143,7 +1153,10 @@
     ctx.globalAlpha = 1;
   }
 
-  function recordKineticClip({ prompt = 'ripples', seconds = 3.6, width = 768, height = 432 } = {}) {
+  function recordKineticClip({ prompt = 'ripples', seconds = 3.6, width, height } = {}) {
+    const preset = getCanvasResolutionPreset();
+    width = width || preset.vidW;
+    height = height || preset.vidH;
     const seed = hashString(prompt);
     const canvas = document.createElement('canvas');
     canvas.width = width;
@@ -1185,9 +1198,118 @@
     return { posterSrc, videoPromise };
   }
 
+  /* =========================================================================
+     5. Safari Browser Window Frame (Native Port of safari.tsx)
+     ========================================================================= */
+  function renderSafariMockupSvg({ url = 'localhost:4177', src = '' } = {}) {
+    const uid = `saf-${++grainUid}`;
+    return `
+      <svg class="safari-svg" viewBox="0 0 1203 753" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Safari 浏览器预览: ${escapeHtml(url)}">
+        <g clip-path="url(#${uid}-clip)">
+          <path d="M0 52H1202V741C1202 747.627 1196.63 753 1190 753H12C5.37258 753 0 747.627 0 741V52Z" class="safari-fill-border" />
+          <path fill-rule="evenodd" clip-rule="evenodd" d="M0 12C0 5.37258 5.37258 0 12 0H1190C1196.63 0 1202 5.37258 1202 12V52H0L0 12Z" class="safari-fill-border" />
+          <path fill-rule="evenodd" clip-rule="evenodd" d="M1.067 12C1.067 5.925 5.992 1 12.067 1H1189.93C1196.01 1 1200.93 5.925 1200.93 12V51H1.067V12Z" class="safari-fill-bar" />
+          <circle cx="27" cy="25" r="6" class="safari-fill-dot" />
+          <circle cx="47" cy="25" r="6" class="safari-fill-dot" />
+          <circle cx="67" cy="25" r="6" class="safari-fill-dot" />
+          <path d="M286 17C286 13.686 288.686 11 292 11H946C949.314 11 952 13.686 952 17V35C952 38.314 949.314 41 946 41H292C288.686 41 286 38.314 286 35V17Z" class="safari-fill-pill" />
+          <text x="619" y="30" text-anchor="middle" fill="#8C939E" font-size="13" font-family="var(--font-mono)">${escapeHtml(url)}</text>
+          ${src ? `<image href="${escapeHtml(src)}" width="1200" height="700" x="1" y="52" preserveAspectRatio="xMidYMid slice" clip-path="url(#${uid}-body)" />` : ''}
+        </g>
+        <defs>
+          <clipPath id="${uid}-clip"><rect width="1203" height="753" fill="white" /></clipPath>
+          <clipPath id="${uid}-body"><path d="M1 52H1201V741C1201 747.075 1196.08 752 1190 752H12C5.925 752 1 747.075 1 741V52Z" fill="white" /></clipPath>
+        </defs>
+      </svg>`;
+  }
+
+  function mountSafariPreview(container, { url = '', htmlSnippet = '', onToast } = {}) {
+    if (!container) return;
+    let currentUrl = url || '';
+    let deviceMode = 'desktop';
+
+    function render() {
+      const safeSrcdoc = htmlSnippet || '';
+      const hasUrl = Boolean(currentUrl);
+      const displayUrl = hasUrl ? currentUrl : safeSrcdoc ? 'sandbox://artifact-preview.html' : 'http://127.0.0.1:4177/';
+
+      container.innerHTML = `
+        <div class="safari-preview-wrap" data-slot="safari-preview">
+          <div class="safari-controls-top">
+            <span class="mono-xs">SAFARI WEB PREVIEW</span>
+            <div class="safari-device-pills">
+              <button type="button" class="safari-dev-btn ${deviceMode === 'desktop' ? 'active' : ''}" data-saf-dev="desktop">桌面</button>
+              <button type="button" class="safari-dev-btn ${deviceMode === 'mobile' ? 'active' : ''}" data-saf-dev="mobile">375px</button>
+            </div>
+          </div>
+          <div class="safari-window">
+            <div class="safari-chrome">
+              <div class="safari-dots" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </div>
+              <form class="safari-url-form" id="safariUrlForm">
+                <svg class="safari-lock" width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                  <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="currentColor" stroke-width="1.3"/>
+                </svg>
+                <input type="text" class="safari-url-input mono-xs" id="safariUrlInput" value="${escapeHtml(displayUrl)}" placeholder="输入本地预览地址，如 http://localhost:3000" autocomplete="off" />
+              </form>
+              <div class="safari-chrome-acts">
+                <button type="button" class="mg-icon-btn" id="safariReloadBtn" title="刷新预览">${ICONS.retry}</button>
+                ${hasUrl ? `<a class="mg-icon-btn" href="${escapeHtml(currentUrl)}" target="_blank" rel="noopener" title="新标签打开">${ICONS.open}</a>` : ''}
+              </div>
+            </div>
+            <div class="safari-viewport ${deviceMode === 'mobile' ? 'is-mobile' : ''}">
+              ${
+                hasUrl
+                  ? `<iframe class="safari-iframe" id="safariFrame" src="${escapeHtml(currentUrl)}" title="Safari 实时页面预览"></iframe>`
+                  : safeSrcdoc
+                    ? `<iframe class="safari-iframe" id="safariFrame" sandbox="allow-scripts" srcdoc="${escapeHtml(safeSrcdoc)}" title="HTML 产物实时预览"></iframe>`
+                    : `<div class="safari-standby">
+                        ${renderSafariMockupSvg({ url: 'localhost:3000' })}
+                        <p class="safari-standby-note">在上方 Safari 地址栏输入本地开发地址（如 <code>http://localhost:3000</code>）回车即可实时预览，或当 Codex 输出 HTML 代码块时自动渲染。</p>
+                      </div>`
+              }
+            </div>
+          </div>
+        </div>`;
+
+      container.querySelectorAll('[data-saf-dev]').forEach((b) => {
+        b.addEventListener('click', () => {
+          deviceMode = b.dataset.safDev;
+          render();
+        });
+      });
+
+      container.querySelector('#safariUrlForm')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const raw = (container.querySelector('#safariUrlInput')?.value || '').trim();
+        if (!raw || raw.startsWith('sandbox://')) {
+          currentUrl = '';
+          render();
+          return;
+        }
+        const normalized = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
+        currentUrl = normalized;
+        render();
+        if (onToast) onToast(`已载入预览：${normalized}`);
+      });
+
+      container.querySelector('#safariReloadBtn')?.addEventListener('click', () => {
+        const frame = container.querySelector('#safariFrame');
+        if (frame && currentUrl) frame.src = currentUrl;
+        else render();
+      });
+    }
+
+    render();
+  }
+
   window.ConduitMediaGen = {
     mountImageGeneration,
     mountVideoGeneration,
+    renderSafariMockupSvg,
+    mountSafariPreview,
     openLightbox,
     closeLightbox,
     extractMediaFromText,

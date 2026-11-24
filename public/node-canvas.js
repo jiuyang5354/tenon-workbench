@@ -668,10 +668,15 @@
     }
 
     function applyTransform() {
-      worldEl.style.transform = `translate3d(${state.panX.toFixed(1)}px, ${state.panY.toFixed(1)}px, 0) scale(${state.zoom.toFixed(4)})`;
+      const px = Math.round(state.panX);
+      const py = Math.round(state.panY);
+      const z = Number(state.zoom.toFixed(4));
+      worldEl.style.transform = Math.abs(z - 1) < 0.001
+        ? `translate(${px}px, ${py}px)`
+        : `translate(${px}px, ${py}px) scale(${z})`;
       const minor = 24 * state.zoom;
       const major = 120 * state.zoom;
-      const p = `${state.panX.toFixed(1)}px ${state.panY.toFixed(1)}px`;
+      const p = `${px}px ${py}px`;
       viewportEl.style.backgroundSize = `${minor.toFixed(2)}px ${minor.toFixed(2)}px, ${minor.toFixed(2)}px ${minor.toFixed(2)}px, ${major.toFixed(2)}px ${major.toFixed(2)}px, ${major.toFixed(2)}px ${major.toFixed(2)}px`;
       viewportEl.style.backgroundPosition = `${p}, ${p}, ${p}, ${p}`;
       if (zoomLabelEl) zoomLabelEl.textContent = `${Math.round(state.zoom * 100)}%`;
@@ -996,7 +1001,7 @@
           const extModel = formatNodeModelLabel(n);
 
           return `
-            <div class="ic-node-wrap ${sel ? 'is-selected' : ''} ${isMerge ? 'is-merge-hub' : ''} ${n.muted ? 'is-muted' : ''}" data-node-id="${escapeHtml(n.id)}" data-status="${safeSt}" style="transform:translate3d(${n.x}px,${n.y}px,0)">
+            <div class="ic-node-wrap ${sel ? 'is-selected' : ''} ${isMerge ? 'is-merge-hub' : ''} ${n.muted ? 'is-muted' : ''}" data-node-id="${escapeHtml(n.id)}" data-status="${safeSt}" style="transform:translate(${Math.round(n.x)}px,${Math.round(n.y)}px)">
               <div class="ic-node-ext-meta mono">
                 <div class="ic-ext-left">
                   <span class="ic-ext-role">${escapeHtml(extRole)}</span>
@@ -1908,7 +1913,8 @@
       if (!ctx) return;
       const w = minimapCanvasEl.clientWidth || 164;
       const h = minimapCanvasEl.clientHeight || 100;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const userScale = Number(document.documentElement.dataset.canvasScale || 2);
+      const dpr = Math.min(3, Math.max(window.devicePixelRatio || 1, userScale));
       if (minimapCanvasEl.width !== Math.round(w * dpr) || minimapCanvasEl.height !== Math.round(h * dpr)) {
         minimapCanvasEl.width = Math.round(w * dpr);
         minimapCanvasEl.height = Math.round(h * dpr);
@@ -2427,7 +2433,7 @@
         node.x = Math.round(nx);
         node.y = Math.round(ny);
         const nodeEl = nodeEls.get(node.id);
-        if (nodeEl) nodeEl.style.transform = `translate3d(${node.x}px,${node.y}px,0)`;
+        if (nodeEl) nodeEl.style.transform = `translate(${Math.round(node.x)}px,${Math.round(node.y)}px)`;
         renderEdges();
         return;
       }
