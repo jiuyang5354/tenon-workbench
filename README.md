@@ -18,7 +18,8 @@
 * **Codex 桌面端聊天流式界面 + 三节点交互画布 + ThinkingOrbs + 连续曲率圆角体系**：以 Awwwards SOTD 7.37 标杆 **DeepBook** 为视觉基调，全站统一采用**连续曲率圆角（Squircle 阶梯：`10px / 18px / 24px / 999px`）** 与胶囊按键几何呼应，原生融合：
   * **全局自定义黑曜石模型选择器**：彻底替换原生操作系统 `<select>`，提供分组展示（`Gemini 4 Neon / Series / Orchestrator / 3.8 Flash`）、实时搜索、内联刷新与 Codex 自定义模型输入；
   * **3D Fibonacci `ThinkingOrbs` 活体点球状态引擎（`public/thinking-orbs.js`）**：根据真实阶段自动切换 `reasoning-twins`（规划思考）、`working-gyro`（沙箱施工）、`searching-lighthouse`（Pre-CI 扫描）、`waiting`（等待拍板）与 `compacting-fuse`（汇报汇总），零依赖纯 SVG 矢量渲染；
-  * **交互式三节点 Agent 编排画布（顶栏一键切换 `对话流` / `节点画布`）**：点阵画布串联 `Gemini 架构规划师 → Codex 沙箱工程师 → Pre-CI 门禁与汇报`，配备电光钴蓝旋转锥形流光环、动态贝塞尔数据连线、与底部护栏双向同步的实时开关，以及单步执行与全链路演练/拦截预演；
+  * **Blender 风格全屏无限 Agent 集群画布（`public/node-canvas.js`，顶栏一键切至 `节点画布`）**：支持**空白区无限拖拽平移、鼠标指针中心滚轮缩放（`30%–200%`）、自由拖拽任意节点卡片（按住 `Shift` 吸附网格）、端口拖拽实时拉线连结（内置 DAG 防环检测与悬停断线）、动态增删 Agent 节点（Gemini 规划 / 并行 Codex 工位 / 集群聚合合并器 Merge Hub / Pre-CI 门禁）、拓扑分层并发演练、撤销（`Ctrl+Z`）、实时缩略导航图与拓扑 JSON 导出**；默认预置「Gemini 总架构 → 双路并行 Codex 工位 → 集群聚合合并器 → Pre-CI 审查」5 节点并行合并拓扑；
+  * **左下角 21st.dev 5 模式声学遥测音波台（`Audio Visualizer #44800`）**：支持 `BAR`（频谱柱）/ `GRD`（LED 矩阵）/ `WAV`（双轨示波）/ `DOT`（能量珠串）/ `RAD`（环形频谱）一键切换、鼠标悬停声学波纹感应，并与真实引擎/集群状态实时联动；
   * **FLIP 分支思路卡组（`Branching Reasoning Deck`）**：Gemini 规划阶段动态扇形展开 3 条架构路线并评分，完成后丝滑收拢为采纳路线卡片，可随时点击展开切换备选思路；
   * **Ink-Orbit 动态三联 SVG 架构图 & Liquid Metal（`metal-fx` WebGL2 边环）& `ai-thinking-and-tool-calls` SVG 树状思考轨**：以及 `Chat Sidebar`、`Conversation`、`Rich Prompt Input`（`/` + `@`）、`Diff Viewer`（Unified/Split）、`Border Beam`、`Segmented Tabs` 与右下角可完全收起的 **Tweaks 调参台**（快捷键 `T`）。
 

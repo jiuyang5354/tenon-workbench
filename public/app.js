@@ -87,6 +87,8 @@
 
   let waveEngine = null;
   let metalEngine = null;
+  let canvasEngine = null;
+  let canvasFittedOnce = false;
   let paletteBlurTimer = null;
   const el = (id) => document.getElementById(id);
 
@@ -576,15 +578,78 @@
   }
 
   /* =========================================================================
-     DeepBook Sidebar Mini Telemetry Wave Engine
+     21st.dev Audio Visualizer (#44800) Multi-Mode Signal Telemetry Engine
+     5 interactive canvas engines: bars | grid | line | dots | radial
+     + hover proximity acoustic scrub + live CONDUIT engine state coupling
      ========================================================================= */
   function initWaveEngine() {
     const miniCanvas = el('miniWaveCanvas');
+    const deckEl = el('signalDeck');
+    const stateLabelEl = el('signalStateLabel');
+    const pillsWrap = el('signalModePills');
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    let phase = 0;
+
+    const COUNTS = { bars: 22, grid: 18, line: 34, dots: 12, radial: 36 };
+    let variant = 'bars';
+    try {
+      const saved = localStorage.getItem('conduit_viz_mode_v1');
+      if (saved && COUNTS[saved]) variant = saved;
+    } catch {}
+
+    let tSec = 0;
+    let lastTs = 0;
     let rafId = null;
-    let colors = { accent: '#1B66FF', warn: '#f59e0b', tick: '#313640' };
-    const dims = new Map();
+    let hoverNorm = -1; // 0..1 across canvas when pointer hovers
+    let hoverEnergy = 0;
+    let values = new Array(COUNTS[variant]).fill(0);
+    let colors = { accent: '#1B66FF', warn: '#f59e0b', tick: '#313640', rest: 'rgba(255,255,255,0.08)' };
+    let dims = { w: 0, h: 0, ctx: null };
+
+    const clamp01 = (v) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0);
+    const approach = (cur, target, rate, dt) => cur + (target - cur) * (1 - Math.exp(-rate * dt));
+    const wobble = (t, seed) =>
+      Math.sin(t * 1.31 + seed * 7.13) * 0.5 +
+      Math.sin(t * 2.17 + seed * 3.71) * 0.3 +
+      Math.sin(t * 3.73 + seed * 1.37) * 0.2;
+
+    function syncPills() {
+      if (!pillsWrap) return;
+      pillsWrap.querySelectorAll('[data-viz]').forEach((b) => {
+        b.classList.toggle('active', b.dataset.viz === variant);
+      });
+    }
+
+    function setVariant(next) {
+      if (!COUNTS[next]) return;
+      variant = next;
+      values = new Array(COUNTS[variant]).fill(0);
+      try { localStorage.setItem('conduit_viz_mode_v1', variant); } catch {}
+      syncPills();
+      drawFrame(1 / 60, false);
+    }
+
+    if (pillsWrap) {
+      pillsWrap.querySelectorAll('[data-viz]').forEach((b) => {
+        b.addEventListener('click', () => setVariant(b.dataset.viz));
+      });
+    }
+
+    if (miniCanvas) {
+      miniCanvas.addEventListener('pointermove', (e) => {
+        const r = miniCanvas.getBoundingClientRect();
+        if (r.width > 0) {
+          hoverNorm = clamp01((e.clientX - r.left) / r.width);
+          hoverEnergy = 1;
+        }
+      });
+      miniCanvas.addEventListener('pointerleave', () => {
+        hoverNorm = -1;
+      });
+      miniCanvas.addEventListener('click', () => {
+        const order = ['bars', 'grid', 'line', 'dots', 'radial'];
+        setVariant(order[(order.indexOf(variant) + 1) % order.length]);
+      });
+    }
 
     function refreshColors() {
       const cs = getComputedStyle(document.documentElement);
@@ -592,85 +657,239 @@
         accent: cs.getPropertyValue('--accent-hex').trim() || '#1B66FF',
         warn: cs.getPropertyValue('--state-warn').trim() || '#f59e0b',
         tick: cs.getPropertyValue('--line-strong').trim() || '#313640',
+        rest: cs.getPropertyValue('--line-subtle').trim() || '#1d2026',
       };
     }
 
-    function sizeCanvas(canvas) {
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
+    function sizeCanvas() {
+      if (!miniCanvas) return;
+      const rect = miniCanvas.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-      canvas.height = Math.max(1, Math.floor(rect.height * dpr));
-      const ctx = canvas.getContext('2d');
+      miniCanvas.width = Math.max(1, Math.floor(rect.width * dpr));
+      miniCanvas.height = Math.max(1, Math.floor(rect.height * dpr));
+      const ctx = miniCanvas.getContext('2d');
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      dims.set(canvas, { w: rect.width, h: rect.height, ctx });
+      dims = { w: rect.width, h: rect.height, ctx };
     }
 
-    function drawOne(canvas, gap, ampMult) {
-      const info = dims.get(canvas);
-      if (!info) return;
-      const { w, h, ctx } = info;
-      ctx.clearRect(0, 0, w, h);
+    function computeTargets(n, t, isLive, isGate, ampScale) {
+      const out = new Array(n).fill(0);
+      const half = (n - 1) / 2;
+      const circular = variant === 'radial';
+      const period = isLive ? 1.35 : 2.4;
+      const u = (t % period) / period;
+      const sweepPos = circular ? u * n : (0.5 - 0.5 * Math.cos(u * Math.PI * 2)) * (n - 1);
 
-      const run = appState.currentRun;
-      const isStreaming = Boolean(run && run.status === 'running');
-      const isGate = Boolean(run && run.status === 'awaiting_approval');
-      const ampScale = (Number(appState.tweaks.waveAmplitude) || 0) / 100;
-      const count = Math.floor((w - 16) / gap);
-      const midY = h * 0.48;
+      for (let i = 0; i < n; i += 1) {
+        const norm = n > 1 ? i / (n - 1) : 0.5;
+        const distCenter = half > 0 ? Math.abs(i - half) / half : 0;
+        let dSweep = Math.abs(i - sweepPos);
+        if (circular) dSweep = Math.min(dSweep, n - dSweep);
+        const sweep = Math.exp(-((dSweep / Math.max(1.5, n * 0.16)) ** 2));
 
-      for (let i = 0; i < count; i += 1) {
-        const x = 8 + i * gap;
-        const norm = count > 1 ? i / (count - 1) : 0.5;
-        const env = Math.sin(norm * Math.PI);
-        const w1 = Math.sin(norm * 8.5 - phase);
-        const w2 = Math.cos(norm * 14.5 + phase * 1.3) * 0.42;
-        const energy = (isStreaming ? 0.92 : 0.38) * ampScale;
-        const barH = Math.max(3, (4 + Math.abs(w1 + w2) * ampMult * energy) * (0.35 + 0.65 * env));
-        const pulse = (phase * 0.14) % 1;
-        const dist = Math.min(Math.abs(norm - pulse), 1 - Math.abs(norm - pulse));
-        const hot = isStreaming ? dist < 0.24 : dist < 0.13;
-
-        ctx.fillStyle = isGate && hot ? colors.warn : hot ? colors.accent : colors.tick;
-        ctx.globalAlpha = hot ? 0.95 : 0.52;
-        if (typeof ctx.roundRect === 'function') {
-          ctx.beginPath();
-          ctx.roundRect(x, midY - barH / 2, 1.8, barH, 1);
-          ctx.fill();
+        let v;
+        if (isLive) {
+          const hump = 0.45 + 0.55 * Math.exp(-(((distCenter - 0.18) / 0.55) ** 2));
+          const rip = 0.55 + 0.45 * Math.abs(wobble(t * 2.9, i * 0.71 + 1.2));
+          v = (0.28 + 0.72 * hump * rip) * (0.72 + 0.28 * sweep);
+        } else if (isGate) {
+          const breath = 0.5 + 0.5 * Math.sin((t * Math.PI * 2) / 1.7 - distCenter * 2.2);
+          v = (0.22 + 0.48 * breath) * (1 - distCenter * 0.35);
         } else {
-          ctx.fillRect(x, midY - barH / 2, 1.6, barH);
+          const idleWave = 0.16 + 0.18 * (0.5 + 0.5 * Math.sin(t * 2.1 - distCenter * 2.6));
+          v = Math.max(idleWave * (1 - distCenter * 0.35), 0.52 * sweep);
+        }
+
+        if (hoverNorm >= 0 && hoverEnergy > 0.02) {
+          const dMouse = Math.abs(norm - hoverNorm);
+          const prox = Math.exp(-((dMouse / 0.15) ** 2)) * hoverEnergy;
+          v = Math.max(v, 0.25 + 0.72 * prox);
+        }
+        out[i] = clamp01(v * Math.max(0.2, ampScale));
+      }
+      return out;
+    }
+
+    function paintBars(ctx, w, h, vals, fg) {
+      const n = vals.length;
+      const gapRatio = 0.55;
+      const bw = Math.min(4.5, (w - 16) / (n + (n - 1) * gapRatio));
+      const gap = bw * gapRatio;
+      const x0 = (w - (n * bw + (n - 1) * gap)) / 2;
+      const maxH = h - 8;
+      ctx.fillStyle = fg;
+      for (let i = 0; i < n; i += 1) {
+        const v = vals[i];
+        const bh = Math.max(bw, v * maxH);
+        ctx.globalAlpha = 0.25 + 0.75 * clamp01(v * 1.45);
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') ctx.roundRect(x0 + i * (bw + gap), (h - bh) / 2, bw, bh, bw / 2);
+        else ctx.rect(x0 + i * (bw + gap), (h - bh) / 2, bw, bh);
+        ctx.fill();
+      }
+    }
+
+    function paintGrid(ctx, w, h, vals, fg) {
+      const cols = vals.length;
+      const gap = 2;
+      const cell = Math.max(2.5, Math.min(6, (w - 14 - (cols - 1) * gap) / cols));
+      let rows = Math.max(3, Math.floor((h - 6 + gap) / (cell + gap)));
+      if (rows % 2 === 0) rows -= 1;
+      const x0 = (w - (cols * cell + (cols - 1) * gap)) / 2;
+      const y0 = (h - (rows * cell + (rows - 1) * gap)) / 2;
+      const half = (rows - 1) / 2;
+      for (let c = 0; c < cols; c += 1) {
+        const lit = vals[c] * (half + 1.15);
+        for (let r = 0; r < rows; r += 1) {
+          const amount = clamp01(lit - Math.abs(r - half));
+          const x = x0 + c * (cell + gap);
+          const y = y0 + r * (cell + gap);
+          ctx.globalAlpha = 0.5;
+          ctx.fillStyle = colors.rest;
+          ctx.beginPath();
+          if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, cell, cell, 1.5);
+          else ctx.rect(x, y, cell, cell);
+          ctx.fill();
+          if (amount > 0.02) {
+            ctx.globalAlpha = amount;
+            ctx.fillStyle = fg;
+            ctx.fill();
+          }
         }
       }
+    }
+
+    function paintLine(ctx, w, h, vals, fg) {
+      const n = vals.length;
+      const mid = h / 2;
+      const amp = h / 2 - 4;
+      const padX = 8;
+      const step = (w - padX * 2) / Math.max(1, n - 1);
+      const ys = vals.map((v, i) => v * amp * Math.sin((Math.PI * i) / Math.max(1, n - 1)) ** 0.75);
+      ctx.strokeStyle = fg;
+      ctx.lineWidth = 1.6;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      for (const dir of [-1, 1]) {
+        ctx.globalAlpha = dir < 0 ? 0.95 : 0.35;
+        ctx.beginPath();
+        ctx.moveTo(padX, mid + dir * ys[0]);
+        for (let i = 1; i < n - 1; i += 1) {
+          const x = padX + i * step;
+          const nx = padX + (i + 1) * step;
+          ctx.quadraticCurveTo(x, mid + dir * ys[i], (x + nx) / 2, mid + dir * ((ys[i] + ys[i + 1]) / 2));
+        }
+        ctx.lineTo(padX + (n - 1) * step, mid + dir * ys[n - 1]);
+        ctx.stroke();
+      }
+    }
+
+    function paintDots(ctx, w, h, vals, fg) {
+      const n = vals.length;
+      const padX = 12;
+      const pitch = (w - padX * 2) / n;
+      const rMax = Math.min(pitch * 0.42, h * 0.36);
+      const rMin = 1.7;
+      ctx.fillStyle = fg;
+      for (let i = 0; i < n; i += 1) {
+        const v = vals[i];
+        ctx.globalAlpha = 0.28 + 0.72 * clamp01(v * 1.4);
+        ctx.beginPath();
+        ctx.arc(padX + pitch * (i + 0.5), h / 2, rMin + v * (rMax - rMin), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function paintRadial(ctx, w, h, vals, fg) {
+      const n = vals.length;
+      const cx = w / 2;
+      const cy = h / 2;
+      const outer = Math.min(w, h) / 2 - 2.5;
+      const inner = outer * 0.46;
+      ctx.strokeStyle = fg;
+      ctx.lineCap = 'round';
+      ctx.lineWidth = 1.45;
+      for (let i = 0; i < n; i += 1) {
+        const v = vals[i];
+        const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+        const len = 1.5 + v * (outer - inner - 1.5);
+        ctx.globalAlpha = 0.25 + 0.75 * clamp01(v * 1.4);
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner);
+        ctx.lineTo(cx + Math.cos(a) * (inner + len), cy + Math.sin(a) * (inner + len));
+        ctx.stroke();
+      }
+    }
+
+    function drawFrame(dt, advance = true) {
+      if (!dims.ctx || dims.w <= 0) return;
+      const { w, h, ctx } = dims;
+      const run = appState.currentRun;
+      const clusterLive = Boolean(canvasEngine && canvasEngine.isDemoRunning());
+      const isLive = Boolean((run && run.status === 'running') || clusterLive);
+      const isGate = Boolean(run && run.status === 'awaiting_approval');
+      const ampScale = (Number(appState.tweaks.waveAmplitude) || 0) / 100;
+
+      if (deckEl) {
+        deckEl.classList.toggle('is-live', isLive);
+        deckEl.classList.toggle('is-gate', isGate);
+      }
+      if (stateLabelEl) {
+        stateLabelEl.textContent = isGate
+          ? 'GATE · WAIT'
+          : clusterLive
+            ? 'CLUSTER · LIVE'
+            : isLive
+              ? (run.activeStage === 'exec' ? 'CODEX · LIVE' : run.activeStage === 'review' ? 'REVIEW · LIVE' : 'GEMINI · LIVE')
+              : 'SIGNAL · IDLE';
+      }
+
+      if (advance && appState.tweaks.motion && !reducedMotion) {
+        tSec += dt;
+        if (hoverNorm < 0 && hoverEnergy > 0) hoverEnergy = Math.max(0, hoverEnergy - dt * 2.5);
+      }
+
+      const n = COUNTS[variant] || 22;
+      if (values.length !== n) values = new Array(n).fill(0);
+      const targets = computeTargets(n, tSec, isLive, isGate, ampScale);
+      for (let i = 0; i < n; i += 1) {
+        const goal = targets[i];
+        values[i] = reducedMotion || !appState.tweaks.motion ? goal : approach(values[i], goal, goal > values[i] ? 22 : 7, dt);
+      }
+
+      ctx.clearRect(0, 0, w, h);
+      const fg = isGate ? colors.warn : colors.accent;
+      if (variant === 'grid') paintGrid(ctx, w, h, values, fg);
+      else if (variant === 'line') paintLine(ctx, w, h, values, fg);
+      else if (variant === 'dots') paintDots(ctx, w, h, values, fg);
+      else if (variant === 'radial') paintRadial(ctx, w, h, values, fg);
+      else paintBars(ctx, w, h, values, fg);
       ctx.globalAlpha = 1;
     }
 
-    function drawAll(advance = true) {
-      const isStreaming = Boolean(appState.currentRun && appState.currentRun.status === 'running');
-      if (advance && appState.tweaks.motion && !reducedMotion) {
-        phase += isStreaming ? 0.065 : 0.015;
-      }
-      drawOne(miniCanvas, 5, 11);
-    }
-
-    function loop() {
+    function loop(now) {
       if (!appState.tweaks.motion || reducedMotion) {
         rafId = null;
         return;
       }
-      drawAll(true);
+      const dt = lastTs ? Math.min(0.05, Math.max(0.004, (now - lastTs) / 1000)) : 1 / 60;
+      lastTs = now;
+      drawFrame(dt, true);
       rafId = requestAnimationFrame(loop);
     }
 
     function resize() {
-      sizeCanvas(miniCanvas);
-      drawAll(false);
+      sizeCanvas();
+      drawFrame(1 / 60, false);
     }
 
     function sync() {
       refreshColors();
+      syncPills();
       resize();
       if (appState.tweaks.motion && !reducedMotion && !rafId) {
+        lastTs = 0;
         rafId = requestAnimationFrame(loop);
       } else if ((!appState.tweaks.motion || reducedMotion) && rafId) {
         cancelAnimationFrame(rafId);
@@ -683,7 +902,7 @@
       syncAllFluidTracks();
     });
     sync();
-    return { sync, redraw: () => drawAll(false), resize };
+    return { sync, redraw: () => drawFrame(1 / 60, false), resize, setVariant };
   }
 
   /* =========================================================================
@@ -1108,12 +1327,13 @@
         variant = 'default';
         cls = 'is-err';
       }
-    } else if (appState.wf.demoRunning) {
+    } else if (canvasEngine && canvasEngine.isDemoRunning()) {
       cls = 'is-live';
-      const idx = appState.wf.statuses.indexOf('running');
-      if (idx === 0) { state = 'reasoning'; variant = 'twins'; }
-      else if (idx === 1) { state = 'working'; variant = 'gyro'; }
-      else if (idx === 2) { state = 'searching'; variant = 'lighthouse'; }
+      const orbPair = canvasEngine.getActiveOrb();
+      if (orbPair) {
+        state = orbPair[0];
+        variant = orbPair[1];
+      }
     }
 
     wrap.classList.remove('is-live', 'is-gate', 'is-done', 'is-err');
@@ -2452,13 +2672,75 @@
   }
 
   /* =========================================================================
-     Interactive AI Agent Workflow Canvas (AgentNodeCard + Bezier Connectors)
+     Blender-Style Infinite Agent Cluster Canvas Wrapper
      ========================================================================= */
+  function renderWorkflowCanvas() {
+    if (canvasEngine) canvasEngine.render();
+  }
+
+  function initInfiniteWorkflowCanvas() {
+    if (!window.ConduitCanvas || !el('wfViewport')) return null;
+    return window.ConduitCanvas.createInfiniteCanvas({
+      viewportEl: el('wfViewport'),
+      worldEl: el('wfWorld'),
+      edgesSvgEl: el('wfEdgesSvg'),
+      nodesLayerEl: el('wfNodesLayer'),
+      minimapCanvasEl: el('wfMinimapCanvas'),
+      zoomLabelEl: el('btnWfZoomReset'),
+      statusBarEl: el('wfStatusBar'),
+      getContext: () => ({
+        currentRun: appState.currentRun,
+        geminiModelShort: formatGeminiShort(el('selectGeminiModel').value || 'gemini-4-neon-high'),
+        codexModelShort: formatCodexShort(el('selectCodexModel').value || ''),
+        codexEffort: el('selectCodexEffort')?.value || 'high',
+        sandbox: el('selectSandbox')?.value || 'workspace-write',
+        maxRounds: el('selectMaxRounds')?.value || '2',
+        approval: Boolean(el('chkApproval')?.checked),
+        worktree: Boolean(el('chkWorktree')?.checked),
+      }),
+      onToggleSync: (key) => {
+        if (key === 'approval') el('chkApproval').checked = !el('chkApproval').checked;
+        else if (key === 'worktree') el('chkWorktree').checked = !el('chkWorktree').checked;
+        else if (key === 'writable') {
+          el('selectSandbox').value = el('selectSandbox').value === 'workspace-write' ? 'read-only' : 'workspace-write';
+        }
+        renderCliCommandCards();
+      },
+      onRunSingleNode: (node) => {
+        const prompt = el('inputPrompt').value.trim();
+        const modeMap = {
+          'gemini-plan': 'plan-only',
+          'gemini-copy': 'copy-polish',
+          'codex-exec': 'codex-exec',
+          'cluster-merge': 'full-pipeline',
+          'codex-review': 'codex-review',
+        };
+        if (prompt) {
+          setModeValue(modeMap[node.kind] || 'full-pipeline');
+          switchStageView('chat');
+          startRun();
+          return true;
+        }
+        return false; // Fall back to single-node visual preview
+      },
+      onStatusChange: () => {
+        syncTopbarOrb(appState.currentRun);
+        if (waveEngine) waveEngine.redraw();
+      },
+      onToast: showToast,
+    });
+  }
+
   function switchStageView(view) {
     const next = view === 'workflow' ? 'workflow' : 'chat';
     appState.stageView = next;
     el('conversationViewport').classList.toggle('hidden', next !== 'chat');
     el('workflowStage').classList.toggle('hidden', next !== 'workflow');
+    const composerDock = document.querySelector('.composer-dock');
+    if (composerDock) composerDock.classList.toggle('hidden', next === 'workflow');
+    closePickers();
+    closePromptPalette();
+
     const tabs = el('stageViewTabs');
     if (tabs) {
       tabs.querySelectorAll('.stage-view-tab').forEach((b) => {
@@ -2467,384 +2749,16 @@
         b.setAttribute('aria-selected', String(active));
       });
     }
-    requestAnimationFrame(syncAllFluidTracks);
-    if (next === 'workflow') renderWorkflowCanvas();
-  }
-
-  function deriveWorkflowStatuses() {
-    const run = appState.currentRun;
-    if (!run || appState.wf.demoRunning) return appState.wf.statuses;
-
-    const s = ['idle', 'idle', 'idle'];
-    const g = run.gemini || {};
-    const c = run.codex || {};
-    if (run.mode === 'full-pipeline') {
-      if (g.status === 'running' && run.activeStage === 'plan') s[0] = 'running';
-      else if (g.planText || run.status === 'awaiting_approval' || c.status !== 'idle') s[0] = 'completed';
-      else if (g.status === 'failed') s[0] = 'error';
-
-      if (c.status === 'running' && run.activeStage === 'exec') s[1] = 'running';
-      else if (c.execText || run.reviewRound > 0 || run.status === 'completed') s[1] = 'completed';
-      else if (c.status === 'failed' && run.activeStage === 'exec') s[1] = 'error';
-
-      if (run.activeStage === 'review' || run.activeStage === 'summary') s[2] = run.status === 'running' ? 'running' : run.status === 'blocked' ? 'error' : 'completed';
-      else if (run.status === 'completed') s[2] = 'completed';
-      else if (run.status === 'blocked' || (run.status === 'failed' && run.reviewRound > 0)) s[2] = 'error';
-    } else if (run.mode === 'plan-only' || run.mode === 'copy-polish') {
-      s[0] = run.status === 'running' ? 'running' : run.status === 'completed' ? 'completed' : run.status === 'failed' ? 'error' : 'idle';
-    } else if (run.mode === 'codex-exec') {
-      s[1] = run.status === 'running' ? 'running' : run.status === 'completed' ? 'completed' : run.status === 'failed' ? 'error' : 'idle';
-    } else if (run.mode === 'codex-review') {
-      s[2] = run.status === 'running' ? 'running' : run.status === 'completed' ? 'completed' : (run.status === 'blocked' || run.status === 'failed') ? 'error' : 'idle';
-    }
-    return s;
-  }
-
-  function renderWorkflowConnector(fromTop, toTop, state) {
-    const portY = 36;
-    const width = 96;
-    const height = 380;
-    const y1 = fromTop + portY;
-    const y2 = toTop + portY;
-    const half = width / 2;
-    const d = `M 0 ${y1} C ${half} ${y1}, ${half} ${y2}, ${width} ${y2}`;
-    const color =
-      state === 'error'
-        ? 'var(--state-err)'
-        : state === 'idle'
-          ? 'var(--line-strong)'
-          : 'var(--accent-hex)';
-    const dashed = state === 'completed' ? '' : 'stroke-dasharray="6 6"';
-    const anim =
-      state === 'running' && appState.tweaks.motion
-        ? '<animate attributeName="stroke-dashoffset" from="0" to="-24" dur="0.7s" repeatCount="indefinite" />'
-        : '';
-    return `
-      <svg class="wf-connector-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-hidden="true">
-        <path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" ${dashed}>${anim}</path>
-      </svg>`;
-  }
-
-  function renderWorkflowCanvas() {
-    const track = el('wfCanvasTrack');
-    const bar = el('wfStatusBar');
-    if (!track) return;
-
-    const statuses = deriveWorkflowStatuses();
-    const gModel = formatGeminiShort(el('selectGeminiModel').value || 'gemini-4-neon-high');
-    const cModel = formatCodexShort(el('selectCodexModel').value || '');
-    const effort = el('selectCodexEffort')?.value || 'high';
-    const sandbox = el('selectSandbox')?.value || 'workspace-write';
-    const maxRounds = el('selectMaxRounds')?.value || '2';
-    const approvalOn = Boolean(el('chkApproval')?.checked);
-    const worktreeOn = Boolean(el('chkWorktree')?.checked);
-
-    const statusMeta = {
-      idle: { label: '就绪', btn: '单步执行' },
-      running: { label: '运行中', btn: '运行中...' },
-      completed: { label: '已完成', btn: '重新运行' },
-      error: { label: '已拦截', btn: '重试节点' },
-    };
-
-    const nodes = [
-      {
-        idx: 0,
-        top: 0,
-        title: 'Gemini · 架构规划师',
-        subtitle: '需求拆解与接口契约设计',
-        orbState: statuses[0] === 'running' ? 'reasoning' : 'base',
-        orbVariant: statuses[0] === 'running' ? 'twins' : 'default',
-        showIn: false,
-        showOut: true,
-        inLabel: '',
-        outLabel: 'Spec 契约',
-        params: [
-          { label: 'Model', value: gModel },
-          { label: 'Approach', value: '3 路分支权衡' },
-          { label: 'Gate', value: approvalOn ? '需人工拍板' : '直通放行' },
-        ],
-        toggles: [
-          { key: 'approval', label: '人工拍板闸门', desc: '派发施工前允许修改契约', checked: approvalOn },
-          { key: 'readOnlyPlan', label: '只读规划约束', desc: '禁止规划阶段写入磁盘', checked: appState.wf.toggles.readOnlyPlan },
-        ],
-        footer: statuses[0] === 'completed' ? '接口契约已锁定' : '等待任务需求',
-        errorMessage: '规划阶段超时或未生成有效契约，请检查 agy CLI 登录态后重试。',
-      },
-      {
-        idx: 1,
-        top: 52,
-        title: 'Codex · 沙箱工程师',
-        subtitle: '安全隔离区内编写并验证代码',
-        orbState: statuses[1] === 'running' ? 'working' : 'base',
-        orbVariant: statuses[1] === 'running' ? 'gyro' : 'default',
-        showIn: true,
-        showOut: true,
-        inLabel: 'Spec 契约',
-        outLabel: 'Git Diff',
-        params: [
-          { label: 'Model', value: cModel },
-          { label: 'Effort', value: effort },
-          { label: 'Sandbox', value: sandbox },
-        ],
-        toggles: [
-          { key: 'worktree', label: 'Git Worktree 隔离', desc: '独立分支目录零污染主干', checked: worktreeOn },
-          { key: 'autoNewDiff', label: '捕获新建未跟踪文件', desc: '完整进入右侧 Diff 对比器', checked: appState.wf.toggles.autoNewDiff },
-        ],
-        footer: statuses[1] === 'completed' ? '变更 Diff 已捕获' : '等待契约放行',
-        errorMessage: 'Codex 沙箱执行失败，请检查 CODEX_HOME 凭据或工作目录权限。',
-      },
-      {
-        idx: 2,
-        top: 16,
-        title: 'Pre-CI 门禁与终局汇报',
-        subtitle: '分级阻断审查 + Gemini 10秒汇报',
-        orbState: statuses[2] === 'running' ? 'searching' : statuses[2] === 'error' ? 'retrying' : 'base',
-        orbVariant: statuses[2] === 'running' ? 'lighthouse' : 'default',
-        showIn: true,
-        showOut: false,
-        inLabel: 'Git Diff',
-        outLabel: '',
-        params: [
-          { label: 'Max Rounds', value: `${maxRounds} 轮复审` },
-          { label: 'High-Risk', value: '自动升 xhigh' },
-          { label: 'Report', value: '10 秒人话总结' },
-        ],
-        toggles: [
-          { key: 'writable', label: '允许沙箱自动修复', desc: '关闭则锁定 read-only 审查', checked: sandbox === 'workspace-write' },
-          { key: 'humanReport', label: 'Gemini 终局人话汇报', desc: '将审查与 Diff 翻译为结论', checked: appState.wf.toggles.humanReport },
-        ],
-        footer: statuses[2] === 'completed' ? '门禁 PASS · 已生成汇报' : statuses[2] === 'error' ? '存在 BLOCKING 项' : '等待代码变更',
-        errorMessage: 'Pre-CI 审查拦截：命中高危鉴权边界变更 [BLOCKING]，已触发人工升级确认。',
-      },
-    ];
-
-    const renderNodeCard = (n) => {
-      const st = statuses[n.idx];
-      const running = st === 'running';
-      const meta = statusMeta[st] || statusMeta.idle;
-      const sel = appState.wf.selected === n.idx;
-
-      const chipIcon =
-        st === 'completed'
-          ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
-          : st === 'error'
-            ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>'
-            : `<span class="wf-chip-dot-wrap">${running ? '<span class="wf-chip-ping"></span>' : ''}<span class="wf-chip-dot"></span></span>`;
-
-      return `
-        <div class="wf-node-slot" style="margin-top:${n.top}px">
-          <div class="agent-node ${sel ? 'is-selected' : ''}" data-status="${st}" data-wf-select="${n.idx}" role="group" tabindex="0">
-            ${running ? '<span class="agent-node-glow" aria-hidden="true"></span>' : ''}
-            <div class="agent-node-surface">
-              ${running ? '<span class="agent-node-sweep-track" aria-hidden="true"><span class="agent-node-sweep"></span></span>' : ''}
-              <header class="agent-node-head">
-                <span class="agent-node-icon">${renderOrbSvg(n.orbState, n.orbVariant, 24)}</span>
-                <div class="agent-node-titles">
-                  <h3 class="agent-node-title">${escapeHtml(n.title)}</h3>
-                  <p class="agent-node-sub">${escapeHtml(n.subtitle)}</p>
-                </div>
-                <span class="wf-status-chip ${st}">${chipIcon}<span>${meta.label}</span></span>
-              </header>
-
-              <div class="agent-node-body">
-                <dl class="wf-params">
-                  ${n.params
-                    .map(
-                      (p) => `
-                      <div class="wf-param-row">
-                        <dt class="wf-param-label">${escapeHtml(p.label)}</dt>
-                        <dd class="wf-param-val">${escapeHtml(p.value)}</dd>
-                      </div>`
-                    )
-                    .join('')}
-                </dl>
-                <div class="wf-toggles">
-                  ${n.toggles
-                    .map(
-                      (t) => `
-                      <div class="wf-toggle-row">
-                        <div class="wf-toggle-text">
-                          <div class="wf-toggle-label">${escapeHtml(t.label)}</div>
-                          ${t.desc ? `<div class="wf-toggle-desc">${escapeHtml(t.desc)}</div>` : ''}
-                        </div>
-                        <button type="button" class="wf-switch" role="switch" aria-checked="${t.checked}" data-wf-toggle="${escapeHtml(t.key)}" aria-label="${escapeHtml(t.label)}">
-                          <span class="wf-switch-thumb"></span>
-                        </button>
-                      </div>`
-                    )
-                    .join('')}
-                </div>
-              </div>
-
-              ${st === 'error' ? `<div class="wf-node-error" role="alert">${escapeHtml(n.errorMessage)}</div>` : ''}
-
-              <footer class="agent-node-foot">
-                <span class="wf-foot-note">${escapeHtml(n.footer)}</span>
-                <button type="button" class="wf-run-btn ${st !== 'idle' ? 'is-secondary' : ''}" data-wf-run="${n.idx}" ${running ? 'disabled' : ''}>
-                  <span>${meta.btn}</span>
-                </button>
-              </footer>
-            </div>
-            ${running ? '<span class="agent-node-ring" aria-hidden="true"></span>' : ''}
-            ${
-              n.showIn
-                ? `<button type="button" class="wf-port wf-port-left is-connected" data-wf-port="输入端口 · ${escapeHtml(n.inLabel)}" aria-label="输入端口: ${escapeHtml(n.inLabel)}"><span class="wf-port-dot"></span><span class="wf-port-tip">${escapeHtml(n.inLabel)}</span></button>`
-                : ''
-            }
-            ${
-              n.showOut
-                ? `<button type="button" class="wf-port wf-port-right is-connected" data-wf-port="输出端口 · ${escapeHtml(n.outLabel)}" aria-label="输出端口: ${escapeHtml(n.outLabel)}"><span class="wf-port-dot"></span><span class="wf-port-tip">${escapeHtml(n.outLabel)}</span></button>`
-                : ''
-            }
-          </div>
-        </div>`;
-    };
-
-    track.innerHTML =
-      renderNodeCard(nodes[0]) +
-      renderWorkflowConnector(nodes[0].top, nodes[1].top, statuses[0]) +
-      renderNodeCard(nodes[1]) +
-      renderWorkflowConnector(nodes[1].top, nodes[2].top, statuses[1]) +
-      renderNodeCard(nodes[2]);
-
-    if (bar) bar.textContent = appState.wf.statusMsg;
-    if (window.ConduitOrbs) window.ConduitOrbs.mountAll(track);
-
-    track.querySelectorAll('[data-wf-select]').forEach((card) => {
-      card.addEventListener('click', (e) => {
-        if (e.target.closest('button, [role="switch"]')) return;
-        appState.wf.selected = Number(card.dataset.wfSelect);
-        renderWorkflowCanvas();
-      });
-    });
-
-    track.querySelectorAll('[data-wf-port]').forEach((port) => {
-      port.addEventListener('click', (e) => {
-        e.stopPropagation();
-        appState.wf.statusMsg = `已检查数据通道：${port.dataset.wfPort}（数据契约已实时绑定当前工作区）`;
-        if (bar) bar.textContent = appState.wf.statusMsg;
-      });
-    });
-
-    track.querySelectorAll('[data-wf-toggle]').forEach((sw) => {
-      sw.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const key = sw.dataset.wfToggle;
-        if (key === 'approval') {
-          el('chkApproval').checked = !el('chkApproval').checked;
-          appState.wf.statusMsg = `人工拍板闸门已${el('chkApproval').checked ? '开启' : '关闭'}（与底部护栏参数实时同步）`;
-        } else if (key === 'worktree') {
-          el('chkWorktree').checked = !el('chkWorktree').checked;
-          appState.wf.statusMsg = `Git Worktree 隔离已${el('chkWorktree').checked ? '开启' : '关闭'}（与底部护栏参数实时同步）`;
-        } else if (key === 'writable') {
-          const nextSb = el('selectSandbox').value === 'workspace-write' ? 'read-only' : 'workspace-write';
-          el('selectSandbox').value = nextSb;
-          appState.wf.statusMsg = `Codex 沙箱已切换为 ${nextSb}`;
-        } else if (Object.prototype.hasOwnProperty.call(appState.wf.toggles, key)) {
-          appState.wf.toggles[key] = !appState.wf.toggles[key];
-          appState.wf.statusMsg = '已更新节点执行偏好设置。';
+    requestAnimationFrame(() => {
+      syncAllFluidTracks();
+      if (next === 'workflow' && canvasEngine) {
+        canvasEngine.render();
+        if (!canvasFittedOnce) {
+          canvasFittedOnce = true;
+          canvasEngine.fitView(false);
         }
-        renderWorkflowCanvas();
-      });
-    });
-
-    track.querySelectorAll('[data-wf-run]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const idx = Number(btn.dataset.wfRun);
-        runWfSingleNode(idx);
-      });
-    });
-  }
-
-  function waitMs(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  async function runWfDemo() {
-    const token = ++appState.wf.demoToken;
-    appState.wf.demoRunning = true;
-    appState.wf.statuses = ['idle', 'idle', 'idle'];
-    appState.wf.statusMsg = '正在执行三节点链路演练：Gemini 架构规划 → Codex 沙箱施工 → Pre-CI 审查...';
-    el('btnWfRunAll').disabled = true;
-    renderWorkflowCanvas();
-    syncTopbarOrb(null);
-
-    const durations = [1400, 1700, 1400];
-    const labels = ['Gemini 正在并行权衡 3 条架构路线...', 'Codex 正在安全沙箱写入代码与捕获 Diff...', 'Pre-CI 正在扫描高危路径并生成 10 秒汇报...'];
-
-    for (let i = 0; i < 3; i += 1) {
-      if (token !== appState.wf.demoToken) return;
-      appState.wf.statuses[i] = 'running';
-      appState.wf.selected = i;
-      appState.wf.statusMsg = labels[i];
-      renderWorkflowCanvas();
-      syncTopbarOrb(null);
-      await waitMs(durations[i]);
-      if (token !== appState.wf.demoToken) return;
-
-      const failed = appState.wf.failLast && i === 2;
-      appState.wf.statuses[i] = failed ? 'error' : 'completed';
-      renderWorkflowCanvas();
-      if (failed) {
-        appState.wf.demoRunning = false;
-        appState.wf.statusMsg = '演练在 Pre-CI 终局门禁处触发 [BLOCKING] 拦截，可点击节点「重试节点」或取消模拟拦截。';
-        el('btnWfRunAll').disabled = false;
-        renderWorkflowCanvas();
-        syncTopbarOrb(appState.currentRun);
-        return;
       }
-    }
-
-    appState.wf.demoRunning = false;
-    appState.wf.statusMsg = '演练完成：三节点全链路 PASS！在底部输入框键入需求即可一键调起真实本机 CLI。';
-    el('btnWfRunAll').disabled = false;
-    renderWorkflowCanvas();
-    syncTopbarOrb(appState.currentRun);
-  }
-
-  async function runWfSingleNode(idx) {
-    const prompt = el('inputPrompt').value.trim();
-    const modeMap = ['plan-only', 'codex-exec', 'codex-review'];
-    if (prompt || idx === 2) {
-      setModeValue(modeMap[idx]);
-      if (!prompt && idx === 2) {
-        el('inputPrompt').value = '对当前工作区未提交变更执行 Pre-CI 代码审查门禁，重点检查高危路径与边界问题。';
-        autoGrowTextarea(el('inputPrompt'));
-      }
-      switchStageView('chat');
-      await startRun();
-      return;
-    }
-
-    // Dry-run single node preview when prompt is empty
-    const token = ++appState.wf.demoToken;
-    appState.wf.demoRunning = true;
-    appState.wf.selected = idx;
-    appState.wf.statuses[idx] = 'running';
-    appState.wf.statusMsg = `正在预演节点 0${idx + 1}（在底部输入需求即可直连真实本机 CLI）...`;
-    renderWorkflowCanvas();
-    syncTopbarOrb(null);
-    await waitMs(1300);
-    if (token !== appState.wf.demoToken) return;
-    const failed = appState.wf.failLast && idx === 2;
-    appState.wf.statuses[idx] = failed ? 'error' : 'completed';
-    appState.wf.demoRunning = false;
-    appState.wf.statusMsg = failed
-      ? '节点 03 触发模拟拦截。请修改配置后点击「重试节点」。'
-      : `节点 0${idx + 1} 预演通过！在下方输入框输入任务后点击即可直接调度真实 CLI。`;
-    renderWorkflowCanvas();
-    syncTopbarOrb(appState.currentRun);
-  }
-
-  function resetWfDemo() {
-    appState.wf.demoToken += 1;
-    appState.wf.demoRunning = false;
-    appState.wf.statuses = ['idle', 'idle', 'idle'];
-    appState.wf.statusMsg = '节点已重置为就绪态。';
-    el('btnWfRunAll').disabled = false;
-    renderWorkflowCanvas();
-    syncTopbarOrb(appState.currentRun);
+    });
   }
 
   async function inspectCurrentWorkspace() {
@@ -3012,16 +2926,31 @@
     });
     el('topbarPipeline')?.querySelectorAll('[data-wf-node]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        appState.wf.selected = Number(btn.dataset.wfNode);
         switchStageView('workflow');
+        if (canvasEngine) canvasEngine.selectKind(Number(btn.dataset.wfNode));
       });
     });
 
-    // Workflow Canvas Controls & Guardrails Sync
-    el('btnWfRunAll')?.addEventListener('click', runWfDemo);
-    el('btnWfReset')?.addEventListener('click', resetWfDemo);
+    // Blender-Style Infinite Canvas Floating HUD Controls
+    document.querySelectorAll('[data-ic-add]').forEach((btn) => {
+      btn.addEventListener('click', () => { if (canvasEngine) canvasEngine.addNode(btn.dataset.icAdd); });
+    });
+    document.querySelectorAll('[data-ic-preset]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('[data-ic-preset]').forEach((b) => b.classList.toggle('is-active', b === btn));
+        if (canvasEngine) canvasEngine.loadPreset(btn.dataset.icPreset);
+      });
+    });
+    el('btnWfRunAll')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.runClusterDemo(); });
+    el('btnWfUndo')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.undo(); });
+    el('btnWfReset')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.resetDemo(); });
+    el('btnWfExport')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.exportJson(); });
+    el('btnWfZoomIn')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.zoomIn(); });
+    el('btnWfZoomOut')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.zoomOut(); });
+    el('btnWfZoomReset')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.resetZoom(); });
+    el('btnWfFit')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.fitView(true); });
     el('chkWfFailLast')?.addEventListener('change', (e) => {
-      appState.wf.failLast = e.target.checked;
+      if (canvasEngine) canvasEngine.setFailLast(e.target.checked);
     });
     ['chkApproval', 'chkWorktree', 'selectSandbox', 'selectCodexEffort', 'selectCodexReviewModel', 'selectMaxRounds'].forEach((id) => {
       el(id)?.addEventListener('change', () => {
@@ -3375,6 +3304,7 @@
   bindEvents();
   waveEngine = initWaveEngine();
   inkDiagrams = initInkOrbitDiagrams();
+  canvasEngine = initInfiniteWorkflowCanvas();
   if (window.ConduitMetalFx) metalEngine = window.ConduitMetalFx.init();
   if (window.ConduitOrbs) window.ConduitOrbs.mountAll(document);
   setModeValue('full-pipeline');

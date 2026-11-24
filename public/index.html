@@ -78,8 +78,21 @@
 
       <!-- Sidebar Footer Utilities -->
       <div class="sidebar-foot">
-        <div class="mini-wave-box sidebar-label" aria-hidden="true">
-          <canvas id="miniWaveCanvas"></canvas>
+        <!-- 21st.dev Audio Visualizer (#44800) Multi-Mode Telemetry Deck -->
+        <div class="signal-deck sidebar-label" id="signalDeck" title="悬停划过触发声学波纹 · 点击右上角切换 5 种可视化引擎">
+          <div class="signal-deck-head">
+            <span class="signal-state-tag mono" id="signalStateLabel">SIGNAL · IDLE</span>
+            <div class="signal-mode-pills" id="signalModePills" role="tablist" aria-label="波形可视化模式">
+              <button type="button" class="sig-pill active" data-viz="bars" title="频谱柱">BAR</button>
+              <button type="button" class="sig-pill" data-viz="grid" title="矩阵点阵">GRD</button>
+              <button type="button" class="sig-pill" data-viz="line" title="双轨示波">WAV</button>
+              <button type="button" class="sig-pill" data-viz="dots" title="能量珠串">DOT</button>
+              <button type="button" class="sig-pill" data-viz="radial" title="环形频谱">RAD</button>
+            </div>
+          </div>
+          <div class="mini-wave-box" id="miniWaveBox">
+            <canvas id="miniWaveCanvas"></canvas>
+          </div>
         </div>
 
         <div class="sidebar-foot-btns">
@@ -248,36 +261,62 @@
         </button>
       </div>
 
-      <!-- Interactive AI Agent Workflow Canvas (adapted from interactive-ai-agent-workflow-node-card.tsx + thinking-orbs.tsx) -->
-      <section class="workflow-stage hidden" id="workflowStage" aria-label="双模型 Agent 节点编排画布">
-        <div class="wf-inner">
-          <header class="wf-header">
-            <div class="wf-head-copy">
-              <span class="wf-kicker mono">INTERACTIVE AGENT WORKFLOW · LIVE TOPOLOGY</span>
-              <h2 class="wf-title">Gemini × Codex 三节点编排画布</h2>
-              <p class="wf-sub">
-                每个节点与底部真实参数、护栏开关及当前运行态实时同步。可直接点击节点单步派发，或开启演练预览观察流动数据线与异常拦截态。
-              </p>
-            </div>
-            <div class="wf-toolbar">
-              <button type="button" class="btn-primary-sm wf-btn" id="btnWfRunAll">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5Z" /></svg>
-                <span>运行链路演练</span>
-              </button>
-              <button type="button" class="btn-secondary-sm wf-btn" id="btnWfReset">重置节点</button>
-              <label class="check-item wf-fail-check">
-                <input type="checkbox" id="chkWfFailLast" />
-                <span>模拟终局拦截</span>
-              </label>
-            </div>
-          </header>
-
-          <div class="wf-canvas-frame" role="region" aria-label="可横向滚动的 Agent 节点画布" tabindex="0">
-            <div class="wf-canvas-track" id="wfCanvasTrack"></div>
+      <!-- Full-Viewport Blender-Style Infinite Agent Cluster Canvas -->
+      <section class="workflow-stage hidden" id="workflowStage" aria-label="Blender 风格无限 Agent 集群编排画布">
+        <div class="ic-viewport" id="wfViewport" tabindex="0">
+          <!-- Transformed Infinite World Layer -->
+          <div class="ic-world" id="wfWorld">
+            <svg class="ic-edges-svg" id="wfEdgesSvg" aria-hidden="true"></svg>
+            <div class="ic-nodes-layer" id="wfNodesLayer"></div>
           </div>
 
-          <div class="wf-status-bar mono-xs" id="wfStatusBar" role="status" aria-live="polite">
-            就绪：点击任意节点上的「单步执行」直接调起真实本机 CLI，或点击上方「运行链路演练」预览三节点协同动效。
+          <!-- Floating Top-Left: Add Agent Node Palette + Presets -->
+          <div class="ic-floating-bar ic-top-left">
+            <div class="ic-add-group" role="group" aria-label="添加 Agent 节点">
+              <button type="button" class="ic-chip-btn" data-ic-add="gemini-plan" title="添加 Gemini 规划节点">+ Gemini 规划</button>
+              <button type="button" class="ic-chip-btn" data-ic-add="codex-exec" title="添加并行 Codex 沙箱工位">+ Codex 工位</button>
+              <button type="button" class="ic-chip-btn is-accent" data-ic-add="cluster-merge" title="添加多路集群聚合合并器">+ 合并器</button>
+              <button type="button" class="ic-chip-btn" data-ic-add="codex-review" title="添加 Pre-CI 代码审查门禁">+ Pre-CI</button>
+            </div>
+            <span class="ic-divider" aria-hidden="true"></span>
+            <div class="ic-preset-group" role="group" aria-label="拓扑预设">
+              <button type="button" class="ic-chip-btn is-active" id="btnPresetCluster" data-ic-preset="cluster">5节点集群合并</button>
+              <button type="button" class="ic-chip-btn" id="btnPresetLinear" data-ic-preset="linear">3节点精简链</button>
+            </div>
+          </div>
+
+          <!-- Floating Top-Right: Execution & Edit Controls -->
+          <div class="ic-floating-bar ic-top-right">
+            <button type="button" class="btn-primary-sm wf-btn" id="btnWfRunAll">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5Z" /></svg>
+              <span>运行集群演练</span>
+            </button>
+            <button type="button" class="ic-chip-btn" id="btnWfUndo" title="撤销上一步 (Ctrl+Z)">撤销</button>
+            <button type="button" class="ic-chip-btn" id="btnWfReset" title="重置运行状态">重置</button>
+            <button type="button" class="ic-chip-btn" id="btnWfExport" title="导出集群拓扑 JSON">JSON</button>
+            <label class="ic-chip-check" title="勾选后在终局门禁触发模拟拦截">
+              <input type="checkbox" id="chkWfFailLast" />
+              <span>模拟拦截</span>
+            </label>
+          </div>
+
+          <!-- Floating Bottom-Left: Live Canvas Telemetry -->
+          <div class="ic-hud-panel ic-bottom-left mono-xs" id="wfStatusBar" role="status" aria-live="polite">
+            无限画布就绪：拖空白处无限平移 · 滚轮缩放 · 拖卡片自由排布 · 拖右端口至左端口连线合并。
+          </div>
+
+          <!-- Floating Bottom-Center: Zoom & Fit HUD -->
+          <div class="ic-floating-bar ic-bottom-center">
+            <button type="button" class="ic-zoom-btn mono" id="btnWfZoomOut" title="缩小">-</button>
+            <button type="button" class="ic-zoom-val mono" id="btnWfZoomReset" title="点击重置为 100%">88%</button>
+            <button type="button" class="ic-zoom-btn mono" id="btnWfZoomIn" title="放大">+</button>
+            <span class="ic-divider" aria-hidden="true"></span>
+            <button type="button" class="ic-chip-btn" id="btnWfFit" title="适配全部节点到视野 (F)">全览 F</button>
+          </div>
+
+          <!-- Floating Bottom-Right: Live Interactive Minimap -->
+          <div class="ic-minimap-card" title="实时缩略导航图（点击居中全览）">
+            <canvas id="wfMinimapCanvas" width="164" height="100"></canvas>
           </div>
         </div>
       </section>
@@ -637,6 +676,7 @@
 
   <script src="/metal-fx.js" defer></script>
   <script src="/thinking-orbs.js" defer></script>
+  <script src="/node-canvas.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

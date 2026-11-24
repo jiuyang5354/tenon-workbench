@@ -125,7 +125,7 @@ async function serveStatic(res, reqPath) {
     const ext = path.extname(resolved).toLowerCase();
     res.writeHead(200, {
       'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
-      'Cache-Control': ext === '.html' ? 'no-store' : 'public, max-age=60',
+      'Cache-Control': 'no-store',
     });
     res.end(content);
   } catch {
