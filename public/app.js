@@ -21,9 +21,11 @@
     surface: 'obsidian',
     accent: 'cobalt',
     inspector: 'standard',
+    metal: 'chromatic',
     fontSize: 14,
     waveAmplitude: 75,
     crosshairs: true,
+    hatch: true,
     motion: true,
   };
 
@@ -46,11 +48,14 @@
     resumeThreadId: '',
     stickyBottom: true,
     gateDirtyText: null,
+    treeGroupOpen: new Map(), // key -> boolean (manual override)
+    treeRowOpen: new Set(),   // key -> expanded row
     palette: { open: false, trigger: '', query: '', startPos: 0, items: [], selectedIdx: 0 },
     tweaks: loadTweaks(),
   };
 
   let waveEngine = null;
+  let metalEngine = null;
   let paletteBlurTimer = null;
   const el = (id) => document.getElementById(id);
 
@@ -77,7 +82,10 @@
     root.dataset.surface = t.surface;
     root.dataset.accent = t.accent;
     root.dataset.inspector = t.inspector;
+    root.dataset.metal = t.metal || 'chromatic';
     root.dataset.crosshairs = t.crosshairs ? 'on' : 'off';
+    root.dataset.hatch = t.hatch ? 'on' : 'off';
+    root.dataset.motion = t.motion ? 'on' : 'off';
     root.style.setProperty('--base-font-size', `${t.fontSize}px`);
 
     el('tweakFontRange').value = String(t.fontSize);
@@ -85,6 +93,7 @@
     el('tweakWaveRange').value = String(t.waveAmplitude);
     el('tweakWaveVal').textContent = `${t.waveAmplitude}%`;
     el('tweakCrosshairs').checked = Boolean(t.crosshairs);
+    el('tweakHatch').checked = Boolean(t.hatch);
     el('tweakMotion').checked = Boolean(t.motion);
 
     document.querySelectorAll('.tweak-pills').forEach((group) => {
@@ -95,6 +104,7 @@
     });
 
     if (waveEngine) waveEngine.sync();
+    if (metalEngine) metalEngine.sync();
     requestAnimationFrame(syncAllFluidTracks);
   }
 
@@ -250,10 +260,293 @@
   }
 
   /* =========================================================================
-     DeepBook Dual Telemetry Wave Engine (Hero Welcome + Sidebar Mini Wave)
+     Ink-Orbit Live SVG Diagrams (Flow + 4-Tool Hub + Scrubbable Insights Chart)
+     Zero-dependency native SVG port adapted for Gemini x Codex Orchestration
+     ========================================================================= */
+  function initInkOrbitDiagrams() {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // 1. Live Flow Diagram (Gemini Orchestrator Cluster -> CONDUIT Hub -> Codex Report Stack)
+    const flowMount = el('inkFlowSvgMount');
+    let reportCount = Math.max(12, appState.runs.length || 0);
+    let flowSide = '';
+
+    function renderFlowSvg() {
+      if (!flowMount) return;
+      const animate = appState.tweaks.motion && !reduced;
+      const nodes = [
+        { x: 56, y: 36, tag: 'PLAN', label: 'Gemini · 架构拆解' },
+        { x: 104, y: 20, tag: 'SPEC', label: '接口契约定义' },
+        { x: 152, y: 38, tag: 'COPY', label: '文案与交互润色' },
+        { x: 46, y: 92, tag: 'RISK', label: '高危路径识别' },
+        { x: 146, y: 116, tag: 'GATE', label: '人工拍板确认' },
+      ];
+      const L1 = 'M117,67 C196,67 210,100 262,100';
+      const L2 = 'M117,73 C186,73 206,120 262,120';
+      const R1 = 'M378,100 C412,100 418,86 450,86';
+      const R2 = 'M378,120 C412,120 418,134 450,134';
+      const rays = [-62, -38, -14, 14, 38, 62]
+        .map((a) => {
+          const x1 = (320 + Math.sin((a * Math.PI) / 180) * 240).toFixed(1);
+          const y1 = (110 - Math.cos((a * Math.PI) / 180) * 240).toFixed(1);
+          const x2 = (320 + Math.sin(((a + 7) * Math.PI) / 180) * 240).toFixed(1);
+          const y2 = (110 - Math.cos(((a + 7) * Math.PI) / 180) * 240).toFixed(1);
+          return `<path d="M320,110 L${x1},${y1} L${x2},${y2}Z" fill="url(#conduitRays)" opacity="0.48" />`;
+        })
+        .join('');
+
+      const packets = animate
+        ? [L1, L2, R1, R2]
+            .map(
+              (d, i) =>
+                `<circle r="2.3" class="ib-pkt"><animateMotion dur="${(2.1 + (i % 2) * 0.55).toFixed(2)}s" begin="${(i * 0.35).toFixed(2)}s" repeatCount="indefinite" path="${d}" /></circle>`
+            )
+            .join('')
+        : '';
+
+      const sheets = [2, 1, 0]
+        .map((k) => {
+          const bars = [18, 26, 15, 31, 23, 35]
+            .map((h, j) => `<rect x="${12 + j * 13}" y="${92 - h}" width="8" height="${h}" fill="${j >= 4 ? 'var(--accent-hex)' : 'var(--ink-primary)'}" opacity="${(0.24 + j * 0.13).toFixed(2)}" />`)
+            .join('');
+          return `
+            <g transform="translate(${450 + k * 12},${40 - k * 10})" opacity="${(1 - k * 0.26).toFixed(2)}">
+              <g class="${k === 0 && animate ? 'ib-sheet-new' : ''}">
+                <rect width="138" height="102" rx="2" fill="var(--bg-surface-2)" stroke="var(--line-strong)" />
+                ${
+                  k === 0
+                    ? `<text x="10" y="16" font-size="7.5" fill="var(--accent-hex)" font-family="var(--font-mono)">RUN #${reportCount} · PASS</text>
+                       <rect x="10" y="24" width="66" height="4.5" rx="1" fill="var(--ink-primary)" opacity="0.8" />
+                       <rect x="10" y="33" width="96" height="2.8" rx="1" fill="var(--line-strong)" />
+                       <rect x="10" y="39" width="80" height="2.8" rx="1" fill="var(--line-strong)" />
+                       ${bars}
+                       <path d="M94 64h32M94 72h26M94 80h30" stroke="var(--line-strong)" stroke-width="2.2" />`
+                    : ''
+                }
+              </g>
+            </g>`;
+        })
+        .join('');
+
+      flowMount.innerHTML = `
+        <svg class="ib-diagram" viewBox="0 0 640 176" role="img" aria-label="Gemini 规划流经 CONDUIT 中枢派发至 Codex 施工与审查报告">
+          <defs>
+            <radialGradient id="conduitGlow" cx="320" cy="110" r="190" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="var(--bg-surface-3)" stop-opacity="0.9" />
+              <stop offset="1" stop-color="var(--bg-surface-1)" stop-opacity="0" />
+            </radialGradient>
+            <linearGradient id="conduitRays" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="var(--line-strong)" stop-opacity="0.55" />
+              <stop offset="1" stop-color="var(--line-strong)" stop-opacity="0" />
+            </linearGradient>
+          </defs>
+          <rect x="0" y="0" width="640" height="176" fill="url(#conduitGlow)" />
+          ${rays}
+          <g data-flow-zone="left">
+            <rect x="16" y="8" width="176" height="132" fill="transparent" />
+            ${nodes.map((n) => `<line x1="${n.x}" y1="${n.y}" x2="104" y2="70" stroke="var(--line-strong)" stroke-dasharray="2 3" />`).join('')}
+            <g transform="translate(91,57)">
+              <rect width="26" height="26" rx="3" class="ib-node ${flowSide === 'left' ? 'ib-node-active' : ''}" />
+              <text x="13" y="17" text-anchor="middle" font-size="11" font-weight="700" fill="var(--accent-hex)" font-family="var(--font-mono)">G</text>
+            </g>
+            ${nodes
+              .map(
+                (n) => `
+                <g>
+                  <rect x="${n.x - 18}" y="${n.y - 10}" width="36" height="20" rx="2" class="ib-node" />
+                  <text x="${n.x}" y="${n.y + 3}" text-anchor="middle" font-size="7" font-weight="600" fill="var(--ink-secondary)" font-family="var(--font-mono)">${n.tag}</text>
+                </g>`
+              )
+              .join('')}
+          </g>
+          <path d="${L1}" class="ib-flow ${flowSide === 'left' ? 'ib-flow-on' : ''}" />
+          <path d="${L2}" class="ib-flow ${flowSide === 'left' ? 'ib-flow-on' : ''} ${animate ? 'ib-dash' : ''}" />
+          <path d="${R1}" class="ib-flow ${flowSide === 'right' ? 'ib-flow-on' : ''}" />
+          <path d="${R2}" class="ib-flow ${flowSide === 'right' ? 'ib-flow-on' : ''} ${animate ? 'ib-dash' : ''}" />
+          ${packets}
+          <g transform="translate(262,88)">
+            <rect x="-4" y="-4" width="124" height="52" rx="4" fill="none" stroke="var(--accent-hex)" opacity="0.45" class="${animate ? 'ib-glow' : ''}" />
+            <rect width="116" height="44" rx="3" class="ib-node ib-node-active" />
+            <rect x="11" y="13" width="18" height="18" fill="none" stroke="var(--ink-primary)" stroke-width="1.2" />
+            <path d="M15 27V17H22L25 20V27" fill="none" stroke="var(--accent-hex)" stroke-width="1.5" />
+            <text x="36" y="25.5" font-size="9" letter-spacing="1.4" font-weight="700" fill="var(--ink-primary)" font-family="var(--font-mono)">CONDUIT</text>
+            <path d="M101 18l4 4-4 4" fill="none" stroke="var(--ink-muted)" stroke-width="1.3" />
+          </g>
+          <g data-flow-zone="right">${sheets}</g>
+        </svg>`;
+
+      flowMount.querySelectorAll('[data-flow-zone]').forEach((g) => {
+        g.addEventListener('mouseenter', () => { flowSide = g.dataset.flowZone; renderFlowSvg(); });
+        g.addEventListener('mouseleave', () => { flowSide = ''; renderFlowSvg(); });
+      });
+    }
+
+    // 2. Live 4-Tool CLI Integrations Hub (AGY / CODEX / GIT / GATE)
+    const hubMount = el('inkHubSvgMount');
+    let hubHover = -1;
+    let hubAuto = 0;
+    const hubTools = [
+      { x: 62, y: 34, code: 'AGY', label: 'Gemini CLI', action: 'env' },
+      { x: 62, y: 114, code: 'CDX', label: 'Codex Exec', action: 'env' },
+      { x: 238, y: 34, code: 'GIT', label: 'Git Diff', action: 'diff' },
+      { x: 238, y: 114, code: 'CI', label: 'Review Gate', action: 'review' },
+    ];
+
+    function renderHubSvg() {
+      if (!hubMount) return;
+      const animate = appState.tweaks.motion && !reduced;
+      const activeIdx = hubHover >= 0 ? hubHover : animate ? hubAuto : -1;
+      const pathFor = (i) => {
+        const t = hubTools[i];
+        const dir = t.x < 150 ? -1 : 1;
+        return `M${150 + dir * 18},74 H${150 + dir * 44} V${t.y} H${t.x - dir * 18}`;
+      };
+
+      hubMount.innerHTML = `
+        <svg class="ib-diagram" viewBox="0 0 300 148" role="group" aria-label="本地 CLI 集成矩阵">
+          ${hubTools.map((_, i) => `<path d="${pathFor(i)}" class="ib-flow ${activeIdx === i ? 'ib-flow-on' : ''}" />`).join('')}
+          ${animate && activeIdx >= 0 ? `<circle r="2.3" class="ib-pkt"><animateMotion dur="1.15s" repeatCount="indefinite" path="${pathFor(activeIdx)}" /></circle>` : ''}
+          <g transform="translate(132,56)">
+            <rect width="36" height="36" rx="3" class="ib-node ib-node-active" />
+            <path d="M12 25V11H20.5L24 14.5V25" fill="none" stroke="var(--accent-hex)" stroke-width="1.6" />
+          </g>
+          ${hubTools
+            .map(
+              (t, i) => `
+              <g class="ib-tool ${activeIdx === i ? 'ib-tool-on' : ''}" data-hub-idx="${i}" tabindex="0" role="button" aria-label="${t.label}">
+                <rect x="${t.x - 18}" y="${t.y - 15}" width="36" height="30" rx="3" class="ib-node" />
+                <text x="${t.x}" y="${t.y + 3.5}" text-anchor="middle" font-size="9" font-weight="700" fill="var(--ink-primary)" font-family="var(--font-mono)">${t.code}</text>
+                <text x="${t.x}" y="${t.y + (t.y < 74 ? -21 : 27)}" text-anchor="middle" font-size="7.5" fill="var(--ink-secondary)" font-family="var(--font-mono)" opacity="${activeIdx === i ? '1' : '0'}">${t.label}</text>
+              </g>`
+            )
+            .join('')}
+          <text x="150" y="114" text-anchor="middle" font-size="7.5" fill="var(--ink-muted)" font-family="var(--font-mono)">
+            ${activeIdx >= 0 ? `syncing · ${hubTools[activeIdx].label.toLowerCase()}` : '4 local tools connected'}
+          </text>
+        </svg>`;
+
+      hubMount.querySelectorAll('[data-hub-idx]').forEach((node) => {
+        const idx = Number(node.dataset.hubIdx);
+        node.addEventListener('mouseenter', () => { hubHover = idx; renderHubSvg(); });
+        node.addEventListener('mouseleave', () => { hubHover = -1; renderHubSvg(); });
+        node.addEventListener('click', () => {
+          const act = hubTools[idx].action;
+          if (act === 'diff') openInspector('diff');
+          else if (act === 'review') openInspector('review');
+          else { closeAllPopovers('envPopover'); el('envPopover').classList.remove('hidden'); }
+        });
+      });
+    }
+
+    // 3. Scrubbable Predictive / Throughput Insights Chart
+    const chartMount = el('inkChartSvgMount');
+    const chartValues = [22, 26, 25, 32, 30, 38, 36, 44, 42, 51, 56, 64];
+    const forecastFrom = 8;
+    let chartHover = -1;
+
+    function renderChartSvg() {
+      if (!chartMount) return;
+      const W = 300;
+      const H = 132;
+      const pad = 14;
+      const lo = Math.min(...chartValues);
+      const hi = Math.max(...chartValues);
+      const span = hi - lo || 1;
+      const pts = chartValues.map((v, i) => [
+        pad + (i / (chartValues.length - 1)) * (W - pad * 2),
+        H - pad - ((v - lo) / span) * (H - pad * 2),
+      ]);
+      let line = '';
+      pts.forEach(([x, y], i) => {
+        if (i === 0) { line = `M${x.toFixed(1)},${y.toFixed(1)}`; return; }
+        const [px, py] = pts[i - 1];
+        const cx = (px + x) / 2;
+        line += ` C${cx.toFixed(1)},${py.toFixed(1)} ${cx.toFixed(1)},${y.toFixed(1)} ${x.toFixed(1)},${y.toFixed(1)}`;
+      });
+      const area = `${line} L${pts[pts.length - 1][0].toFixed(1)},${H - pad} L${pts[0][0].toFixed(1)},${H - pad} Z`;
+      const idx = chartHover >= 0 ? chartHover : pts.length - 1;
+      const p = pts[idx];
+      const pct = Math.round(((chartValues[idx] - chartValues[0]) / chartValues[0]) * 100);
+      const tx = Math.min(W - 42, Math.max(42, p[0]));
+      const ty = p[1] < 34 ? p[1] + 22 : p[1] - 12;
+      const animate = appState.tweaks.motion && !reduced;
+
+      chartMount.innerHTML = `
+        <svg class="ib-diagram ib-chart" viewBox="0 0 ${W} ${H + 6}" role="img" aria-label="双模型协同吞吐与门禁效率曲线">
+          <defs>
+            <linearGradient id="conduitChartArea" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="var(--accent-hex)" stop-opacity="0.22" />
+              <stop offset="1" stop-color="var(--accent-hex)" stop-opacity="0" />
+            </linearGradient>
+          </defs>
+          ${[0.25, 0.5, 0.75].map((g) => `<line x1="14" x2="${W - 14}" y1="${(H * g).toFixed(1)}" y2="${(H * g).toFixed(1)}" stroke="var(--line-subtle)" />`).join('')}
+          <path d="${area}" fill="url(#conduitChartArea)" />
+          <path d="${line}" fill="none" stroke="var(--accent-hex)" stroke-width="1.6" />
+          <line x1="${pts[forecastFrom][0].toFixed(1)}" x2="${pts[forecastFrom][0].toFixed(1)}" y1="10" y2="${H - 14}" stroke="var(--line-strong)" stroke-dasharray="2 3" />
+          <text x="${(pts[forecastFrom][0] - 4).toFixed(1)}" y="${H - 18}" text-anchor="end" font-size="7" fill="var(--ink-muted)" font-family="var(--font-mono)">GATE</text>
+          ${chartHover >= 0 ? `<line x1="${p[0].toFixed(1)}" x2="${p[0].toFixed(1)}" y1="8" y2="${H - 14}" stroke="var(--ink-primary)" stroke-opacity="0.32" />` : ''}
+          ${animate && chartHover < 0 ? `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="7" fill="var(--accent-hex)" opacity="0.22" class="ib-glow" />` : ''}
+          <circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.2" fill="var(--bg-canvas)" stroke="var(--accent-hex)" stroke-width="1.6" />
+          <g transform="translate(${tx.toFixed(1)},${ty.toFixed(1)})">
+            <rect x="-34" y="-11" width="68" height="15" rx="2" fill="var(--bg-inset-light)" />
+            <text x="0" y="-1" text-anchor="middle" font-size="7.5" fill="var(--ink-inverse)" font-family="var(--font-mono)">
+              ${idx >= forecastFrom ? 'gate ' : `step ${idx + 1} `}${pct >= 0 ? '+' : ''}${pct}%
+            </text>
+          </g>
+        </svg>`;
+
+      const svg = chartMount.querySelector('svg');
+      if (svg) {
+        svg.addEventListener('pointermove', (e) => {
+          const r = svg.getBoundingClientRect();
+          const relX = ((e.clientX - r.left) / r.width) * W;
+          let best = 0;
+          for (let i = 1; i < pts.length; i += 1) {
+            if (Math.abs(pts[i][0] - relX) < Math.abs(pts[best][0] - relX)) best = i;
+          }
+          if (best !== chartHover) {
+            chartHover = best;
+            renderChartSvg();
+          }
+        });
+        svg.addEventListener('pointerleave', () => {
+          chartHover = -1;
+          renderChartSvg();
+        });
+      }
+    }
+
+    renderFlowSvg();
+    renderHubSvg();
+    renderChartSvg();
+
+    setInterval(() => {
+      if (!appState.tweaks.motion || reduced || el('welcomeStage').classList.contains('hidden')) return;
+      if (hubHover < 0) {
+        hubAuto = (hubAuto + 1) % hubTools.length;
+        renderHubSvg();
+      }
+    }, 1800);
+
+    setInterval(() => {
+      if (!appState.tweaks.motion || reduced || el('welcomeStage').classList.contains('hidden')) return;
+      reportCount += 1;
+      renderFlowSvg();
+    }, 3400);
+
+    return {
+      sync: () => {
+        renderFlowSvg();
+        renderHubSvg();
+        renderChartSvg();
+      },
+    };
+  }
+
+  /* =========================================================================
+     DeepBook Sidebar Mini Telemetry Wave Engine
      ========================================================================= */
   function initWaveEngine() {
-    const heroCanvas = el('heroWaveCanvas');
     const miniCanvas = el('miniWaveCanvas');
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     let phase = 0;
@@ -319,7 +612,6 @@
       if (advance && appState.tweaks.motion && !reducedMotion) {
         phase += isStreaming ? 0.065 : 0.015;
       }
-      if (!el('welcomeStage').classList.contains('hidden')) drawOne(heroCanvas, 7, 26);
       drawOne(miniCanvas, 5, 11);
     }
 
@@ -333,7 +625,6 @@
     }
 
     function resize() {
-      sizeCanvas(heroCanvas);
       sizeCanvas(miniCanvas);
       drawAll(false);
     }
@@ -736,7 +1027,7 @@
     el('topbarTitle').textContent = '新协同会话';
     el('topbarMeta').textContent = 'GEMINI 4 NEON × CODEX CLI';
     el('btnCancelRun').classList.add('hidden');
-    el('btnStartRun').classList.remove('hidden');
+    el('sendCtaGroup').classList.remove('hidden');
     el('composerShell').classList.remove('is-streaming');
     updatePipelinePills(null);
     renderSidebarThreads();
@@ -776,49 +1067,147 @@
     });
   }
 
-  function renderToolTraceHtml(events, sourceFilter) {
+  function treeGlyphSvg(kind) {
+    if (kind === 'command') {
+      return '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2.5 4.5L6 8L2.5 11.5M7.5 11.5H13.5" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    }
+    if (kind === 'file_change') {
+      return '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 2.5H9.5L12.5 5.5V13.5H4V2.5Z" stroke="currentColor" stroke-width="1.25"/><path d="M6.5 8.5H10M8.25 6.75V10.25" stroke="currentColor" stroke-width="1.25"/></svg>';
+    }
+    if (kind === 'reasoning' || kind === 'step') {
+      return '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.2" stroke="currentColor" stroke-width="1.25"/><path d="M8 5.2V8L10 9.4" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>';
+    }
+    return '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="3" y="3" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.25"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/></svg>';
+  }
+
+  /**
+   * Renders the ai-thinking-and-tool-calls SVG Activity Rail Tree:
+   * - Single continuous SVG trunk (x=12.5) with curved Q elbows per row
+   * - Live shimmer summary header ("ran 2 commands · edited 1 file")
+   * - Auto-open while working, auto-collapses cleanly when settled (manual clicks always win)
+   */
+  function renderToolTraceHtml(events, sourceFilter, isWorking, groupId) {
     const items = (events || []).filter((e) => {
       if (sourceFilter && e.source !== sourceFilter) return false;
       return ['command', 'file_change', 'reasoning', 'step', 'stage', 'worktree'].includes(e.kind);
     });
     if (items.length === 0) return '';
 
-    return `<div class="tool-trace-list">${items
-      .slice(-12)
-      .map((ev) => {
-        let tag = ev.kind.toUpperCase();
-        let detail = ev.text || '';
-        let body = ev.output || ev.text || '';
+    const shown = items.slice(-14);
+    let cmds = 0;
+    let edits = 0;
+    let thoughts = 0;
+    let failedCount = 0;
+    shown.forEach((ev) => {
+      if (ev.kind === 'command') cmds += 1;
+      else if (ev.kind === 'file_change') edits += (ev.changes?.length || 1);
+      else if (ev.kind === 'reasoning' || ev.kind === 'step') thoughts += 1;
+      if (ev.exitCode != null && ev.exitCode > 0) failedCount += 1;
+    });
+
+    const segs = [];
+    if (cmds > 0) segs.push(`运行 ${cmds} 条命令`);
+    if (edits > 0) segs.push(`修改 ${edits} 处文件`);
+    if (thoughts > 0) segs.push(`推理 ${thoughts} 步`);
+    if (failedCount > 0) segs.push(`${failedCount} 项失败`);
+    const summaryText =
+      segs.length > 0
+        ? segs.join(' · ')
+        : isWorking
+          ? 'Thinking · 正在协同调度...'
+          : `已完成 ${shown.length} 步调度轨迹`;
+
+    const isOpen = appState.treeGroupOpen.has(groupId)
+      ? appState.treeGroupOpen.get(groupId)
+      : isWorking;
+
+    const rowsHtml = shown
+      .map((ev, idx) => {
+        const rowKey = `${groupId}:${idx}`;
+        const rowOpen = appState.treeRowOpen.has(rowKey);
+        const first = idx === 0;
+        const last = idx === shown.length - 1;
+        const isRowActive = isWorking && last;
+        const failed = ev.exitCode != null && ev.exitCode > 0;
+
+        let verb = 'Stage';
+        let pill = ev.text || '';
+        let bodyHtml = '';
+        let badge = '';
+
         if (ev.kind === 'command') {
-          tag = ev.exitCode === 0 ? 'CMD OK' : ev.exitCode != null ? `CMD ${ev.exitCode}` : 'CMD';
-          detail = ev.command || '运行命令';
-          body = ev.output || `(exit=${ev.exitCode ?? 'running'})`;
+          verb = 'Run';
+          pill = ev.command || 'command';
+          if (ev.exitCode === 0) badge = '<span class="tree-exit-ok">exit 0</span>';
+          else if (ev.exitCode != null) badge = `<span class="tree-exit-err">exit ${ev.exitCode}</span>`;
+          bodyHtml = `
+            <div class="tree-terminal-card">
+              <div class="tree-terminal-head">
+                <span class="mono-xs">$ ${escapeHtml(ev.command || '')}</span>
+                ${badge}
+              </div>
+              <div class="tree-terminal-out">${escapeHtml(ev.output || '(无终端输出)')}</div>
+            </div>`;
         } else if (ev.kind === 'file_change') {
-          tag = 'EDIT';
+          verb = 'Edit';
           const paths = (ev.changes || []).map((c) => c.path || c).join(', ');
-          detail = paths || '文件变更';
-          body = JSON.stringify(ev.changes || [], null, 2);
+          pill = paths || 'workspace';
+          bodyHtml = `<div class="tree-thought-body mono">${escapeHtml(JSON.stringify(ev.changes || [], null, 2))}</div>`;
         } else if (ev.kind === 'reasoning') {
-          tag = 'THINK';
-          detail = (ev.text || '').slice(0, 72);
+          verb = 'Thought process';
+          pill = (ev.text || '').slice(0, 60);
+          bodyHtml = `<div class="tree-thought-body">${escapeHtml(ev.text || '')}</div>`;
         } else if (ev.kind === 'step') {
-          tag = 'STEP';
-          detail = `${ev.stepType || 'step'} (${ev.state || ''})`;
-          body = detail;
+          verb = 'Step';
+          pill = `${ev.stepType || 'step'} (${ev.state || ''})`;
+          bodyHtml = `<div class="tree-thought-body">${escapeHtml(pill)}</div>`;
+        } else {
+          verb = ev.kind === 'worktree' ? 'Worktree' : 'Stage';
+          pill = (ev.text || '').slice(0, 80);
+          bodyHtml = `<div class="tree-thought-body">${escapeHtml(ev.text || '')}</div>`;
         }
+
+        const continues = !last || rowOpen;
+        const railSvg = `
+          <svg class="tree-rail-svg" width="28" height="32" aria-hidden="true">
+            <line x1="12.5" y1="${first ? -10 : 0}" x2="12.5" y2="10" stroke-width="1" class="tree-rail-stroke" />
+            <path d="M12.5 10 Q12.5 16 18.5 16 H28" fill="none" stroke-width="1" class="tree-rail-stroke" />
+            ${continues ? '<line x1="12.5" y1="10" x2="12.5" y2="100%" stroke-width="1" class="tree-rail-stroke" />' : ''}
+          </svg>`;
+
         return `
-          <details class="tool-call-card">
-            <summary class="tool-call-summary">
-              <span class="tool-call-left">
-                <span class="tool-call-tag">${escapeHtml(tag)}</span>
-                <span class="tool-call-detail">${escapeHtml(detail)}</span>
-              </span>
-              <span class="mono-xs">▾</span>
-            </summary>
-            <div class="tool-call-body">${escapeHtml(body)}</div>
-          </details>`;
+          <div class="tree-row ${failed ? 'is-failed' : ''} ${rowOpen ? 'is-row-open' : ''}">
+            ${railSvg}
+            <span class="tree-row-icon" aria-hidden="true">
+              ${isRowActive ? '<span class="tree-spinner"></span>' : treeGlyphSvg(ev.kind)}
+            </span>
+            <button type="button" class="tree-row-btn" data-tree-row="${escapeHtml(rowKey)}" aria-expanded="${rowOpen}">
+              <span class="tree-row-verb">${escapeHtml(verb)}</span>
+              ${pill ? `<span class="tree-pill">${escapeHtml(pill)}</span>` : ''}
+              ${badge}
+              <span class="tree-row-caret">${rowOpen ? '▾' : '▸'}</span>
+            </button>
+            <div class="tree-row-fold">
+              <div class="tree-row-fold-inner">${bodyHtml}</div>
+            </div>
+          </div>`;
       })
-      .join('')}</div>`;
+      .join('');
+
+    return `
+      <div class="activity-tree-group ${isOpen ? 'is-open' : ''}">
+        <button type="button" class="tree-group-btn" data-tree-group="${escapeHtml(groupId)}" aria-expanded="${isOpen}">
+          <span class="tree-chevron-wrap" aria-hidden="true">
+            <svg class="tree-chevron-svg" width="13" height="13" viewBox="0 0 16 16" fill="none">
+              <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span class="tree-group-title ${isWorking ? 'is-live' : ''}">${escapeHtml(summaryText)}</span>
+        </button>
+        <div class="tree-rows-collapse">
+          <div class="tree-rows-inner">${rowsHtml}</div>
+        </div>
+      </div>`;
   }
 
   function renderConversationThread(run) {
@@ -829,7 +1218,7 @@
 
     const isActive = run.status === 'running' || run.status === 'awaiting_approval';
     el('btnCancelRun').classList.toggle('hidden', !isActive);
-    el('btnStartRun').classList.toggle('hidden', isActive);
+    el('sendCtaGroup').classList.toggle('hidden', isActive);
     el('composerShell').classList.toggle('is-streaming', run.status === 'running');
 
     const totalTokens = (run.metrics?.geminiTokens || 0) + (run.metrics?.codexTokens || 0);
@@ -886,7 +1275,7 @@
             </div>
             <span class="agent-status-pill ${escapeHtml(g.status || '')} ${isStreamingG ? 'is-shimmer' : ''}">${statusText}</span>
           </header>
-          ${renderToolTraceHtml(run.events, 'gemini')}
+          ${renderToolTraceHtml(run.events, 'gemini', isStreamingG, `${run.id}:gemini`)}
           ${text ? `<div class="markdown-output">${renderMarkdown(text)}</div>` : isStreamingG ? '<div class="mono-xs is-shimmer">正在拆解需求与接口契约...</div>' : ''}
           ${g.error && run.activeStage !== 'summary' ? `<div class="error-banner">${escapeHtml(g.error)}</div>` : ''}
           <footer class="agent-turn-foot">
@@ -937,7 +1326,7 @@
             </div>
             <span class="agent-status-pill ${escapeHtml(c.status || '')} ${isStreamingC ? 'is-shimmer' : ''}">${statusText}</span>
           </header>
-          ${renderToolTraceHtml(run.events, 'codex')}
+          ${renderToolTraceHtml(run.events, 'codex', isStreamingC, `${run.id}:codex`)}
           ${c.execText ? `<div class="markdown-output">${renderMarkdown(c.execText)}</div>` : isStreamingC ? '<div class="mono-xs is-shimmer">Codex 正在读取工作区并编写代码...</div>' : ''}
           ${
             c.diff
@@ -1054,6 +1443,24 @@
   }
 
   function bindThreadDynamicHandlers(container, run) {
+    container.querySelectorAll('[data-tree-group]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const gid = btn.dataset.treeGroup;
+        const curr = btn.getAttribute('aria-expanded') === 'true';
+        appState.treeGroupOpen.set(gid, !curr);
+        renderConversationThread(run);
+      });
+    });
+
+    container.querySelectorAll('[data-tree-row]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const rkey = btn.dataset.treeRow;
+        if (appState.treeRowOpen.has(rkey)) appState.treeRowOpen.delete(rkey);
+        else appState.treeRowOpen.add(rkey);
+        renderConversationThread(run);
+      });
+    });
+
     container.querySelectorAll('[data-open-insp]').forEach((btn) => {
       btn.addEventListener('click', () => {
         openInspector(btn.dataset.openInsp);
@@ -1633,8 +2040,8 @@
       renderSidebarThreads();
     });
 
-    // Starter prompt cards
-    document.querySelectorAll('.starter-card').forEach((card) => {
+    // Starter copy buttons inside Ink-Orbit Bento
+    document.querySelectorAll('[data-starter-mode]').forEach((card) => {
       card.addEventListener('click', () => {
         el('selectMode').value = card.dataset.starterMode;
         const ta = el('inputPrompt');
@@ -1805,6 +2212,11 @@
     });
 
     el('btnStartRun').addEventListener('click', startRun);
+    el('btnQuickPlan').addEventListener('click', () => {
+      el('selectMode').value = 'plan-only';
+      showToast('已切换为「Gemini 独立规划」模式');
+      el('inputPrompt').focus();
+    });
     el('btnCancelRun').addEventListener('click', async () => {
       if (!appState.currentRun) return;
       try {
@@ -1850,9 +2262,15 @@
       applyTweaks();
       saveTweaks();
     });
+    el('tweakHatch').addEventListener('change', (e) => {
+      appState.tweaks.hatch = e.target.checked;
+      applyTweaks();
+      saveTweaks();
+    });
     el('tweakMotion').addEventListener('change', (e) => {
       appState.tweaks.motion = e.target.checked;
       applyTweaks();
+      if (inkDiagrams) inkDiagrams.sync();
       saveTweaks();
     });
     el('btnResetTweaks').addEventListener('click', () => {
@@ -1897,9 +2315,12 @@
   }
 
   // Bootstrap
+  let inkDiagrams = null;
   applyTweaks();
   bindEvents();
   waveEngine = initWaveEngine();
+  inkDiagrams = initInkOrbitDiagrams();
+  if (window.ConduitMetalFx) metalEngine = window.ConduitMetalFx.init();
   initGlobalEvents();
   loadHealth();
   loadModels(false);

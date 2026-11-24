@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-surface="obsidian" data-accent="cobalt" data-inspector="standard" data-crosshairs="on">
+<html lang="zh-CN" data-surface="obsidian" data-accent="cobalt" data-inspector="standard" data-crosshairs="on" data-hatch="on" data-metal="chromatic">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -40,14 +40,16 @@
         </button>
       </div>
 
-      <!-- Primary New Thread Button -->
+      <!-- Primary New Thread Button (wrapped in 21st.dev Liquid Metal ring) -->
       <div class="sidebar-top-actions">
-        <button type="button" class="btn-new-chat" id="btnNewChat" title="新建协同会话">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M8 3V13M3 8H13" stroke="currentColor" stroke-width="1.5" />
-          </svg>
-          <span class="sidebar-label">新建协同会话</span>
-        </button>
+        <div class="metal-fx-wrap metal-fx-block" data-metal-fx data-metal-variant="pill" data-metal-ring="1.8">
+          <button type="button" class="btn-new-chat" id="btnNewChat" title="新建协同会话">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M8 3V13M3 8H13" stroke="currentColor" stroke-width="1.5" />
+            </svg>
+            <span class="sidebar-label">新建协同会话</span>
+          </button>
+        </div>
 
         <!-- Active Workspace Pill -->
         <button type="button" class="ws-selector-card" id="btnWsPopover" title="点击切换或探测目标工程目录">
@@ -157,46 +159,73 @@
       <!-- Scrollable Conversation Feed (21st.dev Conversation #46450) -->
       <div class="conversation-viewport" id="conversationViewport" role="log" aria-label="双模型协同对话流" tabindex="0">
         <div class="conversation-column" id="conversationColumn">
-          <!-- Centered Codex-Style Empty State -->
+          <!-- Centered Codex-Style Empty State + Ink-Orbit Live Architectural Bento -->
           <section class="welcome-stage" id="welcomeStage">
-            <div class="welcome-wave-frame instrument-frame">
-              <span class="crosshair tl" aria-hidden="true">+</span>
-              <span class="crosshair tr" aria-hidden="true">+</span>
-              <span class="crosshair bl" aria-hidden="true">+</span>
-              <span class="crosshair br" aria-hidden="true">+</span>
-              <canvas id="heroWaveCanvas"></canvas>
-              <div class="wave-overlay-label">
-                <span class="mono-xs">CONDUIT DUAL-MODEL ENGINE</span>
-                <span class="mono-xs" id="welcomeEnvTag">LOCAL CLI READY</span>
+            <div class="ink-sec">
+              <div class="ink-head">
+                <span class="ink-tag mono" id="welcomeEnvTag">DUAL-MODEL ORCHESTRATION · LOCAL CLI READY</span>
+                <h1 class="welcome-title">
+                  <span>Smart <span class="ink-muted-word">Multi-Model</span></span>
+                  <span>Orchestration</span>
+                </h1>
+                <p class="welcome-sub">
+                  像 Codex 桌面端一样自然对话。Gemini 负责需求拆解与人话交付，Codex 在安全沙箱中完成硬核施工与 Pre-CI 审查门禁。
+                </p>
               </div>
-            </div>
 
-            <h1 class="welcome-title">Plan. Dispatch. Verify.</h1>
-            <p class="welcome-sub">
-              像使用 Codex 桌面端一样自然对话。Gemini 负责拆解架构与人话汇报，Codex 在安全沙箱中完成硬核施工与分级代码审查。
-            </p>
+              <!-- 3-Card Live Interactive SVG Bento (adapted from InkOrbitFeatures) -->
+              <div class="ink-bento" id="inkOrbitBento">
+                <!-- Card 1 (Wide): Live Gemini -> CONDUIT Hub -> Codex Report Stack Flow -->
+                <div class="ink-frame ink-wide" id="inkFlowFrame">
+                  <span class="ib-c ib-c-tl" aria-hidden="true"></span>
+                  <span class="ib-c ib-c-tr" aria-hidden="true"></span>
+                  <span class="ib-c ib-c-bl" aria-hidden="true"></span>
+                  <span class="ib-c ib-c-br" aria-hidden="true"></span>
+                  <div class="ink-card ink-card-flush">
+                    <div id="inkFlowSvgMount"></div>
+                    <div class="ink-wide-copy">
+                      <button type="button" class="ink-copy-btn" data-starter-mode="full-pipeline" data-starter-prompt="分析当前项目结构，为一个新功能先出接口契约与实施方案，等我拍板后再派发 Codex 实现并过 Pre-CI 审查。">
+                        <h3>01 · 全链路双模型协同</h3>
+                        <p>Gemini 拆解接口契约并等待你拍板，Codex 在安全沙箱施工并自动沉淀改动 Diff。</p>
+                      </button>
+                      <button type="button" class="ink-copy-btn" data-starter-mode="plan-only" data-starter-prompt="用只读模式评估当前工程目录的模块划分与潜在耦合风险，输出 3 条可落地的重构方案与验收标准。">
+                        <h3>02 · 只读规划与人话交付</h3>
+                        <p>复杂任务先由 Gemini 只读审视结构与边界，最终把 Diff 与审查结论翻译为 10 秒速览汇报。</p>
+                      </button>
+                    </div>
+                  </div>
+                </div>
 
-            <div class="starter-grid">
-              <button type="button" class="starter-card" data-starter-mode="full-pipeline" data-starter-prompt="分析当前项目结构，为一个新功能先出接口契约与实施方案，等我拍板后再派发 Codex 实现并过 Pre-CI 审查。">
-                <span class="starter-code mono">01 / FULL PIPELINE</span>
-                <span class="starter-title">全链路双模型协同开发</span>
-                <span class="starter-desc">Gemini 规划 → 人工拍板 → Codex 施工 → 审查门禁 → 人话交付</span>
-              </button>
-              <button type="button" class="starter-card" data-starter-mode="plan-only" data-starter-prompt="用只读模式评估当前工程目录的模块划分与潜在耦合风险，输出 3 条可落地的重构方案与验收标准。">
-                <span class="starter-code mono">02 / PLAN ONLY</span>
-                <span class="starter-title">Gemini 只读架构军师</span>
-                <span class="starter-desc">只读拆解复杂需求、接口边界与机械检查项，不改动代码</span>
-              </button>
-              <button type="button" class="starter-card" data-starter-mode="codex-review" data-starter-prompt="对当前工作区的未提交变更执行 Pre-CI 两级代码审查，严查数据丢失、越权和边界缺陷。">
-                <span class="starter-code mono">03 / PRE-CI GATE</span>
-                <span class="starter-title">Codex 前置代码审查门禁</span>
-                <span class="starter-desc">区分 BLOCKING 与 SUGGESTION，命中高危文件自动升 xhigh</span>
-              </button>
-              <button type="button" class="starter-card" data-starter-mode="copy-polish" data-starter-prompt="请帮我润色这段空状态文案：选中对话里的一段话，点侧边问就能在这儿顺便问一句，不打断它正在做的事。">
-                <span class="starter-code mono">04 / COPY ADVISOR</span>
-                <span class="starter-title">Gemini 界面文案与交互顾问</span>
-                <span class="starter-desc">去除 AI 解释腔，输出改写前后对照表与状态文案建议</span>
-              </button>
+                <!-- Card 2: Live 4-Tool CLI Integrations Hub -->
+                <div class="ink-frame" id="inkHubFrame">
+                  <span class="ib-c ib-c-tl" aria-hidden="true"></span>
+                  <span class="ib-c ib-c-tr" aria-hidden="true"></span>
+                  <span class="ib-c ib-c-bl" aria-hidden="true"></span>
+                  <span class="ib-c ib-c-br" aria-hidden="true"></span>
+                  <div class="ink-card">
+                    <div id="inkHubSvgMount"></div>
+                    <button type="button" class="ink-copy-btn" data-starter-mode="codex-review" data-starter-prompt="对当前工作区的未提交变更执行 Pre-CI 两级代码审查，严查数据丢失、越权和边界缺陷。">
+                      <h3>03 · 本地 CLI 工具矩阵与门禁</h3>
+                      <p>原生串联 AGY、Codex、Git Worktree 与 Pre-CI 审查，命中高危文件自动升档 xhigh。</p>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Card 3: Scrubbable Telemetry & Copy/Quality Insights Chart -->
+                <div class="ink-frame" id="inkChartFrame">
+                  <span class="ib-c ib-c-tl" aria-hidden="true"></span>
+                  <span class="ib-c ib-c-tr" aria-hidden="true"></span>
+                  <span class="ib-c ib-c-bl" aria-hidden="true"></span>
+                  <span class="ib-c ib-c-br" aria-hidden="true"></span>
+                  <div class="ink-card">
+                    <div id="inkChartSvgMount"></div>
+                    <button type="button" class="ink-copy-btn" data-starter-mode="copy-polish" data-starter-prompt="请帮我润色这段空状态文案：选中对话里的一段话，点侧边问就能在这儿顺便问一句，不打断它正在做的事。">
+                      <h3>04 · 吞吐轨迹与文案顾问</h3>
+                      <p>在图表上滑动可实时查看调度吞吐曲线；点击即可呼出 Gemini 文案与交互去 AI 味顾问。</p>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
 
@@ -271,12 +300,24 @@
                 </svg>
                 <span>停止</span>
               </button>
-              <button type="button" class="btn-send-icon" id="btnStartRun" title="发送并启动协同管线 (Ctrl+Enter)">
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                  <path d="M8 13V3M3.5 7.5L8 3L12.5 7.5" stroke="currentColor" stroke-width="1.6" />
-                </svg>
-                <span>派发</span>
-              </button>
+              <!-- 21st.dev Liquid Metal (metal-fx) Pill CTA + Circular Spark Trigger -->
+              <div class="metal-cta-pair" id="sendCtaGroup">
+                <div class="metal-fx-wrap" data-metal-fx data-metal-variant="pill" data-metal-ring="2">
+                  <button type="button" class="btn-send-metal" id="btnStartRun" title="发送并启动协同管线 (Ctrl+Enter)">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="M8 13V3M3.5 7.5L8 3L12.5 7.5" stroke="currentColor" stroke-width="1.6" />
+                    </svg>
+                    <span>派发协同</span>
+                  </button>
+                </div>
+                <div class="metal-fx-wrap metal-fx-circle" data-metal-fx data-metal-variant="circle" data-metal-ring="1.8">
+                  <button type="button" class="btn-circle-metal" id="btnQuickPlan" title="一键切换为 Gemini 只读独立规划">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="M8 2L9.4 6.6L14 8L9.4 9.4L8 14L6.6 9.4L2 8L6.6 6.6L8 2Z" stroke="currentColor" stroke-width="1.2" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -493,6 +534,15 @@
     </div>
 
     <div class="tweak-group">
+      <span class="tweak-label">液态金属边环 (metal-fx)</span>
+      <div class="tweak-pills" data-tweak="metal">
+        <button type="button" data-val="chromatic" class="active">虹彩镀铬</button>
+        <button type="button" data-val="silver">冷晶银</button>
+        <button type="button" data-val="off">关闭</button>
+      </div>
+    </div>
+
+    <div class="tweak-group">
       <span class="tweak-label">基础字号：<span class="mono" id="tweakFontVal">14px</span></span>
       <input type="range" id="tweakFontRange" min="13" max="16" step="1" value="14" />
     </div>
@@ -505,11 +555,15 @@
     <div class="tweak-group tweak-row-check">
       <label class="check-item">
         <input type="checkbox" id="tweakCrosshairs" checked />
-        <span>四角 + 准星</span>
+        <span>折角护框</span>
+      </label>
+      <label class="check-item">
+        <input type="checkbox" id="tweakHatch" checked />
+        <span>斜线工程底纹</span>
       </label>
       <label class="check-item">
         <input type="checkbox" id="tweakMotion" checked />
-        <span>波形实时脉动</span>
+        <span>动态脉动</span>
       </label>
     </div>
 
@@ -521,6 +575,7 @@
   <!-- Toast feedback rack -->
   <div class="toast-rack" id="toastRack" role="status" aria-live="polite"></div>
 
+  <script src="/metal-fx.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

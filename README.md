@@ -15,7 +15,11 @@
   4. **审查门禁**：针对工作区 Git 变更运行两级审查（`BLOCKING` vs `SUGGESTION`），命中 auth / payment / permission / deploy 等路径自动升档 `xhigh`
   5. **文案顾问**：请 Gemini 4 Neon 去除界面文案与交互说明中的 AI 解释腔
 * **附带三套独立 CLI 脚本 & 规则模板**：即使不开网页，也可以在终端或 Antigravity 中直接调用 `gemini-ask.mjs`、`codex-worker.mjs`、`codex-review.mjs`，并内置 `templates/GEMINI.md` 与 `templates/CODEX.md`。
-* **Codex 桌面端聊天流式界面 + 21st.dev 组件体系 + 实时调参台（Tweaks）**：以 Awwwards SOTD 7.37 标杆 **DeepBook** 为唯一视觉基调，采用 100vh 三栏桌面端布局（左侧分组会话栏 + 中央时间轴对话流与底部悬浮富指令输入框 + 右侧可折叠 Diff/审查/事件终端面板），融合 `21st.dev` `Chat Sidebar`、`Conversation`、`Tool Call`、`Artifact`、`Rich Prompt Input`（`/` 斜杠切模式 + `@` 引用工作区文件）、`Diff Viewer`（Unified/Split 双栏对比）、`Border Beam` 与 `Segmented Tabs`；内置可完全收起的 **Tweaks 面板**（快捷键 `T` 呼出）。
+* **Codex 桌面端聊天流式界面 + Ink-Orbit / Liquid Metal / 树状思考轨 + 实时调参台（Tweaks）**：以 Awwwards SOTD 7.37 标杆 **DeepBook** 为视觉基调，采用 100vh 三栏桌面端布局（左侧分组会话栏 + 中央对话流与底部悬浮富指令输入框 + 右侧可折叠 Diff/审查/事件终端面板），原生融合：
+  * **Ink-Orbit 动态三联 SVG 架构图**：斜线工程底纹、悬停外扩折角 L 型护框、实时双模型协同流图、四工具矩阵中枢与可滑动刮擦吞吐曲线；
+  * **Liquid Metal（`21st.dev` `metal-fx` 共享 WebGL2 着色器）**：为 `派发协同`、`新建会话` 与圆形快捷按钮提供 60fps 液态金属高光边环（支持 `虹彩镀铬 / 冷晶银 / 关闭` 实时切换）；
+  * **`ai-thinking-and-tool-calls` SVG 树状思考与工具调用轨**：连续 SVG 竖干 + `Q` 圆弧分支 + 3.4s 扫光摘要 + 完成后自动折叠，支持展开查看命令输出与思考过程；
+  * **`21st.dev` 聊天交互全家桶**：`Chat Sidebar`（置顶/重命名/删除）、`Conversation`（智能吸底 + 跳至最新）、`Rich Prompt Input`（`/` 切模式 + `@` 引用工作区文件）、`Diff Viewer`（Unified/Split 双栏对比）、`Border Beam` 与 `Segmented Tabs`；右下角内置可完全收起的 **Tweaks 面板**（快捷键 `T` 呼出）。
 
 ---
 
