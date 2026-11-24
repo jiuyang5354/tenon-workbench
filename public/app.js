@@ -2,6 +2,7 @@
   'use strict';
 
   const MODE_LABELS = {
+    'agent-chat': '自由对话',
     'full-pipeline': '全链路协同',
     'plan-only': '独立规划',
     'codex-exec': 'Codex 直派',
@@ -13,6 +14,7 @@
   };
 
   const MODE_SHORT = {
+    'agent-chat': '自由对话',
     'full-pipeline': '全链路',
     'plan-only': '独立规划',
     'codex-exec': 'Codex直派',
@@ -24,7 +26,8 @@
   };
 
   const MODE_ITEMS = [
-    { id: 'full-pipeline', title: '全链路协同', sub: '规划引擎拆解 → 人工拍板 → Codex 施工 → Pre-CI 审查', badge: '推荐' },
+    { id: 'agent-chat', title: '自由对话', sub: '像日常 Agent 一样直接多轮聊天，不启动巡检与审批流', badge: '默认' },
+    { id: 'full-pipeline', title: '全链路协同', sub: '规划引擎拆解 → 人工拍板 → Codex 施工 → Pre-CI 审查', badge: '工程流' },
     { id: 'plan-only', title: '独立规划', sub: '仅只读拆解架构与接口契约（支持切换外部模型）', badge: '只读' },
     { id: 'codex-exec', title: 'Codex 直派', sub: '跳过规划，安全沙箱直接写代码（支持会话续跑）', badge: '沙箱' },
     { id: 'codex-review', title: 'Pre-CI 审查门禁', sub: '两级分级拦截，高危路径自动升档 xhigh', badge: '门禁' },
@@ -35,6 +38,7 @@
   ];
 
   const SLASH_COMMANDS = [
+    { key: '/chat', mode: 'agent-chat', detail: '自由对话（像普通 Agent 一样自然多轮聊天，无冗余巡检）' },
     { key: '/pipeline', mode: 'full-pipeline', detail: '全链路协同（Gemini/外部规划 → 拍板 → Codex 施工 → 审查）' },
     { key: '/plan', mode: 'plan-only', detail: '独立规划（只读拆解契约）' },
     { key: '/codex', mode: 'codex-exec', detail: 'Codex 直派（安全沙箱直接写代码）' },
@@ -1297,6 +1301,7 @@
       const { run } = await api(`/api/runs/${encodeURIComponent(id)}`);
       closeMobileDrawers();
       switchStageView('chat');
+      if (run.mode === 'agent-chat') setModeValue('agent-chat');
       attachToRun(run);
     } catch (err) {
       showToast(`载入会话失败: ${err.message}`);
@@ -2118,6 +2123,73 @@
     const parts = [];
     const createdStr = new Date(run.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 
+    // Clean Multi-Turn Agent Chat Rendering (Zero heavy pipeline/inspection ceremony!)
+    if (run.mode === 'agent-chat') {
+      const messages = Array.isArray(run.messages) && run.messages.length > 0
+        ? run.messages
+        : [{ id: 'initial_u', role: 'user', content: run.prompt, status: 'done', createdAt: run.createdAt }];
+
+      messages.forEach((msg) => {
+        const ts = new Date(msg.createdAt || run.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+        if (msg.role === 'user') {
+          parts.push(`
+            <div class="msg-user-wrap">
+              <div class="msg-user-bubble">
+                <div class="msg-user-text">${escapeHtml(stripPreferenceTag(msg.content))}</div>
+                <div class="msg-user-meta">
+                  <span>${ts}</span>
+                </div>
+              </div>
+            </div>`);
+        } else {
+          const isStreamingMsg = msg.status === 'running';
+          const engineLabel = msg.engine || 'Gemini';
+          const isCodexEng = engineLabel === 'Codex';
+          const avatarCls = isCodexEng ? 'codex' : 'gemini';
+          const glyph = isCodexEng ? 'C' : (engineLabel === 'Gemini' ? 'G' : (engineLabel.trim()[0] || 'A').toUpperCase());
+          const metaBits = [];
+          if (msg.tokens) metaBits.push(`${Number(msg.tokens).toLocaleString()} TOKENS`);
+          if (msg.durationMs) metaBits.push(`${(msg.durationMs / 1000).toFixed(1)}s`);
+          if (!metaBits.length) metaBits.push(isStreamingMsg ? '回复中...' : ts);
+
+          parts.push(`
+            <article class="agent-turn chat-turn ${isStreamingMsg ? 'is-streaming' : ''}">
+              <header class="agent-turn-head">
+                <div class="agent-identity">
+                  <span class="agent-avatar ${avatarCls} ${isStreamingMsg ? 'is-orb' : ''}">${isStreamingMsg ? '<svg class="thinking-orb" width="18" height="18" viewBox="0 0 18 18" data-orb-family="ai" data-orb-state="ai-solving" data-orb-variant="ai" data-orb-size="18" aria-hidden="true"></svg>' : escapeHtml(glyph)}</span>
+                  <span class="agent-role-name">${escapeHtml(engineLabel)}</span>
+                  ${msg.model ? `<span class="agent-model-tag">${escapeHtml(msg.model)}</span>` : ''}
+                </div>
+                ${isStreamingMsg ? '<span class="agent-status-pill running is-shimmer"><span>回复中...</span></span>' : ''}
+              </header>
+              ${msg.content ? `<div class="markdown-output">${renderMarkdown(msg.content)}</div>` : isStreamingMsg ? '<div class="mono-xs is-shimmer">思考中...</div>' : ''}
+              ${msg.error ? `<div class="error-banner">${escapeHtml(msg.error)}</div>` : ''}
+              <footer class="agent-turn-foot">
+                <span class="mono-xs">${escapeHtml(metaBits.join(' · '))}</span>
+                <div class="turn-foot-actions">
+                  ${isCodexEng && run.codex?.diff ? '<button type="button" class="link-btn" data-open-insp="diff">查看 Git Diff →</button>' : ''}
+                  ${msg.content ? `<button type="button" class="link-btn" data-copy-msg="${escapeHtml(msg.id)}">复制</button>` : ''}
+                </div>
+              </footer>
+            </article>`);
+        }
+      });
+
+      container.innerHTML = parts.join('');
+      bindThreadDynamicHandlers(container, run);
+      if (window.ConduitOrbs) window.ConduitOrbs.mountAll(container);
+      renderInspectorContent(run);
+      const vp = el('conversationViewport');
+      if (appState.stickyBottom) {
+        vp.scrollTop = vp.scrollHeight;
+        el('btnJumpLatest').classList.add('hidden');
+      } else if (run.status === 'running') {
+        el('btnJumpLatest').classList.remove('hidden');
+      }
+      if (waveEngine) waveEngine.redraw();
+      return;
+    }
+
     // 1. User Prompt Turn (Stripped of internal preference prompt suffix)
     parts.push(`
       <div class="msg-user-wrap">
@@ -2448,6 +2520,14 @@
     container.querySelectorAll('[data-open-insp]').forEach((btn) => {
       btn.addEventListener('click', () => {
         openInspector(btn.dataset.openInsp);
+      });
+    });
+
+    container.querySelectorAll('[data-copy-msg]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const mid = btn.dataset.copyMsg;
+        const found = (run.messages || []).find((m) => m.id === mid);
+        copyText(found?.content || '', '已复制回复');
       });
     });
 
@@ -3050,20 +3130,31 @@
       return;
     }
 
-    let mode = el('selectMode').value;
+    let mode = el('selectMode').value || 'agent-chat';
     let prompt = rawPrompt;
-    if (/^\/image(?:\s|$)/i.test(rawPrompt)) {
-      mode = 'image-gen';
-      setModeValue('image-gen');
-      prompt = rawPrompt.replace(/^\/image\s*/i, '').trim();
-    } else if (/^\/video(?:\s|$)/i.test(rawPrompt)) {
-      mode = 'video-gen';
-      setModeValue('video-gen');
-      prompt = rawPrompt.replace(/^\/video\s*/i, '').trim();
-    } else if (/^\/agent(?:\s|$)/i.test(rawPrompt)) {
-      mode = 'custom-agent';
-      setModeValue('custom-agent');
-      prompt = rawPrompt.replace(/^\/agent\s*/i, '').trim();
+    const slashMap = [
+      [/^\/chat(?:\s|$)/i, 'agent-chat'],
+      [/^\/pipeline(?:\s|$)/i, 'full-pipeline'],
+      [/^\/plan(?:\s|$)/i, 'plan-only'],
+      [/^\/codex(?:\s|$)/i, 'codex-exec'],
+      [/^\/review(?:\s|$)/i, 'codex-review'],
+      [/^\/copy(?:\s|$)/i, 'copy-polish'],
+      [/^\/agent(?:\s|$)/i, 'custom-agent'],
+      [/^\/image(?:\s|$)/i, 'image-gen'],
+      [/^\/video(?:\s|$)/i, 'video-gen'],
+    ];
+    for (const [rx, targetMode] of slashMap) {
+      if (rx.test(rawPrompt)) {
+        mode = targetMode;
+        setModeValue(targetMode);
+        prompt = rawPrompt.replace(rx, '').trim();
+        break;
+      }
+    }
+    if (!prompt) {
+      showToast('请在指令后面输入具体内容');
+      el('inputPrompt').focus();
+      return;
     }
 
     if (mode === 'image-gen' || mode === 'video-gen') {
@@ -3118,9 +3209,20 @@
       resumeThreadId: mode === 'codex-exec' ? appState.resumeThreadId : '',
     };
 
+    const canContinueChat =
+      mode === 'agent-chat' &&
+      appState.currentRun &&
+      appState.currentRun.mode === 'agent-chat' &&
+      !appState.localRuns.has(appState.currentRun.id) &&
+      appState.currentRun.status !== 'running' &&
+      appState.currentRun.status !== 'awaiting_approval';
+
     el('btnStartRun').disabled = true;
     try {
-      const { run } = await api('/api/runs', {
+      const endpoint = canContinueChat
+        ? `/api/runs/${encodeURIComponent(appState.currentRun.id)}/message`
+        : '/api/runs';
+      const { run } = await api(endpoint, {
         method: 'POST',
         body: JSON.stringify(payload),
       });
@@ -3132,7 +3234,7 @@
       attachToRun(run);
       await loadRunsList();
     } catch (err) {
-      showToast(`启动失败: ${err.message}`);
+      showToast(`发送失败: ${err.message}`);
     } finally {
       el('btnStartRun').disabled = false;
     }
@@ -3286,6 +3388,7 @@
   function formatGeminiShort(id) {
     if (!id) return 'Gemini';
     const raw = String(id).trim();
+    if (raw === 'codex:chat') return 'Codex · 对话';
     const ext = parseProviderRefClient(raw);
     if (ext) {
       const prov = (appState.providers || []).find((p) => p.id === ext.providerId);
@@ -3318,10 +3421,12 @@
   }
 
   function setModeValue(modeVal) {
-    const val = MODE_LABELS[modeVal] ? modeVal : 'full-pipeline';
+    const val = MODE_LABELS[modeVal] ? modeVal : 'agent-chat';
     el('selectMode').value = val;
     const lbl = el('labelModePicker');
     if (lbl) lbl.textContent = MODE_SHORT[val] || MODE_LABELS[val];
+    const sendLbl = el('labelStartRun');
+    if (sendLbl) sendLbl.textContent = val === 'agent-chat' ? '发送' : '派发协同';
     if (appState.stageView === 'workflow') renderWorkflowCanvas();
   }
 
@@ -3331,7 +3436,9 @@
     const lbl = el('labelGeminiPicker');
     if (lbl) lbl.textContent = formatGeminiShort(val);
     const glyph = el('btnGeminiPicker')?.querySelector('.picker-glyph');
-    if (glyph) glyph.textContent = String(val).startsWith('provider:') ? 'A' : 'G';
+    if (glyph) {
+      glyph.textContent = val === 'codex:chat' ? 'C' : String(val).startsWith('provider:') ? 'A' : 'G';
+    }
     renderCliCommandCards();
     if (appState.stageView === 'workflow') renderWorkflowCanvas();
   }
@@ -3470,10 +3577,25 @@
           .join('')
       : '';
 
+    const codexChatOpt = !q || 'codex 对话 cli sandbox'.includes(q)
+      ? `<div class="picker-group-label">本地 CODEX 对话引擎</div>
+        <button type="button" class="picker-option ${current === 'codex:chat' ? 'is-selected' : ''}" role="option" aria-selected="${current === 'codex:chat'}" data-pick-gemini="codex:chat">
+          <div class="picker-opt-main">
+            <span class="picker-opt-title">Codex CLI（直接对话）</span>
+            <span class="picker-opt-sub mono">自由对话模式下支持多轮续跑与工作区读写</span>
+          </div>
+          <div class="picker-opt-right">
+            <span class="picker-badge">CODEX</span>
+            ${current === 'codex:chat' ? '<span class="picker-check">✓</span>' : ''}
+          </div>
+        </button>`
+      : '';
+
     const listHtml =
-      !extHtml && groups.length === 0
+      !extHtml && !codexChatOpt && groups.length === 0
         ? '<div class="picker-group-label">无匹配模型</div>'
-        : extHtml +
+        : codexChatOpt +
+          extHtml +
           groups
             .map(
               (g) =>
@@ -3895,10 +4017,10 @@
   function useProviderInChat(provider) {
     if (!provider) return;
     const ref = `provider:${provider.id}:${provider.defaultModel || ''}`;
-    setModeValue('custom-agent');
+    setModeValue('agent-chat');
     setGeminiModelValue(ref);
     switchStageView('chat');
-    showToast(`已切换对话流至外部引擎：${provider.name}`);
+    showToast(`已切换自由对话至外部引擎：${provider.name}`);
     el('inputPrompt')?.focus();
   }
 
@@ -5095,6 +5217,11 @@
           return;
         }
       }
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
+        e.preventDefault();
+        startRun();
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         startRun();
@@ -5587,7 +5714,7 @@
   canvasEngine = initInfiniteWorkflowCanvas();
   if (window.ConduitOrbs) window.ConduitOrbs.mountAll(document);
   syncTopbarOrb(null);
-  setModeValue('full-pipeline');
+  setModeValue('agent-chat');
   initGlobalEvents();
   loadHealth();
   loadModels(false);

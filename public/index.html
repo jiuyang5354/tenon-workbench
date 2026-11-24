@@ -47,11 +47,11 @@
 
       <!-- Primary New Thread Button (Pure Architectural Hairline) -->
       <div class="sidebar-top-actions">
-        <button type="button" class="btn-new-chat" id="btnNewChat" title="新建协同会话">
+        <button type="button" class="btn-new-chat" id="btnNewChat" title="新建对话">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M8 3V13M3 8H13" stroke="currentColor" stroke-width="1.5" />
           </svg>
-          <span class="sidebar-label">新建协同会话</span>
+          <span class="sidebar-label">新建对话</span>
         </button>
 
         <!-- Active Workspace Pill -->
@@ -212,20 +212,20 @@
               </div>
 
               <div class="starter-grid">
+                <button type="button" class="starter-card" data-starter-mode="agent-chat" data-starter-prompt="你好，先简单聊聊当前工作目录里的项目大概是做什么的，我们边聊边决定要不要改代码。">
+                  <span class="starter-kicker mono">AGENT CHAT · 默认</span>
+                  <strong class="starter-title">直接和 Agent 自由对话</strong>
+                  <span class="starter-desc">轻量多轮聊天、随时追问换模型，不自动启动重型巡检</span>
+                </button>
                 <button type="button" class="starter-card" data-starter-mode="full-pipeline" data-starter-prompt="分析当前项目结构，为一个新功能先出接口契约与实施方案，等我拍板后再派发 Codex 实现并过 Pre-CI 审查。">
                   <span class="starter-kicker mono">FULL PIPELINE</span>
                   <strong class="starter-title">全链路协同开发</strong>
-                  <span class="starter-desc">Gemini 规划契约 → 人工拍板 → Codex 沙箱施工与审查</span>
-                </button>
-                <button type="button" class="starter-card" data-starter-mode="plan-only" data-starter-prompt="用只读模式评估当前工程目录的模块划分与潜在耦合风险，输出 3 条可落地的重构方案与验收标准。">
-                  <span class="starter-kicker mono">READ-ONLY PLAN</span>
-                  <strong class="starter-title">只读架构评估</strong>
-                  <span class="starter-desc">不修改任何文件，快速梳理模块边界与重构路线</span>
+                  <span class="starter-desc">需要正式开工时再启用：规划契约 → 拍板 → 施工审查</span>
                 </button>
                 <button type="button" class="starter-card" data-starter-mode="codex-review" data-starter-prompt="对当前工作区的未提交变更执行 Pre-CI 两级代码审查，严查数据丢失、越权和边界缺陷。">
                   <span class="starter-kicker mono">PRE-CI GATE</span>
                   <strong class="starter-title">未提交代码门禁审查</strong>
-                  <span class="starter-desc">分级拦截高危改动，敏感路径自动升档 xhigh</span>
+                  <span class="starter-desc">按需触发代码审查，高危路径自动升档 xhigh</span>
                 </button>
                 <button type="button" class="starter-card is-canvas-entry" id="btnStarterOpenCanvas">
                   <span class="starter-kicker mono">INFINITE CANVAS</span>
@@ -620,14 +620,14 @@
             id="inputPrompt"
             class="composer-textarea"
             rows="2"
-            placeholder="输入需求，或输入 / 切换模式、@ 引用工作区文件...（Enter 换行，Ctrl+Enter 发送）"
+            placeholder="像日常 Agent 一样直接对话，或输入 / 切协同模式、@ 引用文件...（Enter 发送，Shift+Enter 换行）"
           ></textarea>
 
           <!-- Single-Row 21st.dev chatcn (#45495) Prompt Composer Toolbar -->
           <div class="composer-bar" data-slot="prompt-input-toolbar">
             <div class="composer-bar-left" data-slot="prompt-input-tools">
               <!-- Hidden synced inputs/selects kept only for clean state API compatibility -->
-              <input type="hidden" id="selectMode" value="full-pipeline" />
+              <input type="hidden" id="selectMode" value="agent-chat" />
               <input type="hidden" id="selectGeminiModel" value="gemini-4-neon-high" />
               <input type="hidden" id="selectCodexModel" value="" />
 
@@ -641,7 +641,7 @@
               <!-- Custom Mode Picker Pill -->
               <button type="button" class="picker-pill" id="btnModePicker" aria-haspopup="listbox" aria-expanded="false">
                 <span class="picker-dot"></span>
-                <span class="picker-text" id="labelModePicker">全链路</span>
+                <span class="picker-text" id="labelModePicker">自由对话</span>
                 <svg class="picker-chev" width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
@@ -684,11 +684,11 @@
                 <span class="stop-orb-hover-hint mono-xs">点击停止</span>
               </button>
               <div class="metal-cta-pair" id="sendCtaGroup">
-                <button type="button" class="btn-send-metal" id="btnStartRun" title="发送并启动协同管线 (Ctrl+Enter)">
+                <button type="button" class="btn-send-metal" id="btnStartRun" title="发送消息 (Enter / Ctrl+Enter)">
                   <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M8 13V3M3.5 7.5L8 3L12.5 7.5" stroke="currentColor" stroke-width="1.6" />
                   </svg>
-                  <span>派发协同</span>
+                  <span id="labelStartRun">发送</span>
                 </button>
                 <!-- Dedicated Dialogue-Stream AI Orb Signal Controller (Idle / Listening / Done / Error) -->
                 <button type="button" class="btn-circle-metal composer-orb-btn" id="btnQuickPlan" aria-haspopup="dialog" aria-expanded="false" aria-controls="composerOrbPopover" title="对话流实时状态信号（点击查看反馈 / 启动或暂停）">

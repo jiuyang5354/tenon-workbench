@@ -681,3 +681,123 @@ test('createWorkspaceProject & POST /api/workspace/create scaffold git repo safe
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('agent-chat mode supports lightweight multi-turn conversation via POST /api/runs/:id/message', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tenon-agent-chat-'));
+  const tmpData = path.join(root, 'data');
+  await fs.mkdir(tmpData, { recursive: true });
+
+  const receivedPrompts = [];
+  const mockLlm = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    const userMsg = (body.messages || []).find((m) => m.role === 'user')?.content || '';
+    receivedPrompts.push(userMsg);
+    const reply = receivedPrompts.length === 1 ? '你好！随时直接问我任何代码问题。' : '收到，记住第一轮你说过你好。';
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: reply } }] })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
+  });
+  await new Promise((resolve) => mockLlm.listen(0, '127.0.0.1', resolve));
+  const llmPort = mockLlm.address().port;
+
+  const { server } = await createWorkbenchServer({
+    dataDir: tmpData,
+    defaultWorkspace: root,
+    workspaceDiscoveryOptions: {
+      homeDir: path.join(root, 'home'),
+      tmpDir: path.join(root, 'ignored-tmp'),
+      noisePatterns: [],
+      codexHome: '',
+      claudeDir: '',
+      claudeJsonPath: '',
+      geminiDir: '',
+      scanRoots: [root],
+    },
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+
+  const waitUntilDone = async (runId) => {
+    for (let i = 0; i < 40; i += 1) {
+      const r = await (await fetch(`${base}/api/runs/${runId}`)).json();
+      if (r.run.status === 'completed' || r.run.status === 'failed') return r.run;
+      await new Promise((res) => setTimeout(res, 50));
+    }
+    throw new Error('Timed out waiting for chat turn completion');
+  };
+
+  try {
+    // Register mock provider
+    const pRes = await fetch(`${base}/api/providers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Mock Chat LLM',
+        kind: 'api',
+        protocol: 'openai-compatible',
+        baseUrl: `http://127.0.0.1:${llmPort}/v1`,
+        apiKey: 'sk-chat-test',
+        defaultModel: 'mock-chat-1',
+        enabled: true,
+      }),
+    });
+    assert.equal(pRes.status, 200);
+    const { provider } = await pRes.json();
+
+    // Turn 1: Start natural agent-chat run
+    const r1 = await fetch(`${base}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'agent-chat',
+        prompt: '你好',
+        workspaceDir: root,
+        geminiModel: `provider:${provider.id}:mock-chat-1`,
+        providerId: provider.id,
+        providerModel: 'mock-chat-1',
+      }),
+    });
+    assert.equal(r1.status, 201);
+    const { run: created } = await r1.json();
+    const afterTurn1 = await waitUntilDone(created.id);
+
+    assert.equal(afterTurn1.mode, 'agent-chat');
+    assert.equal(afterTurn1.status, 'completed');
+    assert.equal(afterTurn1.gate, null);
+    assert.equal(afterTurn1.messages.length, 2);
+    assert.equal(afterTurn1.messages[0].role, 'user');
+    assert.equal(afterTurn1.messages[0].content, '你好');
+    assert.equal(afterTurn1.messages[1].role, 'assistant');
+    assert.match(afterTurn1.messages[1].content, /你好/);
+
+    // Turn 2: Follow-up in the SAME thread
+    const r2 = await fetch(`${base}/api/runs/${created.id}/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: '我刚才说了什么？',
+        geminiModel: `provider:${provider.id}:mock-chat-1`,
+        providerId: provider.id,
+        providerModel: 'mock-chat-1',
+      }),
+    });
+    assert.equal(r2.status, 200);
+    const afterTurn2 = await waitUntilDone(created.id);
+
+    assert.equal(afterTurn2.status, 'completed');
+    assert.equal(afterTurn2.messages.length, 4);
+    assert.equal(afterTurn2.messages[2].content, '我刚才说了什么？');
+    assert.match(afterTurn2.messages[3].content, /第一轮/);
+    // Verify Turn 2 carried Turn 1 transcript context
+    assert.match(receivedPrompts[1], /你好/);
+    assert.match(receivedPrompts[1], /我刚才说了什么/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await new Promise((resolve) => mockLlm.close(resolve));
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

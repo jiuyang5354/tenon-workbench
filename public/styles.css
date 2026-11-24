@@ -3268,6 +3268,25 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
   line-height: 1.45;
 }
 
+/* Lightweight Conversational Agent Turn (Zero Heavy Pipeline Chrome) */
+.agent-turn.chat-turn {
+  padding: 14px 16px 12px;
+  gap: 10px;
+  background: var(--bg-surface-1);
+  border-color: var(--line-subtle);
+  box-shadow: none;
+}
+
+.agent-turn.chat-turn .agent-turn-head {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.agent-turn.chat-turn .agent-turn-foot {
+  padding-top: 6px;
+  border-top: 1px solid var(--line-subtle);
+}
+
 .guardrails-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

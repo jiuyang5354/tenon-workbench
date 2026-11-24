@@ -523,7 +523,7 @@ export async function createWorkbenchServer(options = {}) {
         return;
       }
 
-      const runMatch = pathname.match(/^\/api\/runs\/([^/]+)(?:\/(stream|approve|cancel|diff))?$/);
+      const runMatch = pathname.match(/^\/api\/runs\/([^/]+)(?:\/(stream|approve|cancel|diff|message))?$/);
       if (runMatch) {
         const runId = runMatch[1];
         const sub = runMatch[2] || '';
@@ -573,6 +573,12 @@ export async function createWorkbenchServer(options = {}) {
             store.unsubscribe(runId, res);
           });
           return;
+        }
+
+        if (sub === 'message' && method === 'POST') {
+          const body = await readJsonBody(req);
+          const updated = await orchestrator.continueChat(runId, body);
+          return sendJson(res, 200, { run: updated });
         }
 
         if (sub === 'approve' && method === 'POST') {
