@@ -1,0 +1,18 @@
+# Runtime state & logs (never commit private transcripts or local paths)
+data/
+logs/
+*.log
+.tmp/
+
+# Secrets & local env overrides
+.env
+.env.local
+auth.json
+
+# OS & editor artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+node_modules/

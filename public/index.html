@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-surface="obsidian" data-accent="cobalt" data-inspector="standard" data-crosshairs="on">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CONDUIT — Gemini × Codex 协同工作台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app-shell" id="appShell">
+    <!-- Mobile backdrop for drawers -->
+    <div class="drawer-backdrop hidden" id="drawerBackdrop"></div>
+
+    <!-- =====================================================================
+         LEFT PANE: Codex-style Chat Sidebar (21st.dev Chat Sidebar #46401)
+         ===================================================================== -->
+    <aside class="sidebar" id="sidebar" aria-label="会话列表与工作区导航">
+      <div class="sidebar-head">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 18 18" fill="none">
+              <rect x="1" y="1" width="16" height="16" stroke="currentColor" stroke-width="1.3" />
+              <path d="M5 13V5H10.5L13 7.5V13" stroke="var(--accent)" stroke-width="1.6" />
+              <rect x="8" y="8" width="2.5" height="2.5" fill="currentColor" />
+            </svg>
+          </span>
+          <span class="brand-name">CONDUIT</span>
+        </div>
+        <button type="button" class="rail-icon-btn" id="btnCollapseSidebar" title="收起/展开侧边栏">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="1.5" y="2" width="13" height="12" stroke="currentColor" stroke-width="1.25" />
+            <line x1="6" y1="2" x2="6" y2="14" stroke="currentColor" stroke-width="1.25" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Primary New Thread Button -->
+      <div class="sidebar-top-actions">
+        <button type="button" class="btn-new-chat" id="btnNewChat" title="新建协同会话">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 3V13M3 8H13" stroke="currentColor" stroke-width="1.5" />
+          </svg>
+          <span class="sidebar-label">新建协同会话</span>
+        </button>
+
+        <!-- Active Workspace Pill -->
+        <button type="button" class="ws-selector-card" id="btnWsPopover" title="点击切换或探测目标工程目录">
+          <div class="ws-card-top">
+            <span class="ws-folder-icon" aria-hidden="true">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                <path d="M1.5 3.5H6L7.5 5H14.5V12.5H1.5V3.5Z" stroke="currentColor" stroke-width="1.25" />
+              </svg>
+            </span>
+            <span class="ws-card-name sidebar-label" id="wsShortName">选择工作目录</span>
+            <span class="ws-branch-chip mono sidebar-label" id="wsBranchPill">—</span>
+          </div>
+          <div class="ws-card-sub mono sidebar-label" id="wsSubStatus">点击配置路径与 Git 风险探测</div>
+        </button>
+      </div>
+
+      <!-- Search Filter -->
+      <div class="sidebar-search-wrap sidebar-label">
+        <input type="text" id="inputSearchThreads" class="sidebar-search" placeholder="筛选历史会话..." autocomplete="off" />
+      </div>
+
+      <!-- Grouped Thread History (置顶 / 今天 / 更早) -->
+      <div class="thread-list" id="threadList" role="navigation" aria-label="历史会话">
+        <div class="thread-empty sidebar-label">暂无历史会话</div>
+      </div>
+
+      <!-- Sidebar Footer Utilities -->
+      <div class="sidebar-foot">
+        <div class="mini-wave-box sidebar-label" aria-hidden="true">
+          <canvas id="miniWaveCanvas"></canvas>
+        </div>
+
+        <div class="sidebar-foot-btns">
+          <button type="button" class="foot-nav-btn" id="btnOpenStudio" title="独立 CLI 脚本与规则模板">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M4.5 5.5L2 8L4.5 10.5M11.5 5.5L14 8L11.5 10.5M9.5 3.5L6.5 12.5" stroke="currentColor" stroke-width="1.25" />
+            </svg>
+            <span class="sidebar-label">脚本与规则</span>
+          </button>
+
+          <button type="button" class="foot-nav-btn" id="btnEnvPopover" title="本机 AGY / CODEX 健康状态">
+            <span class="dual-dots" aria-hidden="true">
+              <span class="status-dot" id="dotAgy"></span>
+              <span class="status-dot" id="dotCodex"></span>
+            </span>
+            <span class="sidebar-label mono-xs">AGY / CODEX</span>
+          </button>
+
+          <button type="button" class="foot-nav-btn" id="btnToggleTweaks" aria-expanded="false" aria-controls="tweaksPanel" title="实时调参面板 (T)">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <line x1="2" y1="4.5" x2="14" y2="4.5" stroke="currentColor" stroke-width="1.25" />
+              <circle cx="5.5" cy="4.5" r="1.5" fill="var(--bg-surface-1)" stroke="currentColor" stroke-width="1.25" />
+              <line x1="2" y1="11.5" x2="14" y2="11.5" stroke="currentColor" stroke-width="1.25" />
+              <circle cx="10.5" cy="11.5" r="1.5" fill="var(--bg-surface-1)" stroke="currentColor" stroke-width="1.25" />
+            </svg>
+            <span class="sidebar-label">Tweaks</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- =====================================================================
+         CENTER PANE: Codex-Style Conversation Thread & Floating Composer
+         ===================================================================== -->
+    <main class="main-stage">
+      <!-- Compact 48px Thread Header -->
+      <header class="stage-topbar">
+        <div class="topbar-left">
+          <button type="button" class="rail-icon-btn mobile-only" id="btnMobileSidebar" title="打开会话列表">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <line x1="2" y1="4" x2="14" y2="4" stroke="currentColor" stroke-width="1.35" />
+              <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="1.35" />
+              <line x1="2" y1="12" x2="14" y2="12" stroke="currentColor" stroke-width="1.35" />
+            </svg>
+          </button>
+          <div class="topbar-title-wrap">
+            <span class="topbar-title" id="topbarTitle">新协同会话</span>
+            <span class="topbar-meta mono" id="topbarMeta">GEMINI 4 NEON × CODEX CLI</span>
+          </div>
+        </div>
+
+        <!-- Inline Compact 5-Stage Pipeline Strip -->
+        <div class="topbar-pipeline" id="topbarPipeline" aria-label="管线阶段">
+          <span class="pipe-step" data-stage="plan" id="pstep-plan">01 规划</span>
+          <span class="pipe-arrow" aria-hidden="true"></span>
+          <span class="pipe-step" data-stage="gate" id="pstep-gate">02 拍板</span>
+          <span class="pipe-arrow" aria-hidden="true"></span>
+          <span class="pipe-step" data-stage="exec" id="pstep-exec">03 施工</span>
+          <span class="pipe-arrow" aria-hidden="true"></span>
+          <span class="pipe-step" data-stage="review" id="pstep-review">04 审查</span>
+          <span class="pipe-arrow" aria-hidden="true"></span>
+          <span class="pipe-step" data-stage="summary" id="pstep-summary">05 汇报</span>
+        </div>
+
+        <div class="topbar-right">
+          <button type="button" class="inspector-toggle-btn" id="btnToggleInspector" aria-expanded="false">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <rect x="1.5" y="2" width="13" height="12" stroke="currentColor" stroke-width="1.25" />
+              <line x1="10" y1="2" x2="10" y2="14" stroke="currentColor" stroke-width="1.25" />
+            </svg>
+            <span>审查与 Diff</span>
+            <span class="inspector-badge mono hidden" id="inspectorBadge">0</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Scrollable Conversation Feed (21st.dev Conversation #46450) -->
+      <div class="conversation-viewport" id="conversationViewport" role="log" aria-label="双模型协同对话流" tabindex="0">
+        <div class="conversation-column" id="conversationColumn">
+          <!-- Centered Codex-Style Empty State -->
+          <section class="welcome-stage" id="welcomeStage">
+            <div class="welcome-wave-frame instrument-frame">
+              <span class="crosshair tl" aria-hidden="true">+</span>
+              <span class="crosshair tr" aria-hidden="true">+</span>
+              <span class="crosshair bl" aria-hidden="true">+</span>
+              <span class="crosshair br" aria-hidden="true">+</span>
+              <canvas id="heroWaveCanvas"></canvas>
+              <div class="wave-overlay-label">
+                <span class="mono-xs">CONDUIT DUAL-MODEL ENGINE</span>
+                <span class="mono-xs" id="welcomeEnvTag">LOCAL CLI READY</span>
+              </div>
+            </div>
+
+            <h1 class="welcome-title">Plan. Dispatch. Verify.</h1>
+            <p class="welcome-sub">
+              像使用 Codex 桌面端一样自然对话。Gemini 负责拆解架构与人话汇报，Codex 在安全沙箱中完成硬核施工与分级代码审查。
+            </p>
+
+            <div class="starter-grid">
+              <button type="button" class="starter-card" data-starter-mode="full-pipeline" data-starter-prompt="分析当前项目结构，为一个新功能先出接口契约与实施方案，等我拍板后再派发 Codex 实现并过 Pre-CI 审查。">
+                <span class="starter-code mono">01 / FULL PIPELINE</span>
+                <span class="starter-title">全链路双模型协同开发</span>
+                <span class="starter-desc">Gemini 规划 → 人工拍板 → Codex 施工 → 审查门禁 → 人话交付</span>
+              </button>
+              <button type="button" class="starter-card" data-starter-mode="plan-only" data-starter-prompt="用只读模式评估当前工程目录的模块划分与潜在耦合风险，输出 3 条可落地的重构方案与验收标准。">
+                <span class="starter-code mono">02 / PLAN ONLY</span>
+                <span class="starter-title">Gemini 只读架构军师</span>
+                <span class="starter-desc">只读拆解复杂需求、接口边界与机械检查项，不改动代码</span>
+              </button>
+              <button type="button" class="starter-card" data-starter-mode="codex-review" data-starter-prompt="对当前工作区的未提交变更执行 Pre-CI 两级代码审查，严查数据丢失、越权和边界缺陷。">
+                <span class="starter-code mono">03 / PRE-CI GATE</span>
+                <span class="starter-title">Codex 前置代码审查门禁</span>
+                <span class="starter-desc">区分 BLOCKING 与 SUGGESTION，命中高危文件自动升 xhigh</span>
+              </button>
+              <button type="button" class="starter-card" data-starter-mode="copy-polish" data-starter-prompt="请帮我润色这段空状态文案：选中对话里的一段话，点侧边问就能在这儿顺便问一句，不打断它正在做的事。">
+                <span class="starter-code mono">04 / COPY ADVISOR</span>
+                <span class="starter-title">Gemini 界面文案与交互顾问</span>
+                <span class="starter-desc">去除 AI 解释腔，输出改写前后对照表与状态文案建议</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- Dynamic Chronological Thread Messages -->
+          <div class="thread-messages hidden" id="threadMessages"></div>
+        </div>
+
+        <!-- Floating Jump-to-Latest Pill (21st.dev Conversation #46450) -->
+        <button type="button" class="jump-latest-pill hidden" id="btnJumpLatest">
+          <span>↓ 跳至最新输出</span>
+        </button>
+      </div>
+
+      <!-- Bottom Pinned Codex-Style Rich Prompt Composer (21st.dev Rich Prompt Input #46359) -->
+      <div class="composer-dock">
+        <div class="composer-shell instrument-frame" id="composerShell">
+          <div class="border-beam" aria-hidden="true"></div>
+          <span class="crosshair tl" aria-hidden="true">+</span>
+          <span class="crosshair tr" aria-hidden="true">+</span>
+          <span class="crosshair bl" aria-hidden="true">+</span>
+          <span class="crosshair br" aria-hidden="true">+</span>
+
+          <!-- Floating / Slash & @ File Mention Palette -->
+          <div class="prompt-palette hidden" id="promptPalette" role="listbox" aria-label="快捷指令与文件引用菜单"></div>
+
+          <!-- Resume Session Context Chip (only when resuming a Codex thread) -->
+          <div class="composer-context-bar hidden" id="resumeIndicator">
+            <span class="mono-xs">续跑 Codex 会话（仅直派模式生效）：<strong id="resumeThreadLabel"></strong></span>
+            <button type="button" class="link-btn" id="btnClearResume">清除</button>
+          </div>
+
+          <textarea
+            id="inputPrompt"
+            class="composer-textarea"
+            rows="2"
+            placeholder="输入需求，或输入 / 切换模式、@ 引用工作区文件...（Enter 换行，Ctrl+Enter 发送）"
+          ></textarea>
+
+          <!-- Single-Row Codex-Style Inline Toolbar -->
+          <div class="composer-bar">
+            <div class="composer-bar-left">
+              <!-- Mode Pill -->
+              <select id="selectMode" class="pill-select mono" aria-label="协同模式" title="切换协同模式">
+                <option value="full-pipeline" selected>全链路协同</option>
+                <option value="plan-only">独立规划</option>
+                <option value="codex-exec">Codex 直派</option>
+                <option value="codex-review">审查门禁</option>
+                <option value="copy-polish">文案顾问</option>
+              </select>
+
+              <!-- Gemini Model Pill -->
+              <select id="selectGeminiModel" class="pill-select mono" aria-label="Gemini 模型" title="Gemini 主控模型 (agy)"></select>
+
+              <!-- Codex Model Pill -->
+              <select id="selectCodexModel" class="pill-select mono" aria-label="Codex 施工模型" title="Codex 施工模型"></select>
+
+              <button type="button" class="pill-action-btn mono" id="btnTriggerSlash" title="输入 / 快捷切模式">/</button>
+              <button type="button" class="pill-action-btn mono" id="btnTriggerMention" title="输入 @ 引用当前目录文件">@</button>
+
+              <!-- Guardrails Popover Button (tucks advanced settings cleanly out of the main canvas) -->
+              <button type="button" class="pill-action-btn" id="btnGuardrailsPopover" aria-expanded="false" aria-controls="guardrailsPopover" title="配置沙箱、审查模型、推理深度与 Worktree">
+                <span class="mono-xs">护栏</span>
+                <span class="guardrail-dot" id="guardrailSummaryDot"></span>
+              </button>
+            </div>
+
+            <div class="composer-bar-right">
+              <span class="mono-xs shortcut-hint">Ctrl+Enter</span>
+              <button type="button" class="btn-stop-icon hidden" id="btnCancelRun" title="中止当前进程">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+                  <rect x="2" y="2" width="8" height="8" />
+                </svg>
+                <span>停止</span>
+              </button>
+              <button type="button" class="btn-send-icon" id="btnStartRun" title="发送并启动协同管线 (Ctrl+Enter)">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M8 13V3M3.5 7.5L8 3L12.5 7.5" stroke="currentColor" stroke-width="1.6" />
+                </svg>
+                <span>派发</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- =====================================================================
+         RIGHT PANE: Collapsible Inspector (21st.dev Diff Viewer #45484 & Terminal #45482)
+         ===================================================================== -->
+    <aside class="inspector-pane hidden" id="inspectorPane" aria-label="代码差异与审查门禁面板">
+      <header class="inspector-head">
+        <div class="fluid-seg-track inspector-tabs" id="inspectorTabs" role="tablist">
+          <span class="fluid-hover-pill" aria-hidden="true"></span>
+          <span class="fluid-active-pill" aria-hidden="true"></span>
+          <button type="button" class="insp-tab active" role="tab" aria-selected="true" data-insp="diff">Git Diff</button>
+          <button type="button" class="insp-tab" role="tab" aria-selected="false" data-insp="review">审查门禁</button>
+          <button type="button" class="insp-tab" role="tab" aria-selected="false" data-insp="events">事件终端</button>
+        </div>
+        <div class="inspector-head-actions">
+          <button type="button" class="rail-icon-btn" id="btnRefreshDiff" title="刷新当前目录 Git Diff">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M13.5 8A5.5 5.5 0 1 1 11.9 4.1M13.5 2.5V5.5H10.5" stroke="currentColor" stroke-width="1.3" />
+            </svg>
+          </button>
+          <button type="button" class="rail-icon-btn" id="btnCloseInspector" title="收起右侧面板">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.35" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="inspector-body" id="inspectorBody">
+        <div class="diff-viewer" id="inspectorDiffBox">
+          <div class="empty-inline">
+            <span class="mono-xs">DIFF / STANDBY</span>
+            <p>点击右上角刷新或派发 Codex 施工后，这里会以 Unified / Split 双模式呈现真实 Git Diff。</p>
+          </div>
+        </div>
+        <div class="review-panel hidden" id="inspectorReviewBox">
+          <div class="empty-inline">
+            <span class="mono-xs">PRE-CI GATE / STANDBY</span>
+            <p>运行全链路或审查门禁模式后，这里会展示 BLOCKING 与 SUGGESTION 两级裁决明细。</p>
+          </div>
+        </div>
+        <div class="terminal-panel hidden" id="inspectorEventsBox">
+          <div class="empty-inline">
+            <span class="mono-xs">TERMINAL / IDLE</span>
+            <p>暂无实时事件流。</p>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- =======================================================================
+       ON-DEMAND POPOVERS & DRAWERS (Zero clutter in main viewport!)
+       ======================================================================= -->
+
+  <!-- Workspace Path Popover -->
+  <aside class="floating-popover hidden" id="wsPopover" aria-label="目标工程目录设置">
+    <div class="popover-head">
+      <span class="mono-label">WORKSPACE &amp; RISK INSPECTOR</span>
+      <button type="button" class="link-btn" id="btnCloseWsPopover">关闭</button>
+    </div>
+    <div class="popover-stack">
+      <label class="field-block">
+        <span class="field-label">本地工程路径</span>
+        <input type="text" id="inputWorkspace" class="text-input mono" placeholder="例如 D:\my-project" autocomplete="off" />
+      </label>
+      <div class="popover-row-end">
+        <button type="button" class="btn-primary-sm" id="btnInspectWs">探测 Git 与高危路径</button>
+      </div>
+      <div class="ws-probe-result" id="wsTelemetry">
+        <span class="mono-xs">等待探测...</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Guardrails Popover (Advanced Orchestration Parameters) -->
+  <aside class="floating-popover guardrails-popover hidden" id="guardrailsPopover" aria-label="多模型护栏参数">
+    <div class="popover-head">
+      <span class="mono-label">ORCHESTRATION GUARDRAILS</span>
+      <button type="button" class="link-btn" id="btnRefreshModels">刷新模型</button>
+    </div>
+    <div class="guardrails-grid">
+      <label class="field-block">
+        <span class="field-label">Codex 审查门禁模型</span>
+        <select id="selectCodexReviewModel" class="select-input mono"></select>
+      </label>
+      <label class="field-block">
+        <span class="field-label">Codex 推理深度</span>
+        <select id="selectCodexEffort" class="select-input mono">
+          <option value="low">low（快速验证）</option>
+          <option value="medium">medium（常规）</option>
+          <option value="high" selected>high（默认推荐）</option>
+          <option value="xhigh">xhigh（高危深度）</option>
+        </select>
+      </label>
+      <label class="field-block">
+        <span class="field-label">Codex 沙箱模式</span>
+        <select id="selectSandbox" class="select-input mono">
+          <option value="workspace-write" selected>workspace-write（安全写入）</option>
+          <option value="read-only">read-only（只读分析）</option>
+        </select>
+      </label>
+      <label class="field-block">
+        <span class="field-label">审查自动复审上限</span>
+        <select id="selectMaxRounds" class="select-input mono">
+          <option value="1">最多 1 轮</option>
+          <option value="2" selected>最多 2 轮（推荐）</option>
+          <option value="3">最多 3 轮</option>
+        </select>
+      </label>
+      <label class="field-block span-2">
+        <span class="field-label">CODEX_HOME 配置档</span>
+        <select id="selectCodexHome" class="select-input mono">
+          <option value="">默认环境变量</option>
+        </select>
+      </label>
+      <div class="guardrail-checks span-2">
+        <label class="check-item">
+          <input type="checkbox" id="chkApproval" checked />
+          <span>派发给 Codex 前开启人工拍板闸门</span>
+        </label>
+        <label class="check-item">
+          <input type="checkbox" id="chkWorktree" />
+          <span>使用独立 Git Worktree 隔离施工与审查</span>
+        </label>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Environment Inspector Popover -->
+  <aside class="floating-popover env-popover hidden" id="envPopover" aria-label="本地 CLI 环境状态">
+    <div class="popover-head">
+      <span class="mono-label">LOCAL CLI TELEMETRY</span>
+      <button type="button" class="link-btn" id="btnRefreshHealth">重新探测</button>
+    </div>
+    <div class="env-grid" id="envDetails">
+      <div class="env-row"><span>状态</span><span class="mono">正在探测...</span></div>
+    </div>
+  </aside>
+
+  <!-- Scripts & Rules Slide-Over Studio Drawer -->
+  <aside class="studio-drawer hidden" id="studioDrawer" aria-label="独立 CLI 脚本与规则模板库">
+    <header class="studio-head">
+      <div class="studio-title-wrap">
+        <span class="channel-code">CLI / SPEC</span>
+        <h2>独立脚本与规则模板库</h2>
+      </div>
+      <button type="button" class="rail-icon-btn" id="btnCloseStudio" title="关闭抽屉 [Esc]">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.35" />
+        </svg>
+      </button>
+    </header>
+    <div class="studio-body">
+      <section class="studio-section">
+        <div class="section-cap mono-label">可执行 CLI 命令（自动绑定当前工程路径）</div>
+        <div class="cli-cards" id="cliCommandCards"></div>
+      </section>
+      <section class="studio-section">
+        <div class="section-head-row">
+          <div class="pane-subtabs" id="assetTabs" role="tablist">
+            <button type="button" class="subtab active" role="tab" aria-selected="true" data-asset="GEMINI.md">GEMINI.md</button>
+            <button type="button" class="subtab" role="tab" aria-selected="false" data-asset="CODEX.md">CODEX.md</button>
+            <button type="button" class="subtab" role="tab" aria-selected="false" data-asset="scripts/gemini-ask.mjs">gemini-ask.mjs</button>
+            <button type="button" class="subtab" role="tab" aria-selected="false" data-asset="scripts/codex-worker.mjs">codex-worker.mjs</button>
+            <button type="button" class="subtab" role="tab" aria-selected="false" data-asset="scripts/codex-review.mjs">codex-review.mjs</button>
+          </div>
+          <div class="studio-actions">
+            <button type="button" class="btn-secondary-sm hidden" id="btnSaveTemplate">保存模板</button>
+            <button type="button" class="btn-secondary-sm" id="btnCopyAsset">复制</button>
+          </div>
+        </div>
+        <textarea id="assetEditor" class="asset-editor mono" spellcheck="false"></textarea>
+      </section>
+    </div>
+  </aside>
+
+  <!-- Floating Tweaks Panel (Completely hidden when closed, hotkey T) -->
+  <aside class="tweaks-panel hidden" id="tweaksPanel" aria-label="实时调参控制台">
+    <div class="tweaks-head">
+      <span class="tweaks-title">Tweaks</span>
+      <button type="button" class="link-btn" id="btnCloseTweaks">收起 [Esc]</button>
+    </div>
+
+    <div class="tweak-group">
+      <span class="tweak-label">表面主题</span>
+      <div class="tweak-pills" data-tweak="surface">
+        <button type="button" data-val="obsidian" class="active">黑曜石</button>
+        <button type="button" data-val="graphite">深石墨</button>
+        <button type="button" data-val="daylight">昼间白</button>
+      </div>
+    </div>
+
+    <div class="tweak-group">
+      <span class="tweak-label">手术刀高亮色</span>
+      <div class="tweak-pills" data-tweak="accent">
+        <button type="button" data-val="cobalt" class="active">钴蓝</button>
+        <button type="button" data-val="cyan">光学青</button>
+        <button type="button" data-val="mono">纯白单色</button>
+      </div>
+    </div>
+
+    <div class="tweak-group">
+      <span class="tweak-label">右侧 Diff 面板宽度</span>
+      <div class="tweak-pills" data-tweak="inspector">
+        <button type="button" data-val="compact">紧凑</button>
+        <button type="button" data-val="standard" class="active">标准</button>
+        <button type="button" data-val="wide">宽幅</button>
+      </div>
+    </div>
+
+    <div class="tweak-group">
+      <span class="tweak-label">基础字号：<span class="mono" id="tweakFontVal">14px</span></span>
+      <input type="range" id="tweakFontRange" min="13" max="16" step="1" value="14" />
+    </div>
+
+    <div class="tweak-group">
+      <span class="tweak-label">遥测波形振幅：<span class="mono" id="tweakWaveVal">75%</span></span>
+      <input type="range" id="tweakWaveRange" min="0" max="100" step="5" value="75" />
+    </div>
+
+    <div class="tweak-group tweak-row-check">
+      <label class="check-item">
+        <input type="checkbox" id="tweakCrosshairs" checked />
+        <span>四角 + 准星</span>
+      </label>
+      <label class="check-item">
+        <input type="checkbox" id="tweakMotion" checked />
+        <span>波形实时脉动</span>
+      </label>
+    </div>
+
+    <div class="tweaks-foot">
+      <button type="button" class="btn-secondary-sm full-w" id="btnResetTweaks">恢复 DeepBook 默认值</button>
+    </div>
+  </aside>
+
+  <!-- Toast feedback rack -->
+  <div class="toast-rack" id="toastRack" role="status" aria-live="polite"></div>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

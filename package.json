@@ -1,0 +1,26 @@
+{
+  "name": "gemini-codex-workbench",
+  "version": "1.0.0",
+  "description": "CONDUIT — Gemini (Antigravity) × Codex 多模型协同调度可视化工作台与独立 CLI 脚本套件",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "gemini-ask": "node scripts/gemini-ask.mjs",
+    "codex-worker": "node scripts/codex-worker.mjs",
+    "codex-review": "node scripts/codex-review.mjs"
+  },
+  "keywords": [
+    "gemini",
+    "codex",
+    "antigravity",
+    "multi-agent",
+    "orchestrator",
+    "ai-workflow"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
