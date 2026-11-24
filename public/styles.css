@@ -2264,7 +2264,7 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
 /* Custom Cursor/Codex-Style Picker Pills (concentric pill geometry) */
 .picker-pill {
   height: 30px;
-  padding: 0 10px;
+  padding: 0 9px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2273,7 +2273,7 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
   color: var(--ink-secondary);
   background: var(--bg-surface-2);
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sharp);
   max-width: 148px;
   transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
@@ -2330,7 +2330,7 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
 
 .pill-action-btn {
   height: 30px;
-  padding: 0 10px;
+  padding: 0 9px;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -2338,9 +2338,19 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
   color: var(--ink-secondary);
   background: var(--bg-surface-2);
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sharp);
   transition: all 140ms ease;
 }
+
+.composer-orb-btn {
+  background: #141618 !important;
+  color: #ffffff !important;
+  border-color: rgba(17, 19, 21, 0.2) !important;
+}
+
+.composer-orb-btn[data-ai-state="listening"] { color: #eeff82 !important; }
+.composer-orb-btn[data-ai-state="waiting-approval"] { color: #fbbf24 !important; }
+.composer-orb-btn[data-ai-state="error"] { color: #f87171 !important; }
 
 .pill-action-btn:hover,
 .pill-action-btn[aria-expanded="true"] {
@@ -7222,6 +7232,120 @@ html[data-surface="charcoal"] .mg-grain {
 
 .tm-bar-pill:hover {
   transform: scaleY(1.08);
+}
+
+/* AI Orb 10-State Semantic Deck (Native Port of ai-orb.tsx) */
+.tm-orb-deck {
+  padding: 16px;
+  border-radius: var(--radius-card);
+  background: var(--bg-surface-2);
+  border: 1px solid var(--line-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.tm-orb-deck-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tm-orb-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tm-orb-tile {
+  border-radius: 9px;
+  background: #141618;
+  color: #ffffff;
+  border: 1px solid rgba(17, 19, 21, 0.14);
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.tm-orb-tile.is-hero {
+  width: 50px;
+  height: 50px;
+}
+
+.tm-orb-tile.is-sm {
+  width: 38px;
+  height: 38px;
+}
+
+.tm-orb-tile[data-ai-tone="attention"] { color: #fbbf24; }
+.tm-orb-tile[data-ai-tone="critical"] { color: #f87171; }
+.tm-orb-tile[data-ai-tone="muted"] { color: rgba(255, 255, 255, 0.62); }
+.topbar-orb-wrap[data-ai-state="waiting-approval"] { color: #fbbf24; }
+.topbar-orb-wrap[data-ai-state="error"] { color: #f87171; }
+.topbar-orb-wrap[data-ai-state="listening"] { color: #eeff82; }
+
+.tm-orb-hero-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tm-orb-hero-copy strong {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.tm-orb-hero-copy span {
+  color: var(--ink-muted);
+}
+
+.tm-orb-deck-btns {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.tm-orb-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tm-orb-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px;
+  border-radius: var(--radius-sharp);
+  background: var(--bg-surface-1);
+  border: 1px solid var(--line-subtle);
+  transition: border-color 140ms ease, transform 130ms var(--ease-out);
+}
+
+.tm-orb-cell:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
+.tm-orb-cell.is-active {
+  border-color: var(--ink-primary);
+  box-shadow: var(--shadow-card);
+}
+
+.tm-orb-name {
+  color: var(--ink-secondary);
+  font-size: 10px;
+  text-align: center;
+  word-break: break-word;
+}
+
+@media (max-width: 820px) {
+  .tm-orb-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* =========================================================================

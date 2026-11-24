@@ -475,8 +475,85 @@
     };
 
     activeInstances.add(api);
-    api.play();
+    if (!opts.paused) api.play();
     return api;
+  }
+
+  /* =========================================================================
+     Semantic 10-State AI Orb State Machine (Native Port of 21st.dev ai-orb.tsx)
+     ========================================================================= */
+  const AI_ORB_STATES = [
+    'idle',
+    'listening',
+    'thinking',
+    'reasoning',
+    'tool-call',
+    'tool-result',
+    'streaming',
+    'waiting-approval',
+    'error',
+    'done',
+  ];
+
+  const AI_ORB_LABELS = {
+    idle: '助手就绪',
+    listening: '正在聆听输入',
+    thinking: '正在思考拆解',
+    reasoning: '正在深度推演',
+    'tool-call': '正在调用本地工具',
+    'tool-result': '正在汇总工具结果',
+    streaming: '正在流式作答',
+    'waiting-approval': '等待人工拍板确认',
+    error: '运行遇到异常',
+    done: '本轮协同已完成',
+  };
+
+  const AI_ORB_VISUALS = {
+    idle: { state: 'base', variant: 'default', speed: 0.6, paused: false, settles: true, tone: 'muted' },
+    listening: { state: 'waiting', variant: 'default', speed: 1, paused: false, settles: true, tone: 'primary' },
+    thinking: { state: 'working', variant: 'default', speed: 1, paused: false, settles: false, tone: 'primary' },
+    reasoning: { state: 'reasoning', variant: 'twins', speed: 1, paused: false, settles: false, tone: 'primary' },
+    'tool-call': { state: 'searching', variant: 'lighthouse', speed: 1, paused: false, settles: false, tone: 'primary' },
+    'tool-result': { state: 'compacting', variant: 'fuse', speed: 1, paused: false, settles: false, tone: 'primary' },
+    streaming: { state: 'working', variant: 'gyro', speed: 1, paused: false, settles: false, tone: 'primary' },
+    'waiting-approval': { state: 'compacting', variant: 'squeeze', speed: 0.8, paused: false, settles: true, tone: 'attention' },
+    error: { state: 'retrying', variant: 'default', speed: 1, paused: true, settles: false, tone: 'critical' },
+    done: { state: 'base', variant: 'default', speed: 0.6, paused: false, settles: true, tone: 'primary' },
+  };
+
+  function orbStateFor({ status = 'ready', activity, hasDraft = false, hasAnswered = false } = {}) {
+    if (status === 'error') return 'error';
+    if (status === 'submitted') return 'thinking';
+    if (status === 'streaming') {
+      const live = { question: 'waiting-approval', reasoning: 'reasoning', text: 'streaming', 'tool-call': 'tool-call', 'tool-result': 'tool-result' };
+      return activity && live[activity] ? live[activity] : 'thinking';
+    }
+    if (activity === 'question') return 'waiting-approval';
+    if (hasDraft) return 'listening';
+    return hasAnswered ? 'done' : 'idle';
+  }
+
+  function applyAiOrbState(svg, aiState, { settleMs = 5000 } = {}) {
+    if (!svg) return;
+    const key = AI_ORB_VISUALS[aiState] ? aiState : 'idle';
+    const v = AI_ORB_VISUALS[key];
+    svg.dataset.aiOrbState = key;
+    svg.dataset.aiOrbTone = v.tone;
+    svg.dataset.orbState = v.state;
+    svg.dataset.orbVariant = v.variant;
+    svg.dataset.orbSpeed = String(v.speed);
+    svg.dataset.orbPaused = v.paused ? '1' : '0';
+    svg.setAttribute('aria-label', AI_ORB_LABELS[key] || key);
+    if (svg.__settleTimer) {
+      clearTimeout(svg.__settleTimer);
+      svg.__settleTimer = null;
+    }
+    mountAll(svg.parentElement || document);
+    if (v.settles && !v.paused && settleMs > 0) {
+      svg.__settleTimer = setTimeout(() => {
+        if (svg.dataset.aiOrbState === key && svg.__conduitOrb) svg.__conduitOrb.pause();
+      }, settleMs);
+    }
   }
 
   function mountAll(root = document) {
@@ -491,15 +568,16 @@
       const variant = svg.dataset.orbVariant || 'default';
       const size = Number(svg.dataset.orbSize) || 20;
       const speed = Number(svg.dataset.orbSpeed) || 1;
+      const paused = svg.dataset.orbPaused === '1';
       const label = svg.dataset.orbLabel || '';
-      const key = `${state}:${variant}:${size}:${speed}`;
+      const key = `${state}:${variant}:${size}:${speed}:${paused ? 1 : 0}`;
       if (svg.__conduitOrb && svg.__conduitOrb.key === key) {
-        if (isMotionEnabled()) svg.__conduitOrb.play();
+        if (isMotionEnabled() && !paused) svg.__conduitOrb.play();
         else svg.__conduitOrb.pause();
         return;
       }
       if (svg.__conduitOrb) svg.__conduitOrb.destroy();
-      const inst = mountOrb(svg, { state, variant, size, speed, label });
+      const inst = mountOrb(svg, { state, variant, size, speed, label, paused });
       if (inst) {
         inst.key = key;
         svg.__conduitOrb = inst;
@@ -514,10 +592,21 @@
         inst.destroy();
         continue;
       }
-      if (enabled) inst.play();
+      const paused = inst.svg.dataset.orbPaused === '1';
+      if (enabled && !paused) inst.play();
       else inst.pause();
     }
   }
 
-  window.ConduitOrbs = { VARIANTS, mountOrb, mountAll, syncAll };
+  window.ConduitOrbs = {
+    VARIANTS,
+    AI_ORB_STATES,
+    AI_ORB_LABELS,
+    AI_ORB_VISUALS,
+    orbStateFor,
+    applyAiOrbState,
+    mountOrb,
+    mountAll,
+    syncAll,
+  };
 })();

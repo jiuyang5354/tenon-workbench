@@ -1414,44 +1414,51 @@
     const wrap = el('topbarOrbWrap');
     if (!orb || !wrap) return;
 
-    let state = 'base';
-    let variant = 'default';
+    const hasDraft = Boolean((el('inputPrompt')?.value || '').trim());
+    let aiState = 'idle';
     let cls = '';
 
     if (run) {
       if (run.status === 'running') {
         cls = 'is-live';
-        if (run.activeStage === 'exec') { state = 'working'; variant = 'gyro'; }
-        else if (run.activeStage === 'review') { state = 'searching'; variant = 'lighthouse'; }
-        else if (run.activeStage === 'summary') { state = 'compacting'; variant = 'fuse'; }
-        else { state = 'reasoning'; variant = 'twins'; }
+        if (run.activeStage === 'exec') aiState = 'streaming';
+        else if (run.activeStage === 'review') aiState = 'tool-call';
+        else if (run.activeStage === 'summary') aiState = 'tool-result';
+        else aiState = 'reasoning';
       } else if (run.status === 'awaiting_approval') {
-        state = 'waiting';
-        variant = 'default';
+        aiState = 'waiting-approval';
         cls = 'is-gate';
       } else if (run.status === 'completed') {
-        state = 'base';
-        variant = 'default';
+        aiState = hasDraft ? 'listening' : 'done';
         cls = 'is-done';
       } else if (run.status === 'failed' || run.status === 'blocked') {
-        state = 'retrying';
-        variant = 'default';
+        aiState = 'error';
         cls = 'is-err';
       }
     } else if (canvasEngine && canvasEngine.isDemoRunning()) {
       cls = 'is-live';
-      const orbPair = canvasEngine.getActiveOrb();
-      if (orbPair) {
-        state = orbPair[0];
-        variant = orbPair[1];
-      }
+      aiState = 'reasoning';
+    } else if (hasDraft) {
+      aiState = 'listening';
     }
 
     wrap.classList.remove('is-live', 'is-gate', 'is-done', 'is-err');
     if (cls) wrap.classList.add(cls);
-    orb.dataset.orbState = state;
-    orb.dataset.orbVariant = variant;
-    if (window.ConduitOrbs) window.ConduitOrbs.mountAll(wrap);
+    wrap.dataset.aiState = aiState;
+    if (window.ConduitOrbs?.applyAiOrbState) {
+      const label = window.ConduitOrbs.AI_ORB_LABELS[aiState] || aiState;
+      window.ConduitOrbs.applyAiOrbState(orb, aiState, { settleMs: 5000 });
+      wrap.title = `当前协同引擎状态：${label} (${aiState})`;
+      const compOrb = el('composerOrb');
+      const compBtn = el('btnQuickPlan');
+      if (compOrb) {
+        window.ConduitOrbs.applyAiOrbState(compOrb, aiState, { settleMs: 5000 });
+        if (compBtn) {
+          compBtn.dataset.aiState = aiState;
+          compBtn.title = `AI Orb · ${label} (${aiState}) — 点击快速切换 Gemini 独立规划`;
+        }
+      }
+    }
   }
 
   /* =========================================================================
@@ -3207,6 +3214,7 @@
       if (refresh) showToast('已刷新本机 agy Gemini 模型列表');
       renderCliCommandCards();
       if (appState.stageView === 'workflow') renderWorkflowCanvas();
+      if (appState.stageView === 'settings' && appState.settingsSection === 'telemetry') renderSettingsTelemetry();
     } catch (err) {
       showToast(`模型列表加载失败: ${err.message}`);
     }
@@ -3969,6 +3977,7 @@
       cancelBlur();
       autoGrowTextarea(promptTa);
       evaluatePromptTrigger();
+      syncTopbarOrb(appState.currentRun);
     });
 
     promptTa.addEventListener('keydown', (e) => {

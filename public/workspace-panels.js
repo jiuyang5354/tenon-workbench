@@ -704,6 +704,38 @@
               </div>
             </div>
           </div>
+
+          <div class="tm-orb-deck" data-slot="ai-orb-gallery">
+            <div class="tm-orb-deck-head">
+              <div class="tm-orb-hero">
+                <span class="tm-orb-tile is-hero" id="tmAiOrbHeroWrap">
+                  <svg class="thinking-orb" id="tmAiOrbHero" width="38" height="38" viewBox="0 0 38 38" data-orb-state="base" data-orb-variant="default" data-orb-size="38"></svg>
+                </span>
+                <div class="tm-orb-hero-copy">
+                  <strong>AI Orb 10 态语义状态机</strong>
+                  <span class="mono-xs" id="tmAiOrbStatusLabel">助手就绪 · idle</span>
+                </div>
+              </div>
+              <div class="tm-orb-deck-btns">
+                <button type="button" class="btn-primary-sm" id="btnTmPlayTurn">演练完整轮次</button>
+                <button type="button" class="btn-secondary-sm" id="btnTmResetOrb">重置</button>
+              </div>
+            </div>
+            <div class="tm-orb-grid">
+              ${(window.ConduitOrbs?.AI_ORB_STATES || [])
+                .map((st) => {
+                  const v = window.ConduitOrbs.AI_ORB_VISUALS[st];
+                  return `
+                    <button type="button" class="tm-orb-cell ${st === 'idle' ? 'is-active' : ''}" data-pick-aistate="${st}">
+                      <span class="tm-orb-tile is-sm" data-ai-tone="${v.tone}">
+                        <svg class="thinking-orb" width="26" height="26" viewBox="0 0 26 26" data-orb-state="${v.state}" data-orb-variant="${v.variant}" data-orb-size="26" data-orb-speed="${v.speed}" data-orb-paused="${v.paused ? '1' : '0'}"></svg>
+                      </span>
+                      <span class="mono-xs tm-orb-name">${st}</span>
+                    </button>`;
+                })
+                .join('')}
+            </div>
+          </div>
         </div>`;
 
       const tip = mount.querySelector('#tmDonutTip');
@@ -715,6 +747,36 @@
         });
         seg.addEventListener('pointerleave', () => tip?.classList.add('hidden'));
       });
+
+      // Wire interactive 10-state AI Orb gallery + scripted turn playback
+      if (window.ConduitOrbs) {
+        window.ConduitOrbs.mountAll(mount);
+        const heroSvg = mount.querySelector('#tmAiOrbHero');
+        const heroLabel = mount.querySelector('#tmAiOrbStatusLabel');
+        let turnTimers = [];
+        const clearTurn = () => { turnTimers.forEach(clearTimeout); turnTimers = []; };
+        const setDemoState = (st) => {
+          window.ConduitOrbs.applyAiOrbState(heroSvg, st, { settleMs: 60000 });
+          if (heroLabel) heroLabel.textContent = `${window.ConduitOrbs.AI_ORB_LABELS[st] || st} · ${st}`;
+          mount.querySelectorAll('[data-pick-aistate]').forEach((b) => {
+            b.classList.toggle('is-active', b.dataset.pickAistate === st);
+          });
+        };
+        mount.querySelectorAll('[data-pick-aistate]').forEach((b) => {
+          b.addEventListener('click', () => { clearTurn(); setDemoState(b.dataset.pickAistate); });
+        });
+        mount.querySelector('#btnTmPlayTurn')?.addEventListener('click', () => {
+          clearTurn();
+          const seq = ['listening', 'thinking', 'tool-call', 'tool-result', 'reasoning', 'streaming', 'waiting-approval', 'done'];
+          seq.forEach((st, idx) => {
+            turnTimers.push(setTimeout(() => setDemoState(st), idx * 1200));
+          });
+        });
+        mount.querySelector('#btnTmResetOrb')?.addEventListener('click', () => {
+          clearTurn();
+          setDemoState('idle');
+        });
+      }
     }
 
     function renderSettingsModal() {
