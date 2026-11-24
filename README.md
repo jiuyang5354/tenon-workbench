@@ -53,8 +53,9 @@ flowchart LR
 * Git（用于查看实时 Diff、风险路径检测与可选 Worktree 隔离）
 
 ### 启动可视化工作台
-* **Windows 一键启动**：双击 `启动工作台.bat` 或运行 `.\start.ps1`
-* **命令行启动**：
+* **Windows 安装版（推荐）**：直接运行 [Releases](https://github.com/jiuyang5354/tenon-workbench/releases) 中的 `TENON-Setup-1.0.0.exe` 安装到本机（含桌面/开始菜单图标与设置内一键检测更新）；或运行 `npm run build:win` 本地重新打包。
+* **Windows 免安装脚本**：双击 `启动工作台.bat` 或运行 `.\start.ps1`
+* **命令行启动（零依赖 Web 模式）**：
   ```bash
   node server.mjs
   # 浏览器访问 http://127.0.0.1:4177

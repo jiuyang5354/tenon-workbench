@@ -983,6 +983,159 @@
       });
     }
 
+    function formatBytesMb(bytes) {
+      const n = Number(bytes) || 0;
+      if (!n) return '';
+      if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+      return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
+    function renderUpdatesInto(mount, ctx = {}) {
+      if (!mount) return;
+      const info = ctx.info || {};
+      const checking = Boolean(ctx.checking);
+      const autoCheck = ctx.autoCheck !== false;
+      const curVer = info.currentVersion || '1.0.0';
+      const last = info.lastCheck || null;
+      const dl = info.download || { state: 'idle', progress: 0 };
+      const runtimeLabel = info.isDesktopApp
+        ? `Windows 桌面客户端 · Electron ${info.electronVersion || ''}`
+        : `本地 Web 工作台 · Node ${info.nodeVersion || ''}`;
+      const relUrl = last?.releaseUrl || info.releasesUrl || 'https://github.com/jiuyang5354/tenon-workbench/releases';
+
+      const checkedStr = last?.checkedAt
+        ? new Date(last.checkedAt).toLocaleString('zh-CN', { hour12: false })
+        : '尚未检测';
+
+      let statusBodyHtml = '';
+      if (checking) {
+        statusBodyHtml = `
+          <div class="upd-status-banner is-checking">
+            <span class="upd-dot is-pulse" aria-hidden="true"></span>
+            <div class="upd-status-copy">
+              <strong>正在连接 GitHub Releases 检测最新版本...</strong>
+              <span class="mono-xs">仓库：${escapeHtml(info.repo || 'jiuyang5354/tenon-workbench')}</span>
+            </div>
+          </div>`;
+      } else if (!last) {
+        statusBodyHtml = `
+          <div class="upd-status-banner">
+            <span class="upd-dot" aria-hidden="true"></span>
+            <div class="upd-status-copy">
+              <strong>点击右上角「立即检测更新」核对 GitHub 最新版本</strong>
+              <span class="mono-xs">支持自动比对 SemVer 版本号与一键下载 Windows .exe 安装包</span>
+            </div>
+          </div>`;
+      } else if (!last.ok) {
+        statusBodyHtml = `
+          <div class="upd-status-banner is-err">
+            <span class="upd-dot is-err" aria-hidden="true"></span>
+            <div class="upd-status-copy">
+              <strong>更新检测未完成</strong>
+              <span class="mono-xs">${escapeHtml(last.error || '网络连接异常')}</span>
+            </div>
+            <button type="button" class="btn-secondary-sm" data-upd-check>重试</button>
+          </div>`;
+      } else if (last.hasUpdate) {
+        const sizeLabel = last.assetSize ? ` · ${formatBytesMb(last.assetSize)}` : '';
+        let actionHtml = '';
+        if (dl.state === 'downloading') {
+          const pct = Math.max(0, Math.min(100, Number(dl.progress) || 0));
+          actionHtml = `
+            <div class="upd-progress-box">
+              <div class="upd-progress-meta mono-xs">
+                <span>正在下载 ${escapeHtml(dl.assetName || 'TENON-Setup.exe')}...</span>
+                <span>${pct}%${dl.totalBytes ? ` (${formatBytesMb(dl.downloadedBytes)} / ${formatBytesMb(dl.totalBytes)})` : ''}</span>
+              </div>
+              <div class="upd-progress-track"><span class="upd-progress-fill" style="width:${pct}%"></span></div>
+            </div>`;
+        } else if (dl.state === 'downloaded') {
+          actionHtml = `
+            <div class="upd-actions-row">
+              <button type="button" class="btn-weave-cta" data-upd-install>立即启动安装程序 (${escapeHtml(dl.assetName)})</button>
+              <span class="mono-xs upd-ready-hint">安装包已就绪，点击后将拉起向导并自动覆盖升级</span>
+            </div>`;
+        } else {
+          actionHtml = `
+            <div class="upd-actions-row">
+              ${
+                last.downloadUrl
+                  ? `<button type="button" class="btn-weave-cta" data-upd-download>一键下载安装包 (.exe${sizeLabel})</button>`
+                  : ''
+              }
+              <a class="btn-secondary-sm" href="${escapeHtml(relUrl)}" target="_blank" rel="noopener noreferrer">查看 Release 详情 →</a>
+              ${dl.state === 'error' ? `<span class="mono-xs upd-err-inline">${escapeHtml(dl.error)}</span>` : ''}
+            </div>`;
+        }
+
+        statusBodyHtml = `
+          <div class="upd-status-banner is-available">
+            <span class="upd-dot is-new" aria-hidden="true"></span>
+            <div class="upd-status-copy">
+              <strong>发现新版本 v${escapeHtml(last.latestVersion)}</strong>
+              <span class="mono-xs">${escapeHtml(last.releaseName || '')}${last.publishedAt ? ` · 发布于 ${new Date(last.publishedAt).toLocaleDateString('zh-CN')}` : ''}</span>
+            </div>
+          </div>
+          ${last.releaseNotes ? `<pre class="upd-notes mono-xs">${escapeHtml(last.releaseNotes)}</pre>` : ''}
+          ${actionHtml}`;
+      } else {
+        statusBodyHtml = `
+          <div class="upd-status-banner is-ok">
+            <span class="upd-dot is-ok" aria-hidden="true"></span>
+            <div class="upd-status-copy">
+              <strong>当前已是最新版本（v${escapeHtml(curVer)}）</strong>
+              <span class="mono-xs">远端最新：v${escapeHtml(last.latestVersion || curVer)} · 上次检测：${escapeHtml(checkedStr)}</span>
+            </div>
+          </div>
+          ${last.releaseNotes ? `<pre class="upd-notes mono-xs">${escapeHtml(last.releaseNotes)}</pre>` : ''}`;
+      }
+
+      mount.innerHTML = `
+        <div class="upd-wrap" data-slot="software-updates">
+          <div class="settings-card upd-hero-card">
+            <div class="upd-hero-left">
+              <span class="upd-app-tile" aria-hidden="true">
+                <svg class="tenon-mark-svg" width="32" height="32" viewBox="0 0 256 256" fill="none">
+                  <path fill="#F3F4F6" d="M 46 22 H 210 A 24 24 0 0 1 234 46 V 74 H 154 V 154 H 102 V 74 H 22 V 46 A 24 24 0 0 1 46 22 Z" />
+                  <path fill="#F3F4F6" d="M 22 102 H 74 V 182 H 234 V 210 A 24 24 0 0 1 210 234 H 46 A 24 24 0 0 1 22 210 Z" />
+                  <rect fill="#EEFF82" x="182" y="102" width="52" height="52" rx="6" />
+                </svg>
+              </span>
+              <div class="upd-hero-meta">
+                <div class="upd-title-line">
+                  <strong>TENON（榫）多模型协同工作台</strong>
+                  <span class="upd-ver-pill mono-xs">v${escapeHtml(curVer)}</span>
+                </div>
+                <div class="upd-sub-line mono-xs">${escapeHtml(runtimeLabel)} · ${escapeHtml(info.platform || 'win32')} (${escapeHtml(info.arch || 'x64')})</div>
+                <div class="upd-sub-line mono-xs">官方更新源：<a href="${escapeHtml(info.repoUrl || 'https://github.com/jiuyang5354/tenon-workbench')}" target="_blank" rel="noopener noreferrer">${escapeHtml(info.repo || 'jiuyang5354/tenon-workbench')}</a></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <div class="section-cap mono-label">UPDATE STATUS · 版本状态</div>
+            ${statusBodyHtml}
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <strong>启动时自动检测更新</strong>
+                <span class="upd-row-desc">每次打开 TENON 时在后台静默检查 GitHub Releases，有新版本时在设置页提示</span>
+              </div>
+              <button type="button" class="wf-switch" role="switch" aria-checked="${autoCheck}" id="btnToggleAutoUpdate" aria-label="启动时自动检测更新">
+                <span class="wf-switch-thumb"></span>
+              </button>
+            </div>
+          </div>
+        </div>`;
+
+      mount.querySelector('[data-upd-check]')?.addEventListener('click', () => hooks.onCheckUpdates?.());
+      mount.querySelector('[data-upd-download]')?.addEventListener('click', () => hooks.onDownloadUpdate?.());
+      mount.querySelector('[data-upd-install]')?.addEventListener('click', () => hooks.onInstallUpdate?.());
+      mount.querySelector('#btnToggleAutoUpdate')?.addEventListener('click', () => hooks.onToggleAutoUpdate?.());
+    }
+
     function renderTelemetryInto(mount, ctx = {}) {
       if (!mount) return;
       const runs = Array.isArray(ctx.runs) ? ctx.runs : [];
@@ -1320,6 +1473,7 @@
         { title: '生成图像变体预览 (/image)', sub: '打开图像多变体渐进渲染与 Lightbox 预览', keys: ['/image'], run: () => hooks.onQuickMedia?.('image') },
         { title: '生成视频渲染预览 (/video)', sub: '打开视频渐进揭示与自定义视频播放器', keys: ['/video'], run: () => hooks.onQuickMedia?.('video') },
         { title: 'Agent 与 API 接入中心', sub: '接入 Claude Code / Ollama / DeepSeek / OpenRouter / Anthropic / 自定义 CLI', keys: [], run: () => openSettings('providers') },
+        { title: '检测软件更新与版本', sub: '核对 GitHub Releases 新版本并一键下载 Windows 安装包', keys: [], run: () => openSettings('updates') },
         { title: '打开协同遥测与指标总览', sub: '查看实时会话统计、环形分布图与 24 段进度条', keys: [], run: () => openSettings('telemetry') },
         { title: '偏好指令（Custom Instructions）', sub: '配置回复风格与跨会话规则', keys: [], run: () => openSettings('instructions') },
         { title: '持久记忆库（Memory Manager）', sub: `查看、编辑或检索 ${memories.length} 条工作记忆`, keys: [], run: () => openSettings('memory') },
@@ -1497,6 +1651,7 @@
       renderShortcutsInto,
       renderTelemetryInto,
       renderProvidersInto,
+      renderUpdatesInto,
       openNewProviderEditor: (mount, ctx) => {
         openProviderEditor(null);
         renderProvidersInto(mount, ctx);

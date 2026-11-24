@@ -64,6 +64,12 @@
     providers: [],
     localAgents: { clis: [], services: [] },
     providerPresets: [],
+    updateInfo: null,
+    updateChecking: false,
+    updatePollTimer: null,
+    autoCheckUpdates: (() => {
+      try { return localStorage.getItem('tenon_auto_check_updates') !== '0'; } catch { return true; }
+    })(),
     customCodexModels: [],
     assets: null,
     runs: [],
@@ -3868,8 +3874,144 @@
     el('inputPrompt')?.focus();
   }
 
+  function syncUpdateBadge() {
+    const badge = el('settingsUpdateBadge');
+    if (!badge) return;
+    const info = appState.updateInfo;
+    const hasNew = Boolean(info?.lastCheck?.ok && info?.lastCheck?.hasUpdate);
+    badge.textContent = hasNew ? `v${info.lastCheck.latestVersion}` : `v${info?.currentVersion || '1.0.0'}`;
+    badge.classList.toggle('is-new', hasNew);
+  }
+
+  function renderSettingsUpdates() {
+    syncUpdateBadge();
+    workspacePanels?.renderUpdatesInto(el('settingsUpdatesMount'), {
+      info: appState.updateInfo,
+      checking: appState.updateChecking,
+      autoCheck: appState.autoCheckUpdates,
+    });
+  }
+
+  async function loadUpdateInfo() {
+    try {
+      appState.updateInfo = await api('/api/update/info');
+      syncUpdateBadge();
+      if (appState.stageView === 'settings' && appState.settingsSection === 'updates') {
+        renderSettingsUpdates();
+      }
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  async function checkForAppUpdates(silent = false) {
+    if (appState.updateChecking) return;
+    appState.updateChecking = true;
+    const checkBtn = el('btnCheckUpdates');
+    if (checkBtn) {
+      checkBtn.disabled = true;
+      checkBtn.textContent = '检测中...';
+    }
+    if (appState.stageView === 'settings' && appState.settingsSection === 'updates') {
+      renderSettingsUpdates();
+    }
+    try {
+      const data = await api('/api/update/check', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      if (data.info) appState.updateInfo = data.info;
+      else if (appState.updateInfo) appState.updateInfo.lastCheck = data;
+      syncUpdateBadge();
+      if (!silent) {
+        if (!data.ok) showToast(data.error || '更新检测失败');
+        else if (data.hasUpdate) showToast(`发现新版本 TENON v${data.latestVersion}，可在设置页一键下载更新`);
+        else showToast(`当前已是最新版本 v${data.currentVersion}`);
+      } else if (data.ok && data.hasUpdate) {
+        showToast(`发现新版本 TENON v${data.latestVersion}，前往「设置 → 软件更新与版本」查看`);
+      }
+    } catch (err) {
+      if (!silent) showToast(`检测更新失败: ${err.message}`);
+    } finally {
+      appState.updateChecking = false;
+      if (checkBtn) {
+        checkBtn.disabled = false;
+        checkBtn.textContent = '立即检测更新';
+      }
+      if (appState.stageView === 'settings' && appState.settingsSection === 'updates') {
+        renderSettingsUpdates();
+      }
+    }
+  }
+
+  function stopUpdateDownloadPoll() {
+    if (appState.updatePollTimer) {
+      clearInterval(appState.updatePollTimer);
+      appState.updatePollTimer = null;
+    }
+  }
+
+  async function startAppUpdateDownload() {
+    try {
+      const data = await api('/api/update/download', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      if (appState.updateInfo && data.download) {
+        appState.updateInfo.download = data.download;
+      }
+      renderSettingsUpdates();
+      showToast('正在后台下载新版安装包...');
+      stopUpdateDownloadPoll();
+      appState.updatePollTimer = setInterval(async () => {
+        try {
+          const st = await api('/api/update/status');
+          if (appState.updateInfo && st.download) {
+            appState.updateInfo.download = st.download;
+          }
+          if (appState.stageView === 'settings' && appState.settingsSection === 'updates') {
+            renderSettingsUpdates();
+          }
+          if (st.download?.state === 'downloaded') {
+            stopUpdateDownloadPoll();
+            showToast('新版安装包下载完成，点击「立即启动安装程序」完成升级');
+          } else if (st.download?.state === 'error' || st.download?.state === 'idle') {
+            stopUpdateDownloadPoll();
+          }
+        } catch {
+          stopUpdateDownloadPoll();
+        }
+      }, 450);
+    } catch (err) {
+      showToast(`开始下载失败: ${err.message}`);
+    }
+  }
+
+  async function launchAppUpdateInstaller() {
+    try {
+      const res = await api('/api/update/install', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      showToast(
+        res.willQuitApp
+          ? '已拉起新版安装向导，应用将自动退出以完成无缝升级...'
+          : '已启动新版 Windows 安装程序，请按向导完成安装'
+      );
+    } catch (err) {
+      showToast(`启动安装程序失败: ${err.message}`);
+    }
+  }
+
+  function toggleAutoCheckUpdates() {
+    appState.autoCheckUpdates = !appState.autoCheckUpdates;
+    try { localStorage.setItem('tenon_auto_check_updates', appState.autoCheckUpdates ? '1' : '0'); } catch {}
+    renderSettingsUpdates();
+    showToast(appState.autoCheckUpdates ? '已开启启动时自动检测更新' : '已关闭启动时自动检测更新');
+  }
+
   function openSettingsSection(section = 'appearance') {
-    const valid = new Set(['appearance', 'providers', 'telemetry', 'instructions', 'memory', 'env', 'scripts', 'shortcuts']);
+    const valid = new Set(['appearance', 'providers', 'telemetry', 'instructions', 'memory', 'env', 'scripts', 'shortcuts', 'updates']);
     const sec = valid.has(section) ? section : 'appearance';
     appState.settingsSection = sec;
 
@@ -3892,6 +4034,10 @@
     if (sec === 'providers') {
       renderSettingsProviders();
       loadProviders(false);
+    }
+    if (sec === 'updates') {
+      renderSettingsUpdates();
+      loadUpdateInfo();
     }
     if (sec === 'scripts' && !appState.assets) loadAssets();
     if (sec === 'env') loadHealth();
@@ -4670,6 +4816,7 @@
 
     // Dedicated Settings Page Appearance & Canvas Resolution Controls
     el('btnScanProviders')?.addEventListener('click', () => loadProviders(true));
+    el('btnCheckUpdates')?.addEventListener('click', () => checkForAppUpdates(false));
     el('btnAddProvider')?.addEventListener('click', () => {
       workspacePanels?.openNewProviderEditor(el('settingsProvidersMount'), {
         providers: appState.providers,
@@ -5059,6 +5206,10 @@
       onDeleteProvider: (id) => deleteProviderById(id),
       onUseProvider: (prov) => useProviderInChat(prov),
       onRefreshProvidersView: () => renderSettingsProviders(),
+      onCheckUpdates: () => checkForAppUpdates(false),
+      onDownloadUpdate: () => startAppUpdateDownload(),
+      onInstallUpdate: () => launchAppUpdateInstaller(),
+      onToggleAutoUpdate: () => toggleAutoCheckUpdates(),
       onToast: showToast,
     });
   }
@@ -5073,5 +5224,9 @@
   loadHealth();
   loadModels(false);
   loadProviders(false);
+  loadUpdateInfo();
   loadRunsList();
+  if (appState.autoCheckUpdates) {
+    setTimeout(() => checkForAppUpdates(true), 2600);
+  }
 })();

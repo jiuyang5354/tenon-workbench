@@ -15,6 +15,7 @@ import {
   testProvider,
   runProvider,
 } from './lib/providers.mjs';
+import { UpdateManager, readCurrentAppVersion } from './lib/updater.mjs';
 import { inspectWorkspace, getWorkspaceDiff } from './lib/workspace.mjs';
 import { RunStore } from './lib/store.mjs';
 import { Orchestrator, ValidationError } from './lib/orchestrator.mjs';
@@ -225,10 +226,23 @@ async function serveStatic(res, reqPath) {
 
 export async function createWorkbenchServer(options = {}) {
   const dataDir = options.dataDir || DATA_DIR;
+  const writableTemplatesDir = options.templatesDir || TEMPLATES_DIR;
+  const defaultWorkspaceDir = options.defaultWorkspace || path.resolve(__dirname, '..');
   const store = new RunStore(dataDir);
   await store.init();
   const providerStore = new ProviderStore(dataDir);
   await providerStore.init();
+  const appVersion = options.appVersion || (await readCurrentAppVersion(__dirname));
+  const updater = new UpdateManager({
+    currentVersion: appVersion,
+    rootDir: __dirname,
+    runtime: options.runtime || (process.versions?.electron ? 'electron' : 'node-web'),
+    repo: options.updateRepo,
+    apiBase: options.updateApiBase,
+    fetchImpl: options.updateFetchImpl,
+    onRequestQuit: options.onRequestQuit,
+  });
+  await updater.init();
   const orchestrator = new Orchestrator(store, { providerStore });
 
   const server = http.createServer(async (req, res) => {
@@ -252,9 +266,49 @@ export async function createWorkbenchServer(options = {}) {
         const health = await checkEnvironmentHealth();
         return sendJson(res, 200, {
           ...health,
-          defaultWorkspace: path.resolve(__dirname, '..'),
+          appVersion,
+          runtime: updater.runtime,
+          defaultWorkspace: defaultWorkspaceDir,
           workbenchDir: __dirname,
         });
+      }
+
+      if (pathname === '/api/update/info' && method === 'GET') {
+        return sendJson(res, 200, updater.getInfo());
+      }
+
+      if (pathname === '/api/update/status' && method === 'GET') {
+        return sendJson(res, 200, {
+          download: updater.downloadState,
+          lastCheck: updater.lastCheck,
+        });
+      }
+
+      if (pathname === '/api/update/check' && (method === 'GET' || method === 'POST')) {
+        const result = await updater.checkForUpdates();
+        return sendJson(res, 200, {
+          ...result,
+          info: updater.getInfo(),
+        });
+      }
+
+      if (pathname === '/api/update/download' && method === 'POST') {
+        const body = await readJsonBody(req);
+        try {
+          const out = await updater.startDownload(body.downloadUrl, body.assetName);
+          return sendJson(res, 200, out);
+        } catch (err) {
+          throw new ValidationError(err.message);
+        }
+      }
+
+      if (pathname === '/api/update/install' && method === 'POST') {
+        try {
+          const out = await updater.launchInstaller();
+          return sendJson(res, 200, out);
+        } catch (err) {
+          throw new ValidationError(err.message);
+        }
       }
 
       if (pathname === '/api/models' && method === 'GET') {
@@ -478,9 +532,14 @@ export async function createWorkbenchServer(options = {}) {
       }
 
       if (pathname === '/api/assets' && method === 'GET') {
+        const readTemplate = async (name) => {
+          const override = await fs.readFile(path.join(writableTemplatesDir, name), 'utf8').catch(() => '');
+          if (override) return override;
+          return fs.readFile(path.join(TEMPLATES_DIR, name), 'utf8').catch(() => '');
+        };
         const [geminiMd, codexMd, geminiAskJs, codexWorkerJs, codexReviewJs] = await Promise.all([
-          fs.readFile(path.join(TEMPLATES_DIR, 'GEMINI.md'), 'utf8').catch(() => ''),
-          fs.readFile(path.join(TEMPLATES_DIR, 'CODEX.md'), 'utf8').catch(() => ''),
+          readTemplate('GEMINI.md'),
+          readTemplate('CODEX.md'),
           fs.readFile(path.join(SCRIPTS_DIR, 'gemini-ask.mjs'), 'utf8').catch(() => ''),
           fs.readFile(path.join(SCRIPTS_DIR, 'codex-worker.mjs'), 'utf8').catch(() => ''),
           fs.readFile(path.join(SCRIPTS_DIR, 'codex-review.mjs'), 'utf8').catch(() => ''),
@@ -505,8 +564,8 @@ export async function createWorkbenchServer(options = {}) {
         if (!allowed.has(body.filename)) {
           return sendJson(res, 400, { error: '仅允许保存 GEMINI.md 或 CODEX.md 模板' });
         }
-        const target = path.join(TEMPLATES_DIR, body.filename);
-        await fs.mkdir(TEMPLATES_DIR, { recursive: true });
+        const target = path.join(writableTemplatesDir, body.filename);
+        await fs.mkdir(writableTemplatesDir, { recursive: true });
         await fs.writeFile(target, String(body.content || ''), 'utf8');
         return sendJson(res, 200, { ok: true, filename: body.filename });
       }
@@ -523,7 +582,7 @@ export async function createWorkbenchServer(options = {}) {
     }
   });
 
-  return { server, store, orchestrator, providerStore };
+  return { server, store, orchestrator, providerStore, updater };
 }
 
 // Start standalone when run directly

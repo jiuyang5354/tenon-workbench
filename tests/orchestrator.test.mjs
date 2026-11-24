@@ -14,6 +14,11 @@ import {
   parseAnthropicSseChunk,
   parseGeminiSseChunk,
 } from '../lib/providers.mjs';
+import {
+  compareSemver,
+  isAllowedDownloadUrl,
+  selectPlatformAsset,
+} from '../lib/updater.mjs';
 import { createWorkbenchServer } from '../server.mjs';
 
 test('classifyRiskFiles auto-escalates auth/payment/deploy paths to xhigh', () => {
@@ -338,6 +343,91 @@ test('Provider Hub API enforces masking, secret preservation, CSRF, and live Ope
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await new Promise((resolve) => mockApi.close(resolve));
+    await fs.rm(tmpData, { recursive: true, force: true });
+  }
+});
+
+test('Updater compares SemVer, enforces GitHub SSRF allowlist, and checks mock GitHub Releases API', async () => {
+  assert.equal(compareSemver('1.2.0', '1.0.0'), 1);
+  assert.equal(compareSemver('v1.0.0', '1.0.0'), 0);
+  assert.equal(compareSemver('1.0.0', '1.0.0-beta.1'), 1);
+  assert.equal(compareSemver('0.9.9', '1.0.0'), -1);
+
+  assert.equal(
+    isAllowedDownloadUrl('https://github.com/jiuyang5354/tenon-workbench/releases/download/v1.1.0/TENON-Setup-1.1.0.exe'),
+    true
+  );
+  assert.equal(isAllowedDownloadUrl('https://evil.example.com/malware.exe'), false);
+  assert.equal(isAllowedDownloadUrl('http://github.com/jiuyang5354/tenon-workbench/releases/download/v1.1.0/a.exe'), false);
+
+  const picked = selectPlatformAsset(
+    [{ name: 'TENON-1.1.0.dmg' }, { name: 'TENON-Setup-1.1.0.exe', size: 12345 }],
+    'win32'
+  );
+  assert.equal(picked?.name, 'TENON-Setup-1.1.0.exe');
+
+  const tmpData = await fs.mkdtemp(path.join(os.tmpdir(), 'conduit-upd-test-'));
+  const mockGh = http.createServer((req, res) => {
+    if (req.url === '/repos/jiuyang5354/tenon-workbench/releases/latest') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        tag_name: 'v1.2.0',
+        name: 'TENON v1.2.0',
+        body: '## Highlights\n- New multi-agent routing',
+        published_at: '2026-11-24T12:00:00Z',
+        html_url: 'https://github.com/jiuyang5354/tenon-workbench/releases/tag/v1.2.0',
+        assets: [
+          {
+            name: 'TENON-Setup-1.2.0.exe',
+            size: 88_000_000,
+            browser_download_url: 'https://github.com/jiuyang5354/tenon-workbench/releases/download/v1.2.0/TENON-Setup-1.2.0.exe',
+          },
+        ],
+      }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise((resolve) => mockGh.listen(0, '127.0.0.1', resolve));
+  const ghPort = mockGh.address().port;
+
+  const { server } = await createWorkbenchServer({
+    dataDir: tmpData,
+    appVersion: '1.0.0',
+    updateApiBase: `http://127.0.0.1:${ghPort}`,
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const infoRes = await fetch(`${base}/api/update/info`);
+    assert.equal(infoRes.status, 200);
+    const info = await infoRes.json();
+    assert.equal(info.currentVersion, '1.0.0');
+
+    const checkRes = await fetch(`${base}/api/update/check`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.equal(checkRes.status, 200);
+    const checked = await checkRes.json();
+    assert.equal(checked.ok, true);
+    assert.equal(checked.hasUpdate, true);
+    assert.equal(checked.latestVersion, '1.2.0');
+    assert.equal(checked.assetName, 'TENON-Setup-1.2.0.exe');
+
+    // Reject SSRF download URL -> 400
+    const badDl = await fetch(`${base}/api/update/download`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ downloadUrl: 'https://evil.example.com/fake.exe' }),
+    });
+    assert.equal(badDl.status, 400);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await new Promise((resolve) => mockGh.close(resolve));
     await fs.rm(tmpData, { recursive: true, force: true });
   }
 });

@@ -365,6 +365,10 @@
               <button type="button" class="settings-nav-item" role="tab" aria-selected="false" data-settings-sec="env">本机 CLI 环境</button>
               <button type="button" class="settings-nav-item" role="tab" aria-selected="false" data-settings-sec="scripts">脚本与规则模板</button>
               <button type="button" class="settings-nav-item" role="tab" aria-selected="false" data-settings-sec="shortcuts">键盘快捷键</button>
+              <button type="button" class="settings-nav-item" role="tab" aria-selected="false" data-settings-sec="updates">
+                <span>软件更新与版本</span>
+                <span class="c-tab-count mono-xs" id="settingsUpdateBadge">v1.0.0</span>
+              </button>
             </div>
           </nav>
 
@@ -571,6 +575,21 @@
                 </div>
               </header>
               <div class="settings-card" id="settingsShortcutsMount"></div>
+            </div>
+
+            <!-- Section 7: Software Updates & Desktop Release Info -->
+            <div class="settings-pane hidden" data-settings-pane="updates">
+              <header class="settings-pane-head">
+                <div>
+                  <span class="mono-xs settings-kicker">SOFTWARE UPDATE &amp; RELEASE</span>
+                  <h2>软件更新与版本</h2>
+                </div>
+                <div class="settings-head-actions">
+                  <a class="btn-secondary-sm" id="btnOpenReleases" href="https://github.com/jiuyang5354/tenon-workbench/releases" target="_blank" rel="noopener noreferrer">GitHub 发布页</a>
+                  <button type="button" class="btn-primary-sm" id="btnCheckUpdates">立即检测更新</button>
+                </div>
+              </header>
+              <div id="settingsUpdatesMount"></div>
             </div>
           </div>
         </div>
