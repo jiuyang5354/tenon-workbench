@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 896 256" width="896" height="256" role="img" aria-labelledby="t">
+  <title id="t">TENON horizontal lockup (daylight)</title>
+  <g id="symbol">
+    <path fill="#111315" d="M 46 24 H 210 A 22 22 0 0 1 232 46 V 76 H 154 V 154 H 102 V 76 H 24 V 46 A 22 22 0 0 1 46 24 Z" />
+    <path fill="#111315" d="M 24 102 H 76 V 180 H 232 V 210 A 22 22 0 0 1 210 232 H 46 A 22 22 0 0 1 24 210 Z" />
+    <rect fill="#111315" x="180" y="102" width="52" height="52" rx="6" />
+  </g>
+  <g id="wordmark">
+    <path fill="#111315" d="M 292.0 74.0 H 374.0 V 90.0 H 342.0 V 182.0 H 324.0 V 90.0 H 292.0 Z" />
+    <path fill="#111315" d="M 398.0 74.0 H 474.0 V 90.0 H 416.0 V 120.0 H 466.0 V 136.0 H 416.0 V 166.0 H 474.0 V 182.0 H 398.0 Z" />
+    <path fill="#111315" d="M 504.0 74.0 H 522.0 L 574.0 150.0 V 74.0 H 592.0 V 182.0 H 574.0 L 522.0 106.0 V 182.0 H 504.0 Z" />
+    <path fill="#111315" fill-rule="evenodd" d="M 676.0 72.0 A 54 56 0 1 1 676.0 184.0 A 54 56 0 1 1 676.0 72.0 Z M 676.0 88.0 A 36 40 0 1 0 676.0 168.0 A 36 40 0 1 0 676.0 88.0 Z" />
+    <path fill="#111315" d="M 760.0 74.0 H 778.0 L 830.0 150.0 V 74.0 H 848.0 V 182.0 H 830.0 L 778.0 106.0 V 182.0 H 760.0 Z" />
+  </g>
+</svg>

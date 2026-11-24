@@ -1,8 +1,9 @@
-# CONDUIT Visual Design System — Locked Single Benchmark
+# TENON（榫）Visual Design System — Locked Single Benchmark
 
+> **Brand Identity**: **TENON（榫）** — *Many models. One exact joint.*（完整标志矢量与规范见 `public/brand/BRAND_GUIDELINES.md`）
 > **Locked Primary Benchmark**: [Figma Weave](https://weave.figma.com/) (*Architectural Daylight Blueprint Canvas*)
 > **Locked Date**: 2026-11-24
-> **Rule**: Every view in CONDUIT (`对话流`, `节点画布`, `审查与 Diff`, `脚本与规则`, `Tweaks`) must strictly adhere to this single architectural daylight design language. Zero multi-site style stitching.
+> **Rule**: Every view in TENON (`对话流`, `节点画布`, `审查与 Diff`, `Agent 与 API 接入`, `设置中心`) must strictly adhere to this single architectural daylight design language. Zero multi-site style stitching.
 
 ---
 

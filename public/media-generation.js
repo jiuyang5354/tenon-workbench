@@ -1090,7 +1090,7 @@
     ctx.globalAlpha = 0.72;
     ctx.fillStyle = pal.ink;
     ctx.font = '600 12px "JetBrains Mono", monospace';
-    ctx.fillText(`FIG.0${variationIdx + 1} · CONDUIT STUDIO`, 24, height - 24);
+    ctx.fillText(`FIG.0${variationIdx + 1} · TENON STUDIO`, 24, height - 24);
     ctx.globalAlpha = 0.48;
     ctx.fillText(`${width}×${height}`, width - 88, height - 24);
 
@@ -1233,7 +1233,7 @@
       '  return (',
       '    <section className="rounded-xl border p-5">',
       '      <p className="text-xs text-muted">Deploy to production</p>',
-      '      <h3 className="font-mono text-sm">conduit-workbench@main</h3>',
+      '      <h3 className="font-mono text-sm">tenon-workbench@main</h3>',
       '      <ul className="mt-4 space-y-2 text-xs">',
       '        {checks.map((c) => (',
       '          <li key={c.name} className="flex justify-between">',
@@ -1257,7 +1257,7 @@
       const activeCode = (codeSnippet || safeSrcdoc || fallbackCode).trim();
       const codeLines = activeCode.split(/\r?\n/).length;
       const fileLabel = codeLang === 'diff' ? 'workspace.patch' : codeLang === 'html' ? 'preview.html' : `artifact.${codeLang || 'tsx'}`;
-      const targetName = runMeta?.title ? runMeta.title.slice(0, 24) : 'conduit-workbench@main';
+      const targetName = runMeta?.title ? runMeta.title.slice(0, 24) : 'tenon-workbench@main';
       const durSec = runMeta?.durationSec || '1.4';
       const checks = [
         { name: 'Syntax Check', time: '0.2 s' },

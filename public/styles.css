@@ -9724,6 +9724,23 @@ html[data-surface="charcoal"] .ph-kind-badge {
   color: var(--ink-primary);
 }
 
+/* =========================================================================
+   TENON Brand Mark Keystone Polarity (Daylight Ink / Charcoal Chartreuse)
+   ========================================================================= */
+.tenon-mark-svg {
+  display: block;
+}
+
+.tenon-keystone {
+  fill: currentColor;
+  transition: fill 180ms ease;
+}
+
+html[data-surface="charcoal"] .tenon-keystone,
+.tm-logo-tile .tenon-keystone {
+  fill: #EEFF82;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

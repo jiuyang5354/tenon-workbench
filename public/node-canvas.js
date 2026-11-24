@@ -2891,7 +2891,7 @@
     function exportJson() {
       const payload = JSON.stringify(
         {
-          engine: 'CONDUIT Infinite Agent Cluster Canvas v6.1',
+          engine: 'TENON Infinite Agent Cluster Canvas v6.2',
           nodes: state.graph.nodes.map(({ id, kind, title, model, effort, prompt, x, y, w, h, muted }) => ({
             id, kind, title, model: model || 'global-default', effort: effort || 'global-default', prompt, x, y, w: w || NODE_WIDTH, h: h || null, muted,
           })),

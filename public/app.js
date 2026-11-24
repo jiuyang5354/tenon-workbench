@@ -2316,7 +2316,7 @@
           <header class="agent-turn-head">
             <div class="agent-identity">
               <span class="agent-avatar gemini ${isRunningM ? 'is-orb' : ''}">${isRunningM ? '<svg class="thinking-orb" width="18" height="18" viewBox="0 0 18 18" data-orb-family="ai" data-orb-state="ai-composing" data-orb-variant="ai" data-orb-size="18" aria-hidden="true"></svg>' : (isVid ? 'V' : 'I')}</span>
-              <span class="agent-role-name">${isVid ? 'CONDUIT · 视频生成输出' : 'CONDUIT · 图像生成输出'}</span>
+              <span class="agent-role-name">${isVid ? 'TENON · 视频生成输出' : 'TENON · 图像生成输出'}</span>
               <span class="agent-model-tag">${escapeHtml(mj.modelLabel || (isVid ? 'VIDEO STUDIO' : 'IMAGE STUDIO'))}</span>
             </div>
             <span class="agent-status-pill ${mj.status === 'done' ? 'completed' : mj.status === 'failed' ? 'failed' : isRunningM ? 'running is-shimmer' : ''}">
@@ -2598,7 +2598,7 @@
           aspectRatio: mj.aspectRatio || '4:3',
           progress: mj.progress,
           queuePosition: mj.queuePosition,
-          settings: mj.settings || ['CONDUIT Studio', '本地渲染'],
+          settings: mj.settings || ['TENON Studio', '本地渲染'],
           busyAction: mj.busyAction,
           selectedIndex: mj.selectedIndex || 0,
           onToast: showToast,
@@ -2622,7 +2622,7 @@
               const hi = window.ConduitMediaGen.createArchitecturalImage(mj.prompt, idx, 1280, 960, (mj.salt || 0) + 7);
               mj.images[idx] = { ...mj.images[idx], ...hi, alt: `${mj.prompt} · 2× 高清放大` };
               mj.busyAction = undefined;
-              mj.settings = ['CONDUIT Studio', '1280×960 高清放大'];
+              mj.settings = ['TENON Studio', '1280×960 高清放大'];
               api.update({ busyAction: undefined, images: mj.images, settings: mj.settings });
               showToast(`变体 ${idx + 1} 已完成 2× 高清放大`);
             }, 650);
@@ -2656,7 +2656,7 @@
           fps: mj.fps || 24,
           audio: Boolean(mj.audio),
           aspectRatio: mj.aspectRatio || '16:9',
-          settings: mj.settings || ['CONDUIT Motion'],
+          settings: mj.settings || ['TENON Motion'],
           autoPlay: true,
           loop: true,
           onToast: showToast,
@@ -2997,7 +2997,7 @@
           codeSnippet: codeMatch ? codeMatch[2].trim() : (run?.codex?.diff || ''),
           codeLang: codeMatch ? (codeMatch[1] || 'tsx') : (run?.codex?.diff ? 'diff' : 'tsx'),
           runMeta: run ? {
-            title: stripPreferenceTag(run.title) || 'conduit-workbench',
+            title: stripPreferenceTag(run.title) || 'tenon-workbench',
             status: run.status,
             durationSec: (((run.gemini?.durationMs || 0) + (run.codex?.durationMs || 0)) / 1000).toFixed(1),
             passed: run.reviewVerdict ? run.reviewVerdict.passed : run.status === 'completed',
@@ -3707,7 +3707,7 @@
             providerId,
             model,
             prompt: promptText,
-            systemPrompt: `你正在 CONDUIT 多 Agent 节点画布中执行节点「${node?.title || '外部 Agent'}」。请用结构化中文直接输出可执行交付结果。`,
+            systemPrompt: `你正在 TENON 多 Agent 节点画布中执行节点「${node?.title || '外部 Agent'}」。请用结构化中文直接输出可执行交付结果。`,
             cwd: el('inputWorkspace')?.value.trim() || '',
           }),
         });

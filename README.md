@@ -1,6 +1,10 @@
-# CONDUIT — Gemini × Codex 多模型协同调度工作台
+<p align="left">
+  <img src="public/brand/tenon-lockup-horizontal-light.svg" alt="TENON logo" height="54" />
+</p>
 
-> 基于官方本地 CLI（`agy` + `codex`）构建的零依赖多模型协同可视化桌面 Web 工作台与独立脚本套件。无需 Claude，也能让 **Gemini（总指挥 / 规划 / 文案顾问）** 与 **Codex（严谨后端施工 / Pre-CI 代码审查门神）** 顺畅协作。
+# TENON（榫）— 本地多 Agent 与多协议 API 协同工作台
+
+> **Many models. One exact joint.** — 零第三方 npm 依赖的本地多模型协同与无限节点画布工坊。原生协同 **Gemini (`agy`)**、**Codex (`codex`)**、**Claude Code (`claude`)**、**Ollama / LM Studio** 及 **OpenAI / Anthropic / Gemini REST 流式 API**，通过人工拍板闸门与 Pre-CI 分级门禁让多模型如榫卯般严密咬合交付。
 
 ---
 

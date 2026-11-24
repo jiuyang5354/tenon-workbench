@@ -44,6 +44,7 @@ const MIME_TYPES = {
   '.webm': 'video/webm',
   '.mov': 'video/quicktime',
   '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
   '.md': 'text/markdown; charset=utf-8',
 };
@@ -541,6 +542,6 @@ if (isDirectRun) {
   process.on('SIGTERM', gracefulExit);
 
   server.listen(PORT, HOST, () => {
-    console.log(`[CONDUIT] Gemini x Codex Workbench running at http://${HOST}:${PORT}`);
+    console.log(`[TENON] Multi-Agent Workbench running at http://${HOST}:${PORT}`);
   });
 }

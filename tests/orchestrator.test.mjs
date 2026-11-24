@@ -79,11 +79,17 @@ test('HTTP server enforces CSRF, validation status codes (400/403/415), and path
   const base = `http://127.0.0.1:${port}`;
 
   try {
-    // Static SPA
+    // Static SPA & TENON brand assets
     const htmlRes = await fetch(`${base}/`);
     assert.equal(htmlRes.status, 200);
     const html = await htmlRes.text();
-    assert.match(html, /CONDUIT/);
+    assert.match(html, /TENON/);
+
+    const favRes = await fetch(`${base}/favicon.ico`);
+    assert.equal(favRes.status, 200);
+    const manifestRes = await fetch(`${base}/site.webmanifest`);
+    assert.equal(manifestRes.status, 200);
+    assert.match(manifestRes.headers.get('content-type') || '', /manifest\+json/);
 
     // Malformed percent-encoding returns 400 (not unhandled URIError)
     const badUri = await fetch(`${base}/%E0%A4%A`);

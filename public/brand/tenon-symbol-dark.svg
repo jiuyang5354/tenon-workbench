@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="t">
+  <title id="t">TENON logo mark (charcoal + chartreuse keystone)</title>
+  <g id="symbol">
+    <path fill="#F3F4F6" d="M 46 24 H 210 A 22 22 0 0 1 232 46 V 76 H 154 V 154 H 102 V 76 H 24 V 46 A 22 22 0 0 1 46 24 Z" />
+    <path fill="#F3F4F6" d="M 24 102 H 76 V 180 H 232 V 210 A 22 22 0 0 1 210 232 H 46 A 22 22 0 0 1 24 210 Z" />
+    <rect fill="#EEFF82" x="180" y="102" width="52" height="52" rx="6" />
+  </g>
+</svg>

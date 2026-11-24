@@ -1072,15 +1072,15 @@
             <div class="tm-left-col">
               <div class="tm-identity">
                 <span class="tm-logo-tile" aria-hidden="true">
-                  <svg width="20" height="20" viewBox="0 0 18 18" fill="none">
-                    <rect x="1" y="1" width="16" height="16" stroke="currentColor" stroke-width="1.3" />
-                    <path d="M5 13V5H10.5L13 7.5V13" stroke="var(--cta-bg)" stroke-width="1.6" />
-                    <rect x="8" y="8" width="2.5" height="2.5" fill="currentColor" />
+                  <svg class="tenon-mark-svg" width="22" height="22" viewBox="0 0 256 256" fill="none">
+                    <path fill="currentColor" d="M 46 22 H 210 A 24 24 0 0 1 234 46 V 74 H 154 V 154 H 102 V 74 H 22 V 46 A 24 24 0 0 1 46 22 Z" />
+                    <path fill="currentColor" d="M 22 102 H 74 V 182 H 234 V 210 A 24 24 0 0 1 210 234 H 46 A 24 24 0 0 1 22 210 Z" />
+                    <rect class="tenon-keystone" x="182" y="102" width="52" height="52" rx="6" />
                   </svg>
                 </span>
                 <div class="tm-identity-text">
-                  <strong>CONDUIT 本地协同引擎</strong>
-                  <span class="mono-xs">${escapeHtml(ctx.workspaceDir || '本机直连工作区')} · 官方 CLI 订阅额度</span>
+                  <strong>TENON 本地多模型协同引擎</strong>
+                  <span class="mono-xs">${escapeHtml(ctx.workspaceDir || '本机直连工作区')} · CLI &amp; Multi-API Hub</span>
                 </div>
               </div>
 
@@ -1272,7 +1272,7 @@
           <div class="cp-list" id="cpList" role="listbox" aria-label="命令结果"></div>
           <footer class="cp-foot mono-xs">
             <span>↑↓ 移动 · Enter 执行</span>
-            <span>CONDUIT COMMANDS</span>
+            <span>TENON COMMANDS</span>
           </footer>
         </div>`;
       document.body.appendChild(paletteModal);
