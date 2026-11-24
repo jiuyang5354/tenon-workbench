@@ -163,7 +163,8 @@
   function formatInline(s) {
     return s
       .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
   }
 
   function renderMarkdown(raw) {
@@ -214,7 +215,8 @@
             continue;
           }
 
-          if (/^###\s+/.test(trimmed)) { closeList(); html.push(`<h3>${formatInline(trimmed.slice(4))}</h3>`); }
+          if (/^-{3,}$/.test(trimmed)) { closeList(); html.push('<hr class="md-hr" />'); }
+          else if (/^###\s+/.test(trimmed)) { closeList(); html.push(`<h3>${formatInline(trimmed.slice(4))}</h3>`); }
           else if (/^##\s+/.test(trimmed)) { closeList(); html.push(`<h2>${formatInline(trimmed.slice(3))}</h2>`); }
           else if (/^#\s+/.test(trimmed)) { closeList(); html.push(`<h1>${formatInline(trimmed.slice(2))}</h1>`); }
           else if (/^&gt;\s+/.test(trimmed)) { closeList(); html.push(`<blockquote>${formatInline(trimmed.slice(5))}</blockquote>`); }
@@ -1289,7 +1291,6 @@
     el('btnCancelRun').classList.add('hidden');
     el('sendCtaGroup').classList.remove('hidden');
     el('composerShell').classList.remove('is-streaming');
-    updatePipelinePills(null);
     syncTopbarOrb(null);
     renderSidebarThreads();
     if (appState.stageView === 'workflow') renderWorkflowCanvas();
@@ -1492,41 +1493,6 @@
       </div>`;
   }
 
-  function updatePipelinePills(run) {
-    const topbar = document.querySelector('.stage-topbar');
-    if (topbar) topbar.classList.toggle('has-active-run', Boolean(run));
-    const order = ['plan', 'gate', 'exec', 'review', 'summary'];
-    const stageIdxMap = { init: -1, plan: 0, copy: 0, exec: 2, review: 3, summary: 4, done: 5, failed: -2 };
-    let activeIdx = run ? (stageIdxMap[run.activeStage] ?? -1) : -1;
-    if (run?.status === 'awaiting_approval') {
-      activeIdx = run.gate?.type === 'review_escalation' ? 3 : 1;
-    }
-
-    order.forEach((st, idx) => {
-      const node = el(`pstep-${st}`);
-      if (!node) return;
-      node.classList.remove('is-active', 'is-done', 'is-gate', 'is-failed');
-      if (!run) return;
-      if (run.status === 'completed') {
-        if (
-          run.mode === 'full-pipeline' ||
-          (run.mode === 'plan-only' && idx === 0) ||
-          (run.mode === 'copy-polish' && idx === 0) ||
-          (run.mode === 'codex-exec' && idx === 2) ||
-          (run.mode === 'codex-review' && idx === 3)
-        ) node.classList.add('is-done');
-      } else if (run.status === 'awaiting_approval' && idx === activeIdx) {
-        node.classList.add('is-gate');
-      } else if ((run.status === 'failed' || run.status === 'blocked') && idx === Math.max(0, activeIdx)) {
-        node.classList.add('is-failed');
-      } else if (idx === activeIdx) {
-        node.classList.add('is-active');
-      } else if (idx < activeIdx && run.mode === 'full-pipeline') {
-        node.classList.add('is-done');
-      }
-    });
-  }
-
   function treeGlyphSvg(kind) {
     if (kind === 'command') {
       return '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2.5 4.5L6 8L2.5 11.5M7.5 11.5H13.5" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -1685,7 +1651,6 @@
     const totalSec = (((run.gemini?.durationMs || 0) + (run.codex?.durationMs || 0)) / 1000).toFixed(1);
     el('topbarTitle').textContent = run.title || '协同会话';
     el('topbarMeta').textContent = `${MODE_LABELS[run.mode] || run.mode} · ${totalTokens.toLocaleString()} TOKENS · ${totalSec}s`;
-    updatePipelinePills(run);
     syncTopbarOrb(run);
 
     // Update Inspector badge
@@ -2957,15 +2922,9 @@
     initFluidTrack(el('inspectorTabs'));
     initFluidTrack(el('stageViewTabs'));
 
-    // Topbar View Switcher (对话流 / 节点画布) & Pipeline pills
+    // Topbar View Switcher (对话流 / 节点画布)
     el('stageViewTabs')?.querySelectorAll('.stage-view-tab').forEach((btn) => {
       btn.addEventListener('click', () => switchStageView(btn.dataset.stageView));
-    });
-    el('topbarPipeline')?.querySelectorAll('[data-wf-node]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        switchStageView('workflow');
-        if (canvasEngine) canvasEngine.selectKind(Number(btn.dataset.wfNode));
-      });
     });
 
     // Blender-Style Infinite Canvas Floating HUD Controls

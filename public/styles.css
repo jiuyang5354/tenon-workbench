@@ -1098,81 +1098,6 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
   text-overflow: ellipsis;
 }
 
-/* Inline 5-stage pipeline micro-strip (shown ONLY when a real run is active in chat view) */
-.stage-topbar.is-workflow-mode .topbar-pipeline,
-.stage-topbar:not(.has-active-run) .topbar-pipeline {
-  display: none;
-}
-
-.topbar-pipeline {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.pipe-step {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  padding: 3px 9px;
-  color: var(--ink-muted);
-  border: 1px solid transparent;
-  background: transparent;
-  border-radius: var(--radius-sharp);
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  transition: all 150ms var(--ease-out);
-}
-
-.pipe-step:hover {
-  color: var(--ink-primary);
-  background: var(--hover-film);
-}
-
-.pipe-step.is-active {
-  background: var(--cta-bg);
-  border-color: var(--cta-border);
-  color: var(--cta-ink);
-  font-weight: 600;
-}
-
-.pipe-step.is-done {
-  background: var(--bg-surface-1);
-  border-color: var(--line-strong);
-  color: var(--ink-primary);
-  font-weight: 600;
-  box-shadow: 0 1px 2px rgba(17, 19, 21, 0.05);
-}
-
-.pipe-step.is-done::before {
-  content: "";
-  width: 5.5px;
-  height: 5.5px;
-  border-radius: 999px;
-  background: var(--state-ok);
-  flex-shrink: 0;
-}
-
-.pipe-step.is-gate {
-  border-color: var(--state-warn);
-  color: var(--state-warn);
-}
-
-.pipe-step.is-failed {
-  border-color: var(--state-err);
-  color: var(--state-err);
-}
-
-.pipe-arrow {
-  width: 6px;
-  height: 1px;
-  background: var(--line-strong);
-}
-
 .topbar-right {
   display: flex;
   align-items: center;
@@ -2191,6 +2116,11 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
   overflow-x: auto;
 }
 .markdown-output pre code { padding: 0; border: none; background: none; }
+.markdown-output .md-hr {
+  border: none;
+  border-top: 1px solid var(--line-subtle);
+  margin: 14px 0;
+}
 
 .md-table-wrap { overflow-x: auto; margin: 10px 0; }
 .md-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
@@ -4895,7 +4825,6 @@ html[data-motion="off"] .ic-ext-dot.is-pulse {
 
 /* --- Responsive Breakpoints (Zero Horizontal Overflow) --- */
 @media (max-width: 1180px) {
-  .topbar-pipeline { display: none; }
   .inspector-pane {
     position: fixed;
     top: 0;
