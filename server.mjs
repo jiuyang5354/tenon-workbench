@@ -1,5 +1,6 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -28,10 +29,90 @@ const MIME_TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
   '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8',
   '.md': 'text/markdown; charset=utf-8',
 };
+
+const SAFE_MEDIA_EXTS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
+  '.svg',
+  '.mp4',
+  '.webm',
+  '.mov',
+]);
+
+async function serveWorkspaceMedia(req, res, workspaceDir, relFile) {
+  if (!workspaceDir || !relFile) {
+    return sendJson(res, 400, { error: '缺少 dir 或 file 参数' });
+  }
+  const base = path.resolve(workspaceDir);
+  const candidate = path.isAbsolute(relFile) ? path.resolve(relFile) : path.resolve(base, relFile);
+  const baseNorm = process.platform === 'win32' ? base.toLowerCase() : base;
+  const candNorm = process.platform === 'win32' ? candidate.toLowerCase() : candidate;
+  const prefix = baseNorm.endsWith(path.sep) ? baseNorm : `${baseNorm}${path.sep}`;
+  if (candNorm !== baseNorm && !candNorm.startsWith(prefix)) {
+    return sendJson(res, 403, { error: '拒绝访问工作区目录之外的媒体文件' });
+  }
+  const ext = path.extname(candidate).toLowerCase();
+  if (!SAFE_MEDIA_EXTS.has(ext)) {
+    return sendJson(res, 403, { error: '仅允许预览图片或视频媒体文件' });
+  }
+  let stat;
+  try {
+    stat = await fs.stat(candidate);
+    if (!stat.isFile()) return sendJson(res, 404, { error: '媒体文件不存在' });
+  } catch {
+    return sendJson(res, 404, { error: '媒体文件不存在' });
+  }
+
+  const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+  const total = stat.size;
+  const range = req.headers.range;
+  if (range) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (!match) {
+      res.writeHead(416, { 'Content-Range': `bytes */${total}` });
+      res.end();
+      return;
+    }
+    const start = match[1] ? Number(match[1]) : 0;
+    const end = match[2] ? Math.min(Number(match[2]), total - 1) : total - 1;
+    if (start > end || start >= total) {
+      res.writeHead(416, { 'Content-Range': `bytes */${total}` });
+      res.end();
+      return;
+    }
+    res.writeHead(206, {
+      'Content-Type': contentType,
+      'Content-Range': `bytes ${start}-${end}/${total}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': end - start + 1,
+      'Cache-Control': 'no-store',
+    });
+    createReadStream(candidate, { start, end }).pipe(res);
+    return;
+  }
+
+  res.writeHead(200, {
+    'Content-Type': contentType,
+    'Accept-Ranges': 'bytes',
+    'Content-Length': total,
+    'Cache-Control': 'no-store',
+  });
+  createReadStream(candidate).pipe(res);
+}
 
 function sendJson(res, status, data) {
   const body = JSON.stringify(data);
@@ -184,6 +265,12 @@ export async function createWorkbenchServer(options = {}) {
         const dir = url.searchParams.get('dir') || __dirname;
         const info = await getWorkspaceDiff(dir);
         return sendJson(res, 200, info);
+      }
+
+      if (pathname === '/api/workspace/media' && method === 'GET') {
+        const dir = url.searchParams.get('dir') || __dirname;
+        const file = url.searchParams.get('file') || '';
+        return await serveWorkspaceMedia(req, res, dir, file);
       }
 
       if (pathname === '/api/runs' && method === 'GET') {

@@ -23,10 +23,12 @@
   const VALID_STEP_STATUS = new Set(['pending', 'active', 'completed', 'error']);
   const EFFORT_OPTIONS = [
     { id: '', label: '跟随全局默认', badge: 'AUTO' },
-    { id: 'low', label: 'low（快速验证）', badge: 'LOW' },
-    { id: 'medium', label: 'medium（常规均衡）', badge: 'MED' },
-    { id: 'high', label: 'high（默认推荐）', badge: 'HIGH' },
-    { id: 'xhigh', label: 'xhigh（高危深度）', badge: 'XHIGH' },
+    { id: 'low', label: 'low（极速）', badge: 'LOW' },
+    { id: 'medium', label: 'medium（均衡）', badge: 'MED' },
+    { id: 'high', label: 'high（推荐）', badge: 'HIGH' },
+    { id: 'xhigh', label: 'xhigh（深度）', badge: 'EXTRA' },
+    { id: 'max', label: 'max（极限）', badge: 'MAX' },
+    { id: 'ultracode', label: 'ultracode（Ultracode）', badge: 'ULTRA' },
   ];
 
   const NODE_TEMPLATES = {
@@ -134,6 +136,48 @@
         { verb: '输出前后对照交付表', detail: '附带场景说明与推荐直接替换的最终文案' },
       ],
       errorMessage: '文案润色超时，请点击重试。',
+    },
+    'image-gen': {
+      kind: 'image-gen',
+      roleCode: 'IMAGE STUDIO',
+      provider: 'gemini',
+      title: '图像生成与变体工位',
+      subtitle: '渐进扫描揭示 · 4 组变体 · Lightbox',
+      mode: 'image-gen',
+      orbIdle: ['waiting', 'default'],
+      orbRun: ['working', 'gyro'],
+      inLabel: '视觉提示词',
+      outLabel: '图像产物',
+      showIn: true,
+      showOut: true,
+      defaultPrompt: 'Figma Weave 风格冷矿物建筑白昼光影雕塑，极简几何结构与纸张肌理',
+      stepTemplates: [
+        { verb: '构图与比例锁定', detail: '按 4:3 画幅初始化 4 组变体插槽与胶片噪点基底' },
+        { verb: '渐进扫描渲染细节', detail: '从上至下同步推进清晰度扫描线并计算平滑 ETA' },
+        { verb: '完成 4 组变体并开放放大', detail: '支持变体切换、2× 高清放大、微调变体与全屏 Lightbox' },
+      ],
+      errorMessage: '图像生成节点渲染中断，请重试。',
+    },
+    'video-gen': {
+      kind: 'video-gen',
+      roleCode: 'VIDEO STUDIO',
+      provider: 'gemini',
+      title: '视频渲染与播放工位',
+      subtitle: '帧渐进揭示 · 悬浮控制栏播放器',
+      mode: 'video-gen',
+      orbIdle: ['background', 'spiral'],
+      orbRun: ['working', 'gyro'],
+      inLabel: '分镜 / 首帧',
+      outLabel: '视频片段',
+      showIn: true,
+      showOut: true,
+      defaultPrompt: '极简暗夜静水上的同心涟漪，俯视慢镜头，细微胶片颗粒与柠黄微光',
+      stepTemplates: [
+        { verb: '解析镜头脚本与首帧海报', detail: '锁定 16:9 · 1080p · 24fps 构图与首帧渐进揭示基底' },
+        { verb: '逐帧渲染动态波形', detail: '实时写入视频流并推进扫描进度条' },
+        { verb: '封装播放并就绪下载', detail: '挂载自定义悬浮播放器（支持 K/M/F 快捷键与拖拽）' },
+      ],
+      errorMessage: '视频渲染节点编码中止，请重试。',
     },
   };
 
@@ -1434,6 +1478,8 @@
             { id: 'add:cluster-merge', label: '+ 集群聚合合并器 (Merge Hub)', shortcut: 'MERGE', accent: true },
             { id: 'add:codex-review', label: '+ Pre-CI 审查门禁', shortcut: 'GATE' },
             { id: 'add:gemini-copy', label: '+ Gemini · 文案与交互顾问', shortcut: 'COPY' },
+            { id: 'add:image-gen', label: '+ 图像生成与变体工位', shortcut: 'IMG' },
+            { id: 'add:video-gen', label: '+ 视频渲染与播放工位', shortcut: 'VID' },
             { type: 'sep' },
             { type: 'group', label: '画布编排与自定义集群' },
             { id: 'act:layout', label: '自动拓扑对齐排列', shortcut: 'L' },
@@ -1717,6 +1763,13 @@
                   : ''
               }
             </div>
+            ${
+              tpl.provider !== 'gemini'
+                ? `<div class="field-block" style="margin-top:4px">
+                    <div id="icDrawerEffortMount"></div>
+                  </div>`
+                : ''
+            }
             <label class="field-block">
               <span class="field-label">节点专属任务 Prompt（自定义该工位职责）</span>
               <textarea class="gate-editor" id="icEditPrompt" rows="3">${escapeHtml(node.prompt || '')}</textarea>
@@ -1725,6 +1778,12 @@
               <span>上游汇入：${escapeHtml(upNodes.length ? upNodes.join(' + ') : '无（起始节点）')}</span>
             </div>
           </div>
+
+          ${
+            node.kind === 'image-gen' || node.kind === 'video-gen'
+              ? '<div class="ic-drawer-media-mount" id="icDrawerMediaMount"></div>'
+              : ''
+          }
 
           <div class="ic-drawer-cot-section">
             <div class="mono-xs ic-drawer-subcap">树状思考工作流（${node.steps.length} 步）</div>
@@ -1773,6 +1832,69 @@
           const r = e.currentTarget.getBoundingClientRect();
           openEffortPicker(node.id, r.left, r.bottom + 6);
         });
+        const effMount = resultBodyEl.querySelector('#icDrawerEffortMount');
+        if (effMount && window.ConduitEffortSlider) {
+          window.ConduitEffortSlider.mount(effMount, {
+            defaultValue: node.effort || getContext()?.codexEffort || 'high',
+            recommended: 'high',
+            compact: true,
+            title: '此节点推理深度',
+            onChange: (lv) => {
+              pushHistory();
+              node.effort = lv;
+              renderNodes();
+              const btnSpan = resultBodyEl.querySelector('#btnDrawerPickEffort span');
+              if (btnSpan) btnSpan.textContent = formatNodeEffortLabel(node);
+            },
+          });
+        }
+        const mediaMount = resultBodyEl.querySelector('#icDrawerMediaMount');
+        if (mediaMount && window.ConduitMediaGen) {
+          if (node.kind === 'image-gen') {
+            if (!node._previewImages) {
+              node._previewImages = [0, 1, 2, 3].map((idx) =>
+                window.ConduitMediaGen.createArchitecturalImage(node.prompt || tpl.defaultPrompt, idx, 640, 480, 0)
+              );
+            }
+            window.ConduitMediaGen.mountImageGeneration(mediaMount, {
+              prompt: node.prompt || tpl.defaultPrompt,
+              status: 'done',
+              images: node._previewImages,
+              count: 4,
+              aspectRatio: '4:3',
+              settings: ['画布节点产物'],
+              onToast,
+            });
+          } else if (node.kind === 'video-gen') {
+            if (!node._previewClip) {
+              node._previewClip = window.ConduitMediaGen.recordKineticClip({ prompt: node.prompt || tpl.defaultPrompt, seconds: 3.0 });
+            }
+            const vApi = window.ConduitMediaGen.mountVideoGeneration(mediaMount, {
+              prompt: node.prompt || tpl.defaultPrompt,
+              status: node._previewClipUrl ? 'done' : 'generating',
+              progress: node._previewClipUrl ? 100 : 72,
+              posterSrc: node._previewClip.posterSrc,
+              src: node._previewClipUrl || undefined,
+              duration: 3,
+              resolution: '1080p',
+              fps: 24,
+              audio: false,
+              aspectRatio: '16:9',
+              settings: ['画布节点产物'],
+              autoPlay: false,
+              loop: true,
+              onToast,
+            });
+            if (!node._previewClipUrl) {
+              node._previewClip.videoPromise.then((u) => {
+                if (u) {
+                  node._previewClipUrl = u;
+                  vApi?.update({ status: 'done', progress: 100, src: u });
+                }
+              });
+            }
+          }
+        }
         resultBodyEl.querySelector('#btnDrawerRunNode')?.addEventListener('click', () => runSinglePreview(node.id));
         resultBodyEl.querySelector('#btnDrawerRealCli')?.addEventListener('click', () => {
           if (onDispatchRealCli) onDispatchRealCli(node, state.lastTaskPrompt || node.prompt);

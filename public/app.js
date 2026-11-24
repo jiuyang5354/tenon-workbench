@@ -7,6 +7,8 @@
     'codex-exec': 'Codex 直派',
     'codex-review': '审查门禁',
     'copy-polish': '文案顾问',
+    'image-gen': '图像生成',
+    'video-gen': '视频渲染',
   };
 
   const MODE_SHORT = {
@@ -15,6 +17,8 @@
     'codex-exec': 'Codex直派',
     'codex-review': '审查门禁',
     'copy-polish': '文案顾问',
+    'image-gen': '图像输出',
+    'video-gen': '视频输出',
   };
 
   const MODE_ITEMS = [
@@ -23,6 +27,8 @@
     { id: 'codex-exec', title: 'Codex 直派', sub: '跳过规划，安全沙箱直接写代码（支持会话续跑）', badge: '沙箱' },
     { id: 'codex-review', title: 'Pre-CI 审查门禁', sub: '两级分级拦截，高危路径自动升档 xhigh', badge: '门禁' },
     { id: 'copy-polish', title: '文案与交互顾问', sub: 'Gemini 去 AI 味润色，输出前后对比表', badge: '润色' },
+    { id: 'image-gen', title: '图像输出与变体', sub: '渐进扫描揭示 · 4 组变体对比 · 放大 / 变体 / Lightbox', badge: 'IMG' },
+    { id: 'video-gen', title: '视频渲染与播放', sub: '帧渐进揭示 · 悬浮自隐藏播放器 · 帧级拖拽 / 下载', badge: 'VID' },
   ];
 
   const SLASH_COMMANDS = [
@@ -31,6 +37,8 @@
     { key: '/codex', mode: 'codex-exec', detail: 'Codex 直派（安全沙箱直接写代码）' },
     { key: '/review', mode: 'codex-review', detail: 'Pre-CI 审查门禁（分级拦截 + 自动升 xhigh）' },
     { key: '/copy', mode: 'copy-polish', detail: 'Gemini 文案与交互顾问' },
+    { key: '/image', mode: 'image-gen', detail: '图像输出（多变体渐进渲染、放大、参考图与 Lightbox）' },
+    { key: '/video', mode: 'video-gen', detail: '视频渲染（渐进海报揭示、自定义浮动控制栏播放器）' },
   ];
 
   const DEFAULT_TWEAKS = {
@@ -82,12 +90,16 @@
       toggles: { readOnlyPlan: true, autoNewDiff: true, humanReport: true },
     },
     palette: { open: false, trigger: '', query: '', startPos: 0, items: [], selectedIdx: 0 },
+    contextChips: [],
+    localRuns: new Map(),
     tweaks: loadTweaks(),
   };
 
   let waveEngine = null;
   let metalEngine = null;
   let canvasEngine = null;
+  let effortSlider = null;
+  let workspacePanels = null;
   let canvasFittedOnce = false;
   let paletteBlurTimer = null;
   const el = (id) => document.getElementById(id);
@@ -139,6 +151,7 @@
     if (waveEngine) waveEngine.sync();
     if (metalEngine) metalEngine.sync();
     if (canvasEngine) canvasEngine.render();
+    if (effortSlider) effortSlider.syncTheme();
     if (window.ConduitOrbs) window.ConduitOrbs.syncAll();
     requestAnimationFrame(syncAllFluidTracks);
   }
@@ -1154,11 +1167,42 @@
   /* =========================================================================
      21st.dev Chat Sidebar (#46401): Grouped Thread List + Pin/Rename/Delete
      ========================================================================= */
+  async function openRunById(id) {
+    if (appState.localRuns.has(id)) {
+      const localRun = appState.localRuns.get(id);
+      closeMobileDrawers();
+      switchStageView('chat');
+      appState.currentRun = localRun;
+      renderSidebarThreads();
+      renderConversationThread(localRun);
+      return;
+    }
+    try {
+      const { run } = await api(`/api/runs/${encodeURIComponent(id)}`);
+      closeMobileDrawers();
+      switchStageView('chat');
+      attachToRun(run);
+    } catch (err) {
+      showToast(`载入会话失败: ${err.message}`);
+    }
+  }
+
   async function loadRunsList() {
     try {
       const { runs } = await api('/api/runs');
-      appState.runs = runs || [];
+      const locals = Array.from(appState.localRuns.values()).map((r) => ({
+        id: r.id,
+        title: r.title,
+        mode: r.mode,
+        status: r.status,
+        pinned: Boolean(r.pinned),
+        createdAt: r.createdAt,
+      }));
+      appState.runs = [...locals, ...(runs || [])];
       renderSidebarThreads();
+      if (appState.inspectorOpen && appState.inspectorTab === 'runs') {
+        renderAgentRunsMonitor(el('inspectorRunsBox'));
+      }
     } catch {
       // Silent retry next update
     }
@@ -1218,17 +1262,9 @@
       renderGroup('更早', earlier);
 
     container.querySelectorAll('.thread-row').forEach((row) => {
-      row.addEventListener('click', async (e) => {
+      row.addEventListener('click', (e) => {
         if (e.target.closest('.thread-act-btn')) return;
-        const id = row.dataset.threadId;
-        try {
-          const { run } = await api(`/api/runs/${encodeURIComponent(id)}`);
-          closeMobileDrawers();
-          switchStageView('chat');
-          attachToRun(run);
-        } catch (err) {
-          showToast(`载入会话失败: ${err.message}`);
-        }
+        openRunById(row.dataset.threadId);
       });
     });
 
@@ -1239,6 +1275,31 @@
         const act = btn.dataset.act;
         const item = appState.runs.find((x) => x.id === id);
         if (!item) return;
+
+        if (appState.localRuns.has(id)) {
+          const local = appState.localRuns.get(id);
+          if (act === 'pin') {
+            local.pinned = !local.pinned;
+            item.pinned = local.pinned;
+            renderSidebarThreads();
+          } else if (act === 'rename') {
+            const nextTitle = window.prompt('输入新的会话标题：', item.title);
+            if (nextTitle && nextTitle.trim()) {
+              local.title = nextTitle.trim();
+              item.title = local.title;
+              if (appState.currentRun?.id === id) el('topbarTitle').textContent = local.title;
+              renderSidebarThreads();
+            }
+          } else if (act === 'delete') {
+            local.mediaJob?._cancel?.();
+            appState.localRuns.delete(id);
+            appState.runs = appState.runs.filter((x) => x.id !== id);
+            if (appState.currentRun?.id === id) resetToNewChat();
+            renderSidebarThreads();
+            showToast('已删除该媒体会话');
+          }
+          return;
+        }
 
         try {
           if (act === 'pin') {
@@ -1863,8 +1924,48 @@
         </article>`);
     }
 
+    // 7.5 Dedicated or Extracted Media Output Turn (ImageGeneration & VideoGeneration)
+    if (run.mediaJob) {
+      const mj = run.mediaJob;
+      const isVid = mj.kind === 'video';
+      const isRunningM = mj.status === 'queued' || mj.status === 'generating';
+      parts.push(`
+        <article class="agent-turn ${isRunningM ? 'is-streaming' : ''}">
+          <div class="border-beam" aria-hidden="true"></div>
+          <header class="agent-turn-head">
+            <div class="agent-identity">
+              <span class="agent-avatar gemini ${isRunningM ? 'is-orb' : ''}">${isRunningM ? renderOrbSvg('working', 'gyro', 18) : (isVid ? 'V' : 'I')}</span>
+              <span class="agent-role-name">${isVid ? 'CONDUIT · 视频生成输出' : 'CONDUIT · 图像生成输出'}</span>
+              <span class="agent-model-tag">${escapeHtml(mj.modelLabel || (isVid ? 'VIDEO STUDIO' : 'IMAGE STUDIO'))}</span>
+            </div>
+            <span class="agent-status-pill ${mj.status === 'done' ? 'completed' : mj.status === 'failed' ? 'failed' : isRunningM ? 'running is-shimmer' : ''}">
+              <span>${mj.status === 'queued' ? 'QUEUED' : mj.status === 'generating' ? 'RENDERING' : mj.status === 'done' ? 'READY' : mj.status.toUpperCase()}</span>
+            </span>
+          </header>
+          <div class="turn-media-mount" data-media-job-id="${escapeHtml(run.id)}"></div>
+        </article>`);
+    } else if (window.ConduitMediaGen) {
+      const combinedText = [g.planText, g.copyText, c.execText, g.summaryText].filter(Boolean).join('\n');
+      const extracted = window.ConduitMediaGen.extractMediaFromText(combinedText, run.workspaceDir);
+      if (extracted.images.length > 0 || extracted.videos.length > 0) {
+        parts.push(`
+          <article class="agent-turn">
+            <header class="agent-turn-head">
+              <div class="agent-identity">
+                <span class="agent-avatar gemini">M</span>
+                <span class="agent-role-name">媒体产物渲染</span>
+                <span class="agent-model-tag">${extracted.images.length ? `${extracted.images.length} 张图像` : ''}${extracted.images.length && extracted.videos.length ? ' · ' : ''}${extracted.videos.length ? `${extracted.videos.length} 段视频` : ''}</span>
+              </div>
+              <span class="agent-status-pill completed"><span>MEDIA</span></span>
+            </header>
+            <div class="turn-media-mount" data-media-extracted="${escapeHtml(run.id)}"></div>
+          </article>`);
+      }
+    }
+
     container.innerHTML = parts.join('');
     bindThreadDynamicHandlers(container, run);
+    mountTurnMediaWidgets(container, run);
     if (window.ConduitOrbs) window.ConduitOrbs.mountAll(container);
     renderInspectorContent(run);
     if (appState.stageView === 'workflow') renderWorkflowCanvas();
@@ -2058,8 +2159,336 @@
     }
   }
 
+  function renderContextChips() {
+    const bar = el('contextChipsBar');
+    if (!bar) return;
+    if (!appState.contextChips.length) {
+      bar.classList.add('hidden');
+      bar.innerHTML = '';
+      return;
+    }
+    bar.classList.remove('hidden');
+    bar.innerHTML = appState.contextChips
+      .map(
+        (chip, idx) => `
+        <span class="ctx-chip" data-chip-idx="${idx}">
+          ${chip.thumb ? `<img class="ctx-chip-thumb" src="${escapeHtml(chip.thumb)}" alt="" />` : '<span class="ctx-chip-badge mono-xs">REF</span>'}
+          <span class="ctx-chip-label">${escapeHtml(chip.label)}</span>
+          <button type="button" class="ctx-chip-rm" data-rm-chip="${idx}" aria-label="移除参考">×</button>
+        </span>`
+      )
+      .join('');
+    bar.querySelectorAll('[data-rm-chip]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        appState.contextChips.splice(Number(btn.dataset.rmChip), 1);
+        renderContextChips();
+      });
+    });
+  }
+
+  function addContextChip(chip) {
+    if (appState.contextChips.length >= 6) appState.contextChips.shift();
+    appState.contextChips.push(chip);
+    renderContextChips();
+  }
+
+  function mountTurnMediaWidgets(container, run) {
+    if (!window.ConduitMediaGen) return;
+
+    const jobMount = container.querySelector('[data-media-job-id]');
+    if (jobMount && run.mediaJob) {
+      const mj = run.mediaJob;
+      if (mj.kind === 'image') {
+        mj._api = window.ConduitMediaGen.mountImageGeneration(jobMount, {
+          prompt: mj.prompt,
+          status: mj.status,
+          images: mj.images,
+          count: mj.count || 4,
+          aspectRatio: mj.aspectRatio || '4:3',
+          progress: mj.progress,
+          queuePosition: mj.queuePosition,
+          settings: mj.settings || ['CONDUIT Studio', '本地渲染'],
+          busyAction: mj.busyAction,
+          selectedIndex: mj.selectedIndex || 0,
+          onToast: showToast,
+          onCancel: () => {
+            if (mj._cancel) mj._cancel();
+            mj.status = 'failed';
+            mj.errorText = '任务已手动取消。';
+            run.status = 'cancelled';
+            renderConversationThread(run);
+          },
+          onRetry: () => runLocalMediaGeneration('image-gen', mj.prompt, (mj.salt || 0) + 1),
+          onEditPrompt: () => {
+            el('inputPrompt').value = mj.prompt;
+            setModeValue('image-gen');
+            el('inputPrompt').focus();
+          },
+          onUpscale: (img, idx, api) => {
+            mj.busyAction = 'upscale';
+            api.update({ busyAction: 'upscale' });
+            setTimeout(() => {
+              const hi = window.ConduitMediaGen.createArchitecturalImage(mj.prompt, idx, 1280, 960, (mj.salt || 0) + 7);
+              mj.images[idx] = { ...mj.images[idx], ...hi, alt: `${mj.prompt} · 2× 高清放大` };
+              mj.busyAction = undefined;
+              mj.settings = ['CONDUIT Studio', '1280×960 高清放大'];
+              api.update({ busyAction: undefined, images: mj.images, settings: mj.settings });
+              showToast(`变体 ${idx + 1} 已完成 2× 高清放大`);
+            }, 650);
+          },
+          onVary: (img, idx) => {
+            showToast(`正在基于变体 ${idx + 1} 生成新一组微调方案...`);
+            runLocalMediaGeneration('image-gen', `${mj.prompt}（变体 ${idx + 1} 延展）`, (mj.salt || 0) + idx + 3);
+          },
+          onUseAsReference: (img, idx) => {
+            addContextChip({
+              kind: 'image',
+              label: `参考图 · 变体 ${idx + 1}`,
+              thumb: img.previewSrc || img.src,
+              prompt: mj.prompt,
+            });
+            showToast(`已将变体 ${idx + 1} 附加到输入框上下文`);
+            el('inputPrompt').focus();
+          },
+        });
+      } else if (mj.kind === 'video') {
+        mj._api = window.ConduitMediaGen.mountVideoGeneration(jobMount, {
+          prompt: mj.prompt,
+          status: mj.status,
+          progress: mj.progress,
+          queuePosition: mj.queuePosition,
+          etaMs: mj.etaMs,
+          posterSrc: mj.posterSrc,
+          src: mj.src,
+          duration: mj.duration || 4,
+          resolution: mj.resolution || '1080p',
+          fps: mj.fps || 24,
+          audio: Boolean(mj.audio),
+          aspectRatio: mj.aspectRatio || '16:9',
+          settings: mj.settings || ['CONDUIT Motion'],
+          autoPlay: true,
+          loop: true,
+          onToast: showToast,
+          onCancel: () => {
+            if (mj._cancel) mj._cancel();
+            mj.status = 'failed';
+            mj.errorText = '视频渲染已手动中止。';
+            run.status = 'cancelled';
+            renderConversationThread(run);
+          },
+          onRetry: () => runLocalMediaGeneration('video-gen', mj.prompt, (mj.salt || 0) + 1),
+          onEditPrompt: () => {
+            el('inputPrompt').value = mj.prompt;
+            setModeValue('video-gen');
+            el('inputPrompt').focus();
+          },
+          onUseAsReference: () => {
+            addContextChip({
+              kind: 'video',
+              label: `参考分镜 · ${mj.prompt.slice(0, 14)}`,
+              thumb: mj.posterSrc || '',
+              prompt: mj.prompt,
+            });
+            showToast('已将视频首帧附加为参考上下文');
+            el('inputPrompt').focus();
+          },
+        });
+      }
+    }
+
+    const extMount = container.querySelector('[data-media-extracted]');
+    if (extMount) {
+      const g = run.gemini || {};
+      const c = run.codex || {};
+      const combinedText = [g.planText, g.copyText, c.execText, g.summaryText].filter(Boolean).join('\n');
+      const extracted = window.ConduitMediaGen.extractMediaFromText(combinedText, run.workspaceDir);
+      extMount.innerHTML = '';
+
+      if (extracted.images.length > 0) {
+        const imgHost = document.createElement('div');
+        imgHost.className = 'extracted-media-block';
+        extMount.appendChild(imgHost);
+        window.ConduitMediaGen.mountImageGeneration(imgHost, {
+          prompt: run.prompt || '生成图像产物',
+          status: 'done',
+          images: extracted.images.slice(0, 4),
+          count: Math.min(4, extracted.images.length),
+          aspectRatio: '4:3',
+          settings: ['工作区输出'],
+          onToast: showToast,
+          onUseAsReference: (img, idx) => {
+            addContextChip({ kind: 'image', label: img.alt || `输出图像 ${idx + 1}`, thumb: img.src });
+            showToast('已附加为对话参考图');
+          },
+        });
+      }
+
+      extracted.videos.slice(0, 2).forEach((vid) => {
+        const vidHost = document.createElement('div');
+        vidHost.className = 'extracted-media-block';
+        extMount.appendChild(vidHost);
+        window.ConduitMediaGen.mountVideoGeneration(vidHost, {
+          prompt: vid.title || run.prompt || '生成视频产物',
+          status: 'done',
+          src: vid.src,
+          aspectRatio: '16:9',
+          settings: ['工作区输出'],
+          autoPlay: false,
+          loop: true,
+          onToast: showToast,
+        });
+      });
+    }
+  }
+
+  function runLocalMediaGeneration(mode, promptText, salt = 0) {
+    if (!window.ConduitMediaGen) return;
+    const isVideo = mode === 'video-gen';
+    const id = `local-${isVideo ? 'vid' : 'img'}-${Date.now()}`;
+    const cleanPrompt =
+      (promptText || '').trim() ||
+      (isVideo
+        ? '极简建筑光影下的静水同心涟漪，俯视慢镜头，细微胶片颗粒'
+        : 'Figma Weave 风格的冷矿物建筑白昼光影雕塑，极简几何构图，细腻纸张肌理');
+
+    const timers = [];
+    let cancelled = false;
+    const at = (ms, fn) => {
+      const tid = setTimeout(() => { if (!cancelled) fn(); }, ms);
+      timers.push(tid);
+    };
+
+    const run = {
+      id,
+      title: `${isVideo ? '视频' : '图像'} · ${cleanPrompt.slice(0, 22)}`,
+      mode,
+      prompt: cleanPrompt,
+      status: 'running',
+      createdAt: new Date().toISOString(),
+      workspaceDir: el('inputWorkspace')?.value.trim() || '',
+      metrics: { geminiTokens: 0, codexTokens: 0 },
+      gemini: { status: 'idle', durationMs: 0 },
+      codex: { status: 'idle', durationMs: 0 },
+      events: [{ ts: new Date().toISOString(), source: 'studio', kind: 'stage', text: isVideo ? '启动视频帧渲染管线' : '启动多变体图像渲染管线' }],
+      mediaJob: isVideo
+        ? {
+            kind: 'video',
+            prompt: cleanPrompt,
+            status: 'queued',
+            queuePosition: 1,
+            etaMs: 6000,
+            progress: 0,
+            duration: 4,
+            resolution: '1080p',
+            fps: 24,
+            audio: false,
+            aspectRatio: '16:9',
+            settings: ['CONDUIT Motion', 'WebM 24fps'],
+            modelLabel: 'VIDEO STUDIO',
+            salt,
+            _cancel: () => { cancelled = true; timers.forEach(clearTimeout); },
+          }
+        : {
+            kind: 'image',
+            prompt: cleanPrompt,
+            status: 'queued',
+            queuePosition: 1,
+            count: 4,
+            aspectRatio: '4:3',
+            progress: 0,
+            images: [],
+            settings: ['CONDUIT Studio', '4:3 构图'],
+            modelLabel: 'IMAGE STUDIO',
+            salt,
+            _cancel: () => { cancelled = true; timers.forEach(clearTimeout); },
+          },
+    };
+
+    appState.localRuns.set(id, run);
+    appState.runs = [
+      { id: run.id, title: run.title, mode: run.mode, status: run.status, createdAt: run.createdAt },
+      ...appState.runs.filter((r) => r.id !== id),
+    ];
+    appState.currentRun = run;
+    appState.stickyBottom = true;
+    renderSidebarThreads();
+    renderConversationThread(run);
+
+    if (!isVideo) {
+      const rendered = [0, 1, 2, 3].map((idx) =>
+        window.ConduitMediaGen.createArchitecturalImage(cleanPrompt, idx, 768, 576, salt)
+      );
+      const rates = [1.06, 0.94, 1.0, 0.88];
+      at(420, () => {
+        run.mediaJob.status = 'generating';
+        run.mediaJob.progress = 8;
+        run.mediaJob.images = rendered.map((img, i) => ({ ...img, progress: Math.round(8 * rates[i]) }));
+        run.mediaJob._api?.update({ status: 'generating', progress: 8, images: run.mediaJob.images });
+      });
+      [22, 39, 57, 74, 89, 98].forEach((pct, stepIdx) => {
+        at(740 + stepIdx * 290, () => {
+          run.mediaJob.progress = pct;
+          run.mediaJob.images = rendered.map((img, i) => ({ ...img, progress: Math.min(99, Math.round(pct * rates[i])) }));
+          run.mediaJob._api?.update({ progress: pct, images: run.mediaJob.images });
+        });
+      });
+      at(2600, () => {
+        run.status = 'completed';
+        run.mediaJob.status = 'done';
+        run.mediaJob.progress = 100;
+        run.mediaJob.images = rendered.map((img) => ({ ...img, progress: 100 }));
+        const idx = appState.runs.findIndex((r) => r.id === id);
+        if (idx >= 0) appState.runs[idx].status = 'completed';
+        renderSidebarThreads();
+        renderConversationThread(run);
+      });
+    } else {
+      const { posterSrc, videoPromise } = window.ConduitMediaGen.recordKineticClip({ prompt: cleanPrompt, seconds: 3.4 });
+      run.mediaJob.posterSrc = posterSrc;
+      let clipUrl = null;
+      let stepsDone = false;
+      const tryFinish = () => {
+        if (cancelled || !stepsDone) return;
+        run.status = 'completed';
+        run.mediaJob.status = 'done';
+        run.mediaJob.progress = 100;
+        run.mediaJob.src = clipUrl || '';
+        if (!clipUrl) {
+          run.mediaJob.status = 'failed';
+          run.mediaJob.errorText = '当前浏览器不支持 MediaRecorder 本地封装，已保留高清首帧海报。';
+        }
+        const idx = appState.runs.findIndex((r) => r.id === id);
+        if (idx >= 0) appState.runs[idx].status = run.status;
+        renderSidebarThreads();
+        renderConversationThread(run);
+      };
+      videoPromise.then((url) => {
+        clipUrl = url;
+        if (stepsDone) tryFinish();
+      });
+
+      at(420, () => {
+        run.mediaJob.status = 'generating';
+        run.mediaJob.etaMs = undefined;
+        run.mediaJob.progress = 12;
+        run.mediaJob._api?.update({ status: 'generating', etaMs: undefined, progress: 12, posterSrc });
+      });
+      [28, 46, 65, 82, 95].forEach((pct, stepIdx) => {
+        at(780 + stepIdx * 420, () => {
+          run.mediaJob.progress = pct;
+          run.mediaJob._api?.update({ progress: pct, posterSrc });
+        });
+      });
+      at(3200, () => {
+        stepsDone = true;
+        if (clipUrl) tryFinish();
+        else videoPromise.then(() => tryFinish());
+      });
+    }
+  }
+
   /* =========================================================================
-     Right Inspector Rendering (Diff / Review / Terminal Events)
+     Right Inspector Rendering (Diff / Review / Agent Runs / Terminal Events)
      ========================================================================= */
   function openInspector(tabName = null) {
     appState.inspectorOpen = true;
@@ -2085,9 +2514,56 @@
     });
     el('inspectorDiffBox').classList.toggle('hidden', tab !== 'diff');
     el('inspectorReviewBox').classList.toggle('hidden', tab !== 'review');
+    el('inspectorRunsBox')?.classList.toggle('hidden', tab !== 'runs');
     el('inspectorEventsBox').classList.toggle('hidden', tab !== 'events');
     syncAllFluidTracks();
     renderInspectorContent(appState.currentRun);
+  }
+
+  function renderAgentRunsMonitor(box) {
+    if (!box) return;
+    const allRuns = appState.runs || [];
+    if (allRuns.length === 0) {
+      box.innerHTML = '<div class="empty-inline"><span class="mono-xs">AGENT RUNS / IDLE</span><p>暂无运行中的多模型协同任务。</p></div>';
+      return;
+    }
+    const statusMap = {
+      running: { label: '运行中', cls: 'is-running' },
+      awaiting_approval: { label: '待人工拍板', cls: 'is-waiting' },
+      completed: { label: '已完成', cls: 'is-done' },
+      failed: { label: '已失败', cls: 'is-failed' },
+      blocked: { label: '门禁拦截', cls: 'is-failed' },
+      cancelled: { label: '已中止', cls: 'is-stopped' },
+    };
+    box.innerHTML = `
+      <div class="runs-monitor-head">
+        <span class="mono-xs">AGENT RUNS · ${allRuns.length} 项任务</span>
+        <span class="mono-xs">点击切换上下文</span>
+      </div>
+      <div class="runs-list">
+        ${allRuns
+          .slice(0, 24)
+          .map((r) => {
+            const st = statusMap[r.status] || { label: r.status || 'IDLE', cls: 'is-stopped' };
+            const active = appState.currentRun?.id === r.id;
+            const tStr = r.createdAt ? new Date(r.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '--:--';
+            return `
+              <button type="button" class="run-status-row ${active ? 'is-active' : ''}" data-open-run="${escapeHtml(r.id)}">
+                <div class="run-row-main">
+                  <span class="run-row-title">${escapeHtml(r.title || '协同任务')}</span>
+                  <span class="run-row-sub mono-xs">${escapeHtml(MODE_LABELS[r.mode] || r.mode || '')} · ${tStr}</span>
+                </div>
+                <span class="run-status-pill ${st.cls}">
+                  <span class="run-status-dot"></span>
+                  <span>${escapeHtml(st.label)}</span>
+                </span>
+              </button>`;
+          })
+          .join('')}
+      </div>`;
+    box.querySelectorAll('[data-open-run]').forEach((btn) => {
+      btn.addEventListener('click', () => openRunById(btn.dataset.openRun));
+    });
   }
 
   function renderInspectorContent(run) {
@@ -2116,6 +2592,8 @@
         }
         box.innerHTML = html;
       }
+    } else if (appState.inspectorTab === 'runs') {
+      renderAgentRunsMonitor(el('inspectorRunsBox'));
     } else if (appState.inspectorTab === 'events') {
       const box = el('inspectorEventsBox');
       const events = run?.events || [];
@@ -2142,22 +2620,53 @@
   }
 
   async function startRun() {
-    const prompt = el('inputPrompt').value.trim();
-    if (!prompt) {
+    const rawPrompt = el('inputPrompt').value.trim();
+    if (!rawPrompt) {
       showToast('请输入任务需求');
       el('inputPrompt').focus();
       return;
     }
 
-    const mode = el('selectMode').value;
+    let mode = el('selectMode').value;
+    let prompt = rawPrompt;
+    if (/^\/image(?:\s|$)/i.test(rawPrompt)) {
+      mode = 'image-gen';
+      setModeValue('image-gen');
+      prompt = rawPrompt.replace(/^\/image\s*/i, '').trim();
+    } else if (/^\/video(?:\s|$)/i.test(rawPrompt)) {
+      mode = 'video-gen';
+      setModeValue('video-gen');
+      prompt = rawPrompt.replace(/^\/video\s*/i, '').trim();
+    }
+
+    if (mode === 'image-gen' || mode === 'video-gen') {
+      el('inputPrompt').value = '';
+      autoGrowTextarea(el('inputPrompt'));
+      runLocalMediaGeneration(mode, prompt);
+      return;
+    }
+
+    const rawEffort = el('selectCodexEffort').value || 'high';
+    const cliEffort = window.ConduitEffortSlider
+      ? window.ConduitEffortSlider.toCodexCliEffort(rawEffort)
+      : rawEffort;
+    const prefCtx = workspacePanels ? workspacePanels.getInstructionContext() : null;
+    const refNotes = appState.contextChips.length
+      ? `\n\n[附加参考上下文: ${appState.contextChips.map((c) => c.label).join(', ')}]`
+      : '';
+    const prefNote =
+      prefCtx && (prefCtx.instructions || prefCtx.personality !== 'default')
+        ? `\n\n[用户偏好风格: ${prefCtx.personalityName}${prefCtx.instructions ? ` | ${prefCtx.instructions}` : ''}]`
+        : '';
+
     const payload = {
       mode,
-      prompt,
+      prompt: `${prompt}${refNotes}${prefNote}`,
       workspaceDir: el('inputWorkspace').value.trim(),
       geminiModel: el('selectGeminiModel').value,
       codexModel: el('selectCodexModel').value,
       codexReviewModel: el('selectCodexReviewModel').value,
-      codexEffort: el('selectCodexEffort').value,
+      codexEffort: cliEffort,
       sandbox: el('selectSandbox').value,
       maxReviewRounds: Number(el('selectMaxRounds').value) || 2,
       codexHome: el('selectCodexHome').value,
@@ -2280,6 +2789,7 @@
         homeSel.appendChild(opt);
       });
       if (prev) homeSel.value = prev;
+      syncAllArchSelects();
 
       el('envDetails').innerHTML = `
         <div class="env-row"><span>Antigravity (agy)</span><span class="mono">${escapeHtml(data.agy.installed ? 'READY' : 'MISSING')}</span></div>
@@ -2630,6 +3140,7 @@
         });
         if (prevRev && Array.from(revSel.options).some((o) => o.value === prevRev)) revSel.value = prevRev;
       }
+      syncAllArchSelects();
 
       if (appState.activePicker === 'gemini') renderGeminiPicker();
       if (appState.activePicker === 'codex') renderCodexPicker();
@@ -2683,7 +3194,10 @@
       }),
       onPresetChange: (presetName) => {
         const sel = el('selectWfPreset');
-        if (sel && presetName) sel.value = presetName;
+        if (sel && presetName) {
+          sel.value = presetName;
+          syncAllArchSelects();
+        }
         document.querySelectorAll('[data-ic-preset]').forEach((b) => {
           b.classList.toggle('is-active', Boolean(presetName) && b.dataset.icPreset === presetName);
         });
@@ -2693,6 +3207,7 @@
         else if (key === 'worktree') el('chkWorktree').checked = !el('chkWorktree').checked;
         else if (key === 'writable') {
           el('selectSandbox').value = el('selectSandbox').value === 'workspace-write' ? 'read-only' : 'workspace-write';
+          syncAllArchSelects();
         }
         renderCliCommandCards();
       },
@@ -2703,6 +3218,8 @@
           'codex-exec': 'codex-exec',
           'cluster-merge': 'full-pipeline',
           'codex-review': 'codex-review',
+          'image-gen': 'image-gen',
+          'video-gen': 'video-gen',
         };
         if (node?.model) {
           if (node.kind === 'gemini-plan' || node.kind === 'gemini-copy' || /^gemini-|^orchestrator-/i.test(node.model)) {
@@ -2712,7 +3229,11 @@
           }
         }
         if (node?.codexModel) setCodexModelValue(node.codexModel);
-        if (node?.effort && el('selectCodexEffort')) el('selectCodexEffort').value = node.effort;
+        if (node?.effort && el('selectCodexEffort')) {
+          el('selectCodexEffort').value = node.effort;
+          effortSlider?.setValue(node.effort, true);
+          syncAllArchSelects();
+        }
         setModeValue(modeMap[node?.kind] || 'full-pipeline');
         const ta = el('inputPrompt');
         if (promptText && promptText.trim()) {
@@ -2893,9 +3414,161 @@
   }
 
   /* =========================================================================
+     Custom Architectural Dropdown Engine (Zero Native OS <select> Popups!)
+     Replaces every native <select> with a crisp Figma Weave fixed portal menu
+     while keeping underlying <select>.value and change events 100% synced.
+     ========================================================================= */
+  const archSelectEntries = [];
+  let archPortalEl = null;
+  let activeArchEntry = null;
+
+  function closeArchSelect() {
+    if (activeArchEntry) {
+      activeArchEntry.trigger.setAttribute('aria-expanded', 'false');
+      activeArchEntry = null;
+    }
+    if (archPortalEl) archPortalEl.classList.add('hidden');
+  }
+
+  function syncAllArchSelects() {
+    archSelectEntries.forEach((entry) => {
+      const sel = entry.select;
+      const opt = sel.options[sel.selectedIndex] || sel.options[0];
+      entry.labelEl.textContent = opt ? opt.textContent : '—';
+    });
+  }
+
+  function openArchSelect(entry) {
+    if (!archPortalEl) return;
+    if (activeArchEntry === entry) {
+      closeArchSelect();
+      return;
+    }
+    closeArchSelect();
+    activeArchEntry = entry;
+    entry.trigger.setAttribute('aria-expanded', 'true');
+
+    const sel = entry.select;
+    const opts = Array.from(sel.options);
+    archPortalEl.innerHTML = opts
+      .map((o, idx) => {
+        const selected = idx === sel.selectedIndex;
+        return `
+          <button type="button" class="arch-select-opt ${selected ? 'is-selected' : ''}" role="option" aria-selected="${selected}" data-opt-idx="${idx}">
+            <span class="arch-select-opt-text">${escapeHtml(o.textContent)}</span>
+            ${selected ? '<span class="arch-select-check" aria-hidden="true">✓</span>' : ''}
+          </button>`;
+      })
+      .join('');
+
+    archPortalEl.querySelectorAll('[data-opt-idx]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = Number(btn.dataset.optIdx);
+        if (sel.selectedIndex !== idx && sel.options[idx]) {
+          sel.selectedIndex = idx;
+          sel.value = sel.options[idx].value;
+          syncAllArchSelects();
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        closeArchSelect();
+      });
+    });
+
+    archPortalEl.classList.remove('hidden');
+    const rect = entry.trigger.getBoundingClientRect();
+    const minW = Math.max(rect.width, entry.isCompact ? 176 : 200);
+    const maxW = Math.min(340, window.innerWidth - 20);
+    const menuW = Math.min(maxW, minW);
+    archPortalEl.style.width = `${menuW}px`;
+
+    const menuH = Math.min(280, archPortalEl.scrollHeight + 10);
+    const spaceBelow = window.innerHeight - rect.bottom - 10;
+    const openUp = spaceBelow < menuH && rect.top > menuH + 10;
+    const top = openUp ? Math.max(10, rect.top - menuH - 5) : Math.min(window.innerHeight - menuH - 10, rect.bottom + 5);
+    const left = Math.max(10, Math.min(rect.left, window.innerWidth - menuW - 10));
+
+    archPortalEl.style.left = `${left}px`;
+    archPortalEl.style.top = `${top}px`;
+    archPortalEl.dataset.dir = openUp ? 'up' : 'down';
+  }
+
+  function initArchitecturalSelects() {
+    if (!archPortalEl) {
+      archPortalEl = document.createElement('div');
+      archPortalEl.id = 'archSelectPortal';
+      archPortalEl.className = 'arch-select-menu hidden';
+      archPortalEl.setAttribute('role', 'listbox');
+      document.body.appendChild(archPortalEl);
+    }
+
+    document.querySelectorAll('select.select-input, select.ic-preset-select').forEach((sel) => {
+      if (sel.dataset.archEnhanced) return;
+      sel.dataset.archEnhanced = '1';
+      const isCompact = sel.classList.contains('ic-preset-select');
+      sel.classList.add('native-select-hidden');
+      sel.setAttribute('tabindex', '-1');
+      sel.setAttribute('aria-hidden', 'true');
+
+      const trigger = document.createElement('button');
+      trigger.type = 'button';
+      trigger.className = `arch-select-trigger ${isCompact ? 'is-compact' : 'mono'}`;
+      trigger.setAttribute('aria-haspopup', 'listbox');
+      trigger.setAttribute('aria-expanded', 'false');
+      if (sel.getAttribute('aria-label')) trigger.setAttribute('aria-label', sel.getAttribute('aria-label'));
+
+      const labelEl = document.createElement('span');
+      labelEl.className = 'arch-select-label';
+      const chev = document.createElement('span');
+      chev.className = 'arch-select-chev';
+      chev.setAttribute('aria-hidden', 'true');
+      chev.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+      trigger.appendChild(labelEl);
+      trigger.appendChild(chev);
+      sel.insertAdjacentElement('afterend', trigger);
+
+      const entry = { select: sel, trigger, labelEl, isCompact };
+      archSelectEntries.push(entry);
+
+      trigger.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openArchSelect(entry);
+      });
+
+      trigger.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault();
+          openArchSelect(entry);
+        } else if (e.key === 'Escape') {
+          closeArchSelect();
+        }
+      });
+
+      sel.addEventListener('change', syncAllArchSelects);
+      if (typeof MutationObserver !== 'undefined') {
+        new MutationObserver(syncAllArchSelects).observe(sel, { childList: true, subtree: true, attributes: true });
+      }
+    });
+
+    syncAllArchSelects();
+    window.addEventListener('resize', closeArchSelect);
+    window.addEventListener(
+      'scroll',
+      (e) => {
+        if (archPortalEl && (e.target === archPortalEl || archPortalEl.contains(e.target))) return;
+        closeArchSelect();
+      },
+      true
+    );
+  }
+
+  /* =========================================================================
      Popovers, Drawers & Event Wiring
      ========================================================================= */
   function closeAllPopovers(exceptId = '') {
+    closeArchSelect();
     ['wsPopover', 'guardrailsPopover', 'envPopover'].forEach((id) => {
       if (id !== exceptId) el(id).classList.add('hidden');
     });
@@ -3103,7 +3776,12 @@
       closeAllPopovers(open ? 'guardrailsPopover' : '');
       el('guardrailsPopover').classList.toggle('hidden', !open);
       el('btnGuardrailsPopover').setAttribute('aria-expanded', String(open));
+      if (open && effortSlider) requestAnimationFrame(() => effortSlider.syncTheme());
     });
+
+    el('btnCommandPalette')?.addEventListener('click', () => workspacePanels?.openPalette());
+    el('btnOpenPreferences')?.addEventListener('click', () => workspacePanels?.openSettings('instructions'));
+    el('btnOpenShortcuts')?.addEventListener('click', () => workspacePanels?.openShortcuts());
 
     el('btnEnvPopover').addEventListener('click', () => {
       const open = el('envPopover').classList.contains('hidden');
@@ -3279,6 +3957,7 @@
     document.addEventListener('keydown', (e) => {
       const tag = (e.target?.tagName || '').toLowerCase();
       if (e.key === 'Escape') {
+        closeArchSelect();
         toggleTweaks(false);
         closeAllPopovers();
         closePickers();
@@ -3294,6 +3973,12 @@
     });
 
     document.addEventListener('click', (e) => {
+      if (archPortalEl && !archPortalEl.classList.contains('hidden')) {
+        if (archPortalEl.contains(e.target)) return;
+        if (!activeArchEntry || !activeArchEntry.trigger.contains(e.target)) {
+          closeArchSelect();
+        }
+      }
       const pairs = [
         ['wsPopover', 'btnWsPopover'],
         ['guardrailsPopover', 'btnGuardrailsPopover'],
@@ -3329,6 +4014,52 @@
   // Bootstrap
   let inkDiagrams = null;
   applyTweaks();
+  initArchitecturalSelects();
+  if (window.ConduitEffortSlider && el('guardrailsEffortSlider')) {
+    effortSlider = window.ConduitEffortSlider.mount(el('guardrailsEffortSlider'), {
+      defaultValue: el('selectCodexEffort')?.value || 'high',
+      recommended: 'high',
+      title: 'Codex 推理深度',
+      onChange: (level) => {
+        const sel = el('selectCodexEffort');
+        if (sel) {
+          sel.value = level;
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        showToast(
+          level === 'ultracode'
+            ? '已激活 Ultracode 档位（自动映射 xhigh + 多 Agent 深度推演）'
+            : `推理深度已设为 ${level}`
+        );
+      },
+    });
+  }
+  if (window.ConduitPanels) {
+    workspacePanels = window.ConduitPanels.create({
+      getContext: () => ({
+        runs: appState.runs,
+        geminiModels: appState.models?.agy?.models || [],
+      }),
+      onNewChat: () => {
+        switchStageView('chat');
+        resetToNewChat();
+        el('inputPrompt').focus();
+      },
+      onSwitchView: (v) => switchStageView(v),
+      onQuickMedia: (kind) => {
+        switchStageView('chat');
+        runLocalMediaGeneration(kind === 'video' ? 'video-gen' : 'image-gen', '');
+      },
+      onOpenInspector: (tab) => openInspector(tab),
+      onToggleTweaks: () => toggleTweaks(),
+      onSelectRun: (rid) => openRunById(rid),
+      onPickGemini: (id) => {
+        setGeminiModelValue(id);
+        showToast(`Gemini 模型已切换为 ${formatGeminiShort(id)}`);
+      },
+      onToast: showToast,
+    });
+  }
   bindEvents();
   waveEngine = initWaveEngine();
   inkDiagrams = initInkOrbitDiagrams();

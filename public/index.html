@@ -66,9 +66,10 @@
         </button>
       </div>
 
-      <!-- Search Filter -->
+      <!-- Search Filter + Mod+K Command Palette Trigger -->
       <div class="sidebar-search-wrap sidebar-label">
         <input type="text" id="inputSearchThreads" class="sidebar-search" placeholder="筛选历史会话..." autocomplete="off" />
+        <button type="button" class="sidebar-cmdk-btn mono" id="btnCommandPalette" title="打开全局命令面板 (Ctrl+K)">⌘K</button>
       </div>
 
       <!-- Grouped Thread History (置顶 / 今天 / 更早) -->
@@ -103,6 +104,14 @@
             <span class="sidebar-label">脚本与规则</span>
           </button>
 
+          <button type="button" class="foot-nav-btn" id="btnOpenPreferences" title="偏好指令与持久记忆库">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="8" cy="5.5" r="2.75" stroke="currentColor" stroke-width="1.25" />
+              <path d="M3 13.5C3.5 10.9 5.5 9.5 8 9.5C10.5 9.5 12.5 10.9 13 13.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" />
+            </svg>
+            <span class="sidebar-label">偏好与记忆</span>
+          </button>
+
           <button type="button" class="foot-nav-btn" id="btnEnvPopover" title="本机 Gemini (agy) 与 Codex CLI 健康状态">
             <span class="dual-dots" aria-hidden="true">
               <span class="status-dot" id="dotAgy"></span>
@@ -111,15 +120,20 @@
             <span class="sidebar-label mono-xs">Gemini · Codex</span>
           </button>
 
-          <button type="button" class="foot-nav-btn" id="btnToggleTweaks" aria-expanded="false" aria-controls="tweaksPanel" title="实时调参面板 (T)">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <line x1="2" y1="4.5" x2="14" y2="4.5" stroke="currentColor" stroke-width="1.25" />
-              <circle cx="5.5" cy="4.5" r="1.5" fill="var(--bg-surface-1)" stroke="currentColor" stroke-width="1.25" />
-              <line x1="2" y1="11.5" x2="14" y2="11.5" stroke="currentColor" stroke-width="1.25" />
-              <circle cx="10.5" cy="11.5" r="1.5" fill="var(--bg-surface-1)" stroke="currentColor" stroke-width="1.25" />
-            </svg>
-            <span class="sidebar-label">Tweaks</span>
-          </button>
+          <div class="sidebar-foot-pair">
+            <button type="button" class="foot-nav-btn" id="btnToggleTweaks" aria-expanded="false" aria-controls="tweaksPanel" title="实时调参面板 (T)">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <line x1="2" y1="4.5" x2="14" y2="4.5" stroke="currentColor" stroke-width="1.25" />
+                <circle cx="5.5" cy="4.5" r="1.5" fill="var(--bg-surface-1)" stroke="currentColor" stroke-width="1.25" />
+                <line x1="2" y1="11.5" x2="14" y2="11.5" stroke="currentColor" stroke-width="1.25" />
+                <circle cx="10.5" cy="11.5" r="1.5" fill="var(--bg-surface-1)" stroke="currentColor" stroke-width="1.25" />
+              </svg>
+              <span class="sidebar-label">Tweaks</span>
+            </button>
+            <button type="button" class="foot-nav-btn is-icon-pill" id="btnOpenShortcuts" title="键盘快捷键一览 (?)">
+              <span class="mono-xs">?</span>
+            </button>
+          </div>
         </div>
       </div>
     </aside>
@@ -326,6 +340,9 @@
           <div class="custom-picker-menu custom-picker-tall hidden" id="menuGeminiPicker" role="listbox" aria-label="选择 Gemini 模型"></div>
           <div class="custom-picker-menu hidden" id="menuCodexPicker" role="listbox" aria-label="选择 Codex 模型"></div>
 
+          <!-- Removable Context Chips above composer (21st.dev #46446: Reference Images & Files) -->
+          <div class="ctx-chips-bar hidden" id="contextChipsBar" data-slot="context-chips" aria-label="已附加的参考上下文"></div>
+
           <!-- Resume Session Context Chip -->
           <div class="composer-context-bar hidden" id="resumeIndicator">
             <span class="mono-xs">续跑 Codex 会话（仅直派模式生效）：<strong id="resumeThreadLabel"></strong></span>
@@ -425,6 +442,7 @@
           <span class="fluid-active-pill" aria-hidden="true"></span>
           <button type="button" class="insp-tab active" role="tab" aria-selected="true" data-insp="diff">Git Diff</button>
           <button type="button" class="insp-tab" role="tab" aria-selected="false" data-insp="review">审查门禁</button>
+          <button type="button" class="insp-tab" role="tab" aria-selected="false" data-insp="runs">运行队列</button>
           <button type="button" class="insp-tab" role="tab" aria-selected="false" data-insp="events">事件终端</button>
         </div>
         <div class="inspector-head-actions">
@@ -452,6 +470,12 @@
           <div class="empty-inline">
             <span class="mono-xs">PRE-CI GATE / STANDBY</span>
             <p>运行全链路或审查门禁模式后，这里会展示 BLOCKING 与 SUGGESTION 两级裁决明细。</p>
+          </div>
+        </div>
+        <div class="runs-panel hidden" id="inspectorRunsBox">
+          <div class="empty-inline">
+            <span class="mono-xs">AGENT RUNS / IDLE</span>
+            <p>暂无运行中的多模型协同任务。</p>
           </div>
         </div>
         <div class="terminal-panel hidden" id="inspectorEventsBox">
@@ -495,18 +519,20 @@
       <button type="button" class="link-btn" id="btnRefreshModels">刷新模型</button>
     </div>
     <div class="guardrails-grid">
+      <div class="field-block span-2">
+        <div id="guardrailsEffortSlider" class="guardrails-effort-mount"></div>
+        <select id="selectCodexEffort" class="native-select-hidden" tabindex="-1" aria-hidden="true">
+          <option value="low">low（极速）</option>
+          <option value="medium">medium（均衡）</option>
+          <option value="high" selected>high（默认推荐）</option>
+          <option value="xhigh">xhigh（深度）</option>
+          <option value="max">max（极限）</option>
+          <option value="ultracode">ultracode（Ultracode）</option>
+        </select>
+      </div>
       <label class="field-block">
         <span class="field-label">Codex 审查门禁模型</span>
         <select id="selectCodexReviewModel" class="select-input mono"></select>
-      </label>
-      <label class="field-block">
-        <span class="field-label">Codex 推理深度</span>
-        <select id="selectCodexEffort" class="select-input mono">
-          <option value="low">low（快速验证）</option>
-          <option value="medium">medium（常规）</option>
-          <option value="high" selected>high（默认推荐）</option>
-          <option value="xhigh">xhigh（高危深度）</option>
-        </select>
       </label>
       <label class="field-block">
         <span class="field-label">Codex 沙箱模式</span>
@@ -523,7 +549,7 @@
           <option value="3">最多 3 轮</option>
         </select>
       </label>
-      <label class="field-block span-2">
+      <label class="field-block">
         <span class="field-label">CODEX_HOME 配置档</span>
         <select id="selectCodexHome" class="select-input mono">
           <option value="">默认环境变量</option>
@@ -668,6 +694,9 @@
 
   <script src="/metal-fx.js" defer></script>
   <script src="/thinking-orbs.js" defer></script>
+  <script src="/effort-slider.js" defer></script>
+  <script src="/media-generation.js" defer></script>
+  <script src="/workspace-panels.js" defer></script>
   <script src="/node-canvas.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
