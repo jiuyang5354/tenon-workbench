@@ -216,6 +216,7 @@
           if (/^###\s+/.test(trimmed)) { closeList(); html.push(`<h3>${formatInline(trimmed.slice(4))}</h3>`); }
           else if (/^##\s+/.test(trimmed)) { closeList(); html.push(`<h2>${formatInline(trimmed.slice(3))}</h2>`); }
           else if (/^#\s+/.test(trimmed)) { closeList(); html.push(`<h1>${formatInline(trimmed.slice(2))}</h1>`); }
+          else if (/^&gt;\s+/.test(trimmed)) { closeList(); html.push(`<blockquote>${formatInline(trimmed.slice(5))}</blockquote>`); }
           else if (/^[-*]\s+/.test(trimmed)) {
             if (listType !== 'ul') { closeList(); html.push('<ul>'); listType = 'ul'; }
             html.push(`<li>${formatInline(trimmed.slice(2))}</li>`);
@@ -2207,6 +2208,7 @@
       autoGrowTextarea(el('inputPrompt'));
       appState.stickyBottom = true;
       appState.gateDirtyText = null;
+      if (canvasEngine) canvasEngine.clearDemoOverlay();
       attachToRun(run);
       await loadRunsList();
     } catch (err) {
@@ -2686,10 +2688,23 @@
       edgesSvgEl: el('wfEdgesSvg'),
       nodesLayerEl: el('wfNodesLayer'),
       minimapCanvasEl: el('wfMinimapCanvas'),
+      contextMenuEl: el('wfContextMenu'),
+      resultDrawerEl: el('wfResultDrawer'),
+      resultBodyEl: el('wfResultBody'),
+      resultTabsEl: el('wfResultTabs'),
       zoomLabelEl: el('btnWfZoomReset'),
       statusBarEl: el('wfStatusBar'),
+      commandInputEl: el('inputWfCommand'),
+      renderMarkdown,
       getContext: () => ({
         currentRun: appState.currentRun,
+        geminiModels: appState.models?.agy?.models || [],
+        codexModels: [
+          ...(appState.models?.codex || []),
+          ...appState.customCodexModels.map((id) => ({ id, label: `${id}（自定义）` })),
+        ],
+        formatGeminiShort,
+        formatCodexShort,
         geminiModelShort: formatGeminiShort(el('selectGeminiModel').value || 'gemini-4-neon-high'),
         codexModelShort: formatCodexShort(el('selectCodexModel').value || ''),
         codexEffort: el('selectCodexEffort')?.value || 'high',
@@ -2698,6 +2713,11 @@
         approval: Boolean(el('chkApproval')?.checked),
         worktree: Boolean(el('chkWorktree')?.checked),
       }),
+      onPresetChange: (presetName) => {
+        document.querySelectorAll('[data-ic-preset]').forEach((b) => {
+          b.classList.toggle('is-active', Boolean(presetName) && b.dataset.icPreset === presetName);
+        });
+      },
       onToggleSync: (key) => {
         if (key === 'approval') el('chkApproval').checked = !el('chkApproval').checked;
         else if (key === 'worktree') el('chkWorktree').checked = !el('chkWorktree').checked;
@@ -2706,8 +2726,7 @@
         }
         renderCliCommandCards();
       },
-      onRunSingleNode: (node) => {
-        const prompt = el('inputPrompt').value.trim();
+      onDispatchRealCli: (node, promptText) => {
         const modeMap = {
           'gemini-plan': 'plan-only',
           'gemini-copy': 'copy-polish',
@@ -2715,13 +2734,24 @@
           'cluster-merge': 'full-pipeline',
           'codex-review': 'codex-review',
         };
-        if (prompt) {
-          setModeValue(modeMap[node.kind] || 'full-pipeline');
-          switchStageView('chat');
-          startRun();
-          return true;
+        if (node?.model) {
+          if (node.kind === 'gemini-plan' || node.kind === 'gemini-copy' || /^gemini-|^orchestrator-/i.test(node.model)) {
+            setGeminiModelValue(node.model);
+          } else {
+            setCodexModelValue(node.model);
+          }
         }
-        return false; // Fall back to single-node visual preview
+        if (node?.codexModel) setCodexModelValue(node.codexModel);
+        if (node?.effort && el('selectCodexEffort')) el('selectCodexEffort').value = node.effort;
+        setModeValue(modeMap[node?.kind] || 'full-pipeline');
+        const ta = el('inputPrompt');
+        if (promptText && promptText.trim()) {
+          ta.value = promptText.trim();
+          autoGrowTextarea(ta);
+        }
+        if (canvasEngine) canvasEngine.clearDemoOverlay();
+        switchStageView('chat');
+        startRun();
       },
       onStatusChange: () => {
         syncTopbarOrb(appState.currentRun);
@@ -2942,6 +2972,9 @@
       });
     });
     el('btnWfRunAll')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.runClusterDemo(); });
+    el('btnWfDrawerToggle')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.toggleResultDrawer(); });
+    el('btnWfDrawerClose')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.closeResultDrawer(); });
+    el('btnWfLayout')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.autoLayout(); });
     el('btnWfUndo')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.undo(); });
     el('btnWfReset')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.resetDemo(); });
     el('btnWfExport')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.exportJson(); });
@@ -2951,6 +2984,29 @@
     el('btnWfFit')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.fitView(true); });
     el('chkWfFailLast')?.addEventListener('change', (e) => {
       if (canvasEngine) canvasEngine.setFailLast(e.target.checked);
+    });
+
+    const fireCanvasCmd = () => {
+      const inp = el('inputWfCommand');
+      const txt = (inp?.value || '').trim();
+      if (canvasEngine) canvasEngine.runClusterDemo(txt);
+    };
+    el('btnWfCommandRun')?.addEventListener('click', fireCanvasCmd);
+    el('inputWfCommand')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); fireCanvasCmd(); }
+    });
+
+    const fireDrawerFollowup = () => {
+      const inp = el('inputWfFollowup');
+      const txt = (inp?.value || '').trim();
+      if (!txt) return;
+      if (el('inputWfCommand')) el('inputWfCommand').value = txt;
+      inp.value = '';
+      if (canvasEngine) canvasEngine.runClusterDemo(txt);
+    };
+    el('btnWfFollowupSend')?.addEventListener('click', fireDrawerFollowup);
+    el('inputWfFollowup')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); fireDrawerFollowup(); }
     });
     ['chkApproval', 'chkWorktree', 'selectSandbox', 'selectCodexEffort', 'selectCodexReviewModel', 'selectMaxRounds'].forEach((id) => {
       el(id)?.addEventListener('change', () => {

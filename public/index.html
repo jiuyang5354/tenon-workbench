@@ -270,54 +270,85 @@
             <div class="ic-nodes-layer" id="wfNodesLayer"></div>
           </div>
 
-          <!-- Floating Top-Left: Add Agent Node Palette + Presets -->
+          <!-- Floating Top-Left: Add Agent Node Palette + Multi-Cluster Presets -->
           <div class="ic-floating-bar ic-top-left">
             <div class="ic-add-group" role="group" aria-label="添加 Agent 节点">
-              <button type="button" class="ic-chip-btn" data-ic-add="gemini-plan" title="添加 Gemini 规划节点">+ Gemini 规划</button>
-              <button type="button" class="ic-chip-btn" data-ic-add="codex-exec" title="添加并行 Codex 沙箱工位">+ Codex 工位</button>
+              <button type="button" class="ic-chip-btn" data-ic-add="gemini-plan" title="添加 Gemini 规划节点">+ Gemini</button>
+              <button type="button" class="ic-chip-btn" data-ic-add="codex-exec" title="添加并行 Codex 沙箱工位">+ Codex</button>
               <button type="button" class="ic-chip-btn is-accent" data-ic-add="cluster-merge" title="添加多路集群聚合合并器">+ 合并器</button>
               <button type="button" class="ic-chip-btn" data-ic-add="codex-review" title="添加 Pre-CI 代码审查门禁">+ Pre-CI</button>
             </div>
             <span class="ic-divider" aria-hidden="true"></span>
-            <div class="ic-preset-group" role="group" aria-label="拓扑预设">
-              <button type="button" class="ic-chip-btn is-active" id="btnPresetCluster" data-ic-preset="cluster">5节点集群合并</button>
-              <button type="button" class="ic-chip-btn" id="btnPresetLinear" data-ic-preset="linear">3节点精简链</button>
+            <div class="ic-preset-group" role="group" aria-label="自定义与集群拓扑预设">
+              <button type="button" class="ic-chip-btn is-active" data-ic-preset="cluster">5节点集群</button>
+              <button type="button" class="ic-chip-btn" data-ic-preset="multi" title="9节点双集群两级聚合合并">双集群二级合并</button>
+              <button type="button" class="ic-chip-btn" data-ic-preset="linear">3节点精简</button>
+              <button type="button" class="ic-chip-btn" data-ic-preset="blank" title="从空白画布完全自由构建">空白自定义</button>
             </div>
           </div>
 
-          <!-- Floating Top-Right: Execution & Edit Controls -->
+          <!-- Floating Top-Right: Execution & Blender Edit Controls -->
           <div class="ic-floating-bar ic-top-right">
             <button type="button" class="btn-primary-sm wf-btn" id="btnWfRunAll">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5Z" /></svg>
-              <span>运行集群演练</span>
+              <span>运行集群</span>
             </button>
+            <button type="button" class="ic-chip-btn is-accent" id="btnWfDrawerToggle" title="展开/收起集群交付成果与思考链面板">成果面板</button>
+            <button type="button" class="ic-chip-btn" id="btnWfLayout" title="按拓扑层级自动整理节点 (L)">整理 L</button>
             <button type="button" class="ic-chip-btn" id="btnWfUndo" title="撤销上一步 (Ctrl+Z)">撤销</button>
             <button type="button" class="ic-chip-btn" id="btnWfReset" title="重置运行状态">重置</button>
-            <button type="button" class="ic-chip-btn" id="btnWfExport" title="导出集群拓扑 JSON">JSON</button>
             <label class="ic-chip-check" title="勾选后在终局门禁触发模拟拦截">
               <input type="checkbox" id="chkWfFailLast" />
               <span>模拟拦截</span>
             </label>
           </div>
 
-          <!-- Floating Bottom-Left: Live Canvas Telemetry -->
-          <div class="ic-hud-panel ic-bottom-left mono-xs" id="wfStatusBar" role="status" aria-live="polite">
-            无限画布就绪：拖空白处无限平移 · 滚轮缩放 · 拖卡片自由排布 · 拖右端口至左端口连线合并。
-          </div>
-
-          <!-- Floating Bottom-Center: Zoom & Fit HUD -->
-          <div class="ic-floating-bar ic-bottom-center">
-            <button type="button" class="ic-zoom-btn mono" id="btnWfZoomOut" title="缩小">-</button>
-            <button type="button" class="ic-zoom-val mono" id="btnWfZoomReset" title="点击重置为 100%">88%</button>
-            <button type="button" class="ic-zoom-btn mono" id="btnWfZoomIn" title="放大">+</button>
-            <span class="ic-divider" aria-hidden="true"></span>
-            <button type="button" class="ic-chip-btn" id="btnWfFit" title="适配全部节点到视野 (F)">全览 F</button>
+          <!-- Floating Bottom-Center: Compact Status Pill + Cluster Command Bar + Zoom HUD (Zero-Overlap Stack!) -->
+          <div class="ic-bottom-stack">
+            <div class="ic-status-pill mono-xs" id="wfStatusBar" role="status" aria-live="polite">
+              无限画布就绪：点击任意节点 Model 胶囊即可独立切换模型 · 右键画布呼出 Blender 菜单 · 拖端口自由连线。
+            </div>
+            <div class="ic-cmd-bar" id="wfCommandBar">
+              <input type="text" class="ic-cmd-input" id="inputWfCommand" placeholder="输入集群任务需求（回车直接驱动当前画布全部节点并输出交付报告）..." autocomplete="off" />
+              <button type="button" class="btn-primary-sm wf-btn" id="btnWfCommandRun">派发集群</button>
+            </div>
+            <div class="ic-floating-bar ic-zoom-hud">
+              <button type="button" class="ic-zoom-btn mono" id="btnWfZoomOut" title="缩小">-</button>
+              <button type="button" class="ic-zoom-val mono" id="btnWfZoomReset" title="点击重置为 100%">84%</button>
+              <button type="button" class="ic-zoom-btn mono" id="btnWfZoomIn" title="放大">+</button>
+              <span class="ic-divider" aria-hidden="true"></span>
+              <button type="button" class="ic-chip-btn" id="btnWfFit" title="适配全部节点到视野 (F)">全览 F</button>
+              <button type="button" class="ic-chip-btn" id="btnWfExport" title="导出集群拓扑 JSON">JSON</button>
+            </div>
           </div>
 
           <!-- Floating Bottom-Right: Live Interactive Minimap -->
           <div class="ic-minimap-card" title="实时缩略导航图（点击居中全览）">
             <canvas id="wfMinimapCanvas" width="164" height="100"></canvas>
           </div>
+
+          <!-- Blender-Style Right-Click Context Menu (21st.dev #23560) -->
+          <div class="ic-ctx-menu hidden" id="wfContextMenu" role="menu" aria-label="Blender 节点画布右键菜单"></div>
+
+          <!-- Slide-Over Cluster Deliverable & Node CoT Result Drawer -->
+          <aside class="ic-result-drawer hidden" id="wfResultDrawer" aria-label="集群交付成果与节点思考链面板">
+            <header class="ic-drawer-head">
+              <div class="ic-drawer-tabs" id="wfResultTabs" role="tablist">
+                <button type="button" class="ic-dtab active" role="tab" aria-selected="true" data-drawer-tab="summary">集群总汇报</button>
+                <button type="button" class="ic-dtab" role="tab" aria-selected="false" data-drawer-tab="node">当前节点详情</button>
+              </div>
+              <button type="button" class="rail-icon-btn" id="btnWfDrawerClose" title="收起成果面板">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.35" />
+                </svg>
+              </button>
+            </header>
+            <div class="ic-drawer-body" id="wfResultBody"></div>
+            <footer class="ic-drawer-foot">
+              <input type="text" class="text-input ic-drawer-followup" id="inputWfFollowup" placeholder="继续向此集群追问或下发下一轮指令..." autocomplete="off" />
+              <button type="button" class="btn-primary-sm" id="btnWfFollowupSend">发送</button>
+            </footer>
+          </aside>
         </div>
       </section>
 
