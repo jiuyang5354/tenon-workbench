@@ -71,10 +71,10 @@
   --scroll-thumb: rgba(17, 19, 21, 0.15);
   --scroll-thumb-hover: rgba(17, 19, 21, 0.28);
 
-  /* Typography (Zero Inter / Roboto / Arial / Fraunces / system-ui) */
-  --font-display: 'Space Grotesk', 'Plus Jakarta Sans', 'Noto Sans SC', sans-serif;
-  --font-sans: 'Plus Jakarta Sans', 'Noto Sans SC', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Cascadia Code', monospace;
+  /* Typography (Zero Inter / Roboto / Arial / Fraunces / system-ui; CJK-safe mono stack — NEVER falls back to Windows SimSun!) */
+  --font-display: 'Space Grotesk', 'Plus Jakarta Sans', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei UI', sans-serif;
+  --font-sans: 'Plus Jakarta Sans', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei UI', monospace;
 
   /* Crisp Architectural Shell Dimensions & Radii */
   --sidebar-w: 248px;
@@ -1113,13 +1113,18 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
 
 .pipe-step {
   font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.03em;
-  padding: 3px 7px;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  padding: 3px 9px;
   color: var(--ink-muted);
   border: 1px solid transparent;
   background: transparent;
   border-radius: var(--radius-sharp);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   transition: all 150ms var(--ease-out);
 }
 
@@ -1129,15 +1134,27 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
 }
 
 .pipe-step.is-active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-ink);
+  background: var(--cta-bg);
+  border-color: var(--cta-border);
+  color: var(--cta-ink);
+  font-weight: 600;
 }
 
 .pipe-step.is-done {
   background: var(--bg-surface-1);
-  border-color: var(--line-subtle);
+  border-color: var(--line-strong);
   color: var(--ink-primary);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(17, 19, 21, 0.05);
+}
+
+.pipe-step.is-done::before {
+  content: "";
+  width: 5.5px;
+  height: 5.5px;
+  border-radius: 999px;
+  background: var(--state-ok);
+  flex-shrink: 0;
 }
 
 .pipe-step.is-gate {

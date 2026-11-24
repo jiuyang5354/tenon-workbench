@@ -51,7 +51,7 @@
 ## 3. Typography & Geometry
 - **Display**: `'Space Grotesk', 'Plus Jakarta Sans', 'Noto Sans SC', sans-serif` (tight `-0.025em` tracking on headings).
 - **Body**: `'Plus Jakarta Sans', 'Noto Sans SC', sans-serif` (`14px` base, `1.55` leading).
-- **Micro-Captions & Metrics**: `'JetBrains Mono', monospace` (`10px–11px`, `tabular-nums`, `0.07em` tracking).
+- **Micro-Captions & Metrics**: `'JetBrains Mono', 'Cascadia Code', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei UI', monospace` (`10px–11px`, `tabular-nums`, CJK-safe fallback so Chinese glyphs NEVER degrade to Windows SimSun/宋体).
 - **Radii (Architectural Crispness)**:
   - Controls / Buttons / Inputs: `6px`
   - Node Cards / Panels / Drawers: `8px`
