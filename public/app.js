@@ -4560,10 +4560,229 @@
     });
   }
 
+  /* =========================================================================
+     Architectural Floating Hairline Scroll Rails (Zero Native Windows Bars)
+     - Replaces chunky OS scrollbars with whisper-thin floating rails, smooth
+       60fps drag-scrubbing, soft top/bottom edge fades & conversation turn ticks
+     ========================================================================= */
+  let archScrollSystem = null;
+
+  function initArchitecturalScrollRails() {
+    if (archScrollSystem) return archScrollSystem;
+    const host = document.createElement('div');
+    host.className = 'arch-scroll-overlay';
+    host.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(host);
+
+    const targets = [
+      { id: 'conversationViewport', milestones: true, fadeBg: 'var(--bg-canvas)' },
+      { id: 'threadList', milestones: false, fadeBg: 'var(--bg-surface-1)' },
+      { id: 'inspectorBody', milestones: false, fadeBg: 'var(--bg-surface-1)' },
+      { id: 'settingsStage', milestones: false, fadeBg: 'var(--bg-canvas)' },
+      { id: 'wfResultBody', milestones: false, fadeBg: 'var(--bg-surface-1)' },
+    ];
+
+    const entries = targets
+      .map((cfg) => {
+        const node = el(cfg.id);
+        if (!node) return null;
+        const rail = document.createElement('div');
+        rail.className = 'arch-scroll-rail';
+        rail.dataset.scrollTarget = cfg.id;
+        rail.innerHTML = `
+          <div class="arch-scroll-axis"></div>
+          ${cfg.milestones ? '<div class="arch-scroll-ticks"></div>' : ''}
+          <div class="arch-scroll-thumb"></div>
+          <div class="arch-scroll-hud">0%</div>`;
+        const fadeTop = document.createElement('div');
+        fadeTop.className = 'arch-scroll-fade-top';
+        fadeTop.style.setProperty('--scroll-fade-bg', cfg.fadeBg);
+        const fadeBot = document.createElement('div');
+        fadeBot.className = 'arch-scroll-fade-bot';
+        fadeBot.style.setProperty('--scroll-fade-bg', cfg.fadeBg);
+        host.appendChild(fadeTop);
+        host.appendChild(fadeBot);
+        host.appendChild(rail);
+        return {
+          cfg,
+          node,
+          rail,
+          thumb: rail.querySelector('.arch-scroll-thumb'),
+          ticks: rail.querySelector('.arch-scroll-ticks'),
+          hud: rail.querySelector('.arch-scroll-hud'),
+          fadeTop,
+          fadeBot,
+          hideTimer: null,
+          dragging: null,
+          lastTickSig: '',
+        };
+      })
+      .filter(Boolean);
+
+    function syncEntry(e, reveal = false) {
+      const rect = e.node.getBoundingClientRect();
+      const cs = getComputedStyle(e.node);
+      const hidden = cs.display === 'none' || cs.visibility === 'hidden' || rect.width < 40 || rect.height < 60;
+      const sh = e.node.scrollHeight;
+      const ch = e.node.clientHeight;
+      const maxScroll = Math.max(0, sh - ch);
+      if (hidden || maxScroll <= 4) {
+        e.rail.classList.remove('is-scrollable', 'is-visible', 'is-dragging');
+        e.fadeTop.classList.remove('is-on');
+        e.fadeBot.classList.remove('is-on');
+        return;
+      }
+
+      const padY = 10;
+      const trackH = Math.max(36, rect.height - padY * 2);
+      const ratio = Math.min(1, ch / sh);
+      const thumbH = Math.max(28, Math.round(trackH * ratio));
+      const prog = Math.max(0, Math.min(1, e.node.scrollTop / maxScroll));
+      const thumbTop = Math.round(prog * (trackH - thumbH));
+
+      e.rail.style.left = `${Math.round(rect.right - 14)}px`;
+      e.rail.style.top = `${Math.round(rect.top + padY)}px`;
+      e.rail.style.height = `${Math.round(trackH)}px`;
+      e.rail.classList.add('is-scrollable');
+
+      e.thumb.style.height = `${thumbH}px`;
+      e.thumb.style.top = `${thumbTop}px`;
+
+      const pct = Math.round(prog * 100);
+      e.hud.textContent = `${pct}%`;
+      e.hud.style.top = `${Math.round(thumbTop + thumbH / 2)}px`;
+
+      // Soft top/bottom atmospheric edge fades
+      const fadeW = Math.max(0, Math.round(rect.width - 2));
+      e.fadeTop.style.left = `${Math.round(rect.left + 1)}px`;
+      e.fadeTop.style.top = `${Math.round(rect.top)}px`;
+      e.fadeTop.style.width = `${fadeW}px`;
+      e.fadeTop.classList.toggle('is-on', e.node.scrollTop > 8);
+
+      e.fadeBot.style.left = `${Math.round(rect.left + 1)}px`;
+      e.fadeBot.style.top = `${Math.round(rect.bottom - 22)}px`;
+      e.fadeBot.style.width = `${fadeW}px`;
+      e.fadeBot.classList.toggle('is-on', e.node.scrollTop < maxScroll - 8);
+
+      // Build editorial turn milestone ticks for Dialogue Stream
+      if (e.ticks) {
+        const blocks = e.node.querySelectorAll('.research-progress-card, .catchup-card, .agent-turn, .inline-gate-card');
+        const sig = `${blocks.length}:${sh}`;
+        if (sig !== e.lastTickSig) {
+          e.lastTickSig = sig;
+          e.ticks.innerHTML = '';
+          const baseTop = e.node.getBoundingClientRect().top - e.node.scrollTop;
+          blocks.forEach((blk) => {
+            const relY = blk.getBoundingClientRect().top - baseTop;
+            const frac = Math.max(0.02, Math.min(0.98, relY / Math.max(1, sh)));
+            const tick = document.createElement('span');
+            tick.className = `arch-scroll-tick ${blk.classList.contains('inline-gate-card') ? 'is-gate' : ''}`;
+            tick.style.top = `${Math.round(frac * trackH)}px`;
+            tick.addEventListener('click', (ev) => {
+              ev.stopPropagation();
+              e.node.scrollTo({ top: Math.max(0, relY - 18), behavior: 'smooth' });
+            });
+            e.ticks.appendChild(tick);
+          });
+        }
+      }
+
+      if (reveal) {
+        e.rail.classList.add('is-visible');
+        if (e.hideTimer) clearTimeout(e.hideTimer);
+        e.hideTimer = setTimeout(() => {
+          if (!e.dragging) e.rail.classList.remove('is-visible');
+        }, 1150);
+      }
+    }
+
+    function syncAll(reveal = false) {
+      entries.forEach((e) => syncEntry(e, reveal));
+    }
+
+    entries.forEach((e) => {
+      e.node.addEventListener('scroll', () => syncEntry(e, true), { passive: true });
+      e.node.addEventListener('pointerenter', () => syncEntry(e, true));
+
+      // Click anywhere on floating rail to jump smoothly
+      e.rail.addEventListener('pointerdown', (ev) => {
+        if (ev.button !== 0) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        const railRect = e.rail.getBoundingClientRect();
+        const thumbH = e.thumb.offsetHeight || 28;
+        const trackRange = Math.max(1, railRect.height - thumbH);
+        const maxScroll = Math.max(0, e.node.scrollHeight - e.node.clientHeight);
+        if (ev.target !== e.thumb) {
+          const clickY = ev.clientY - railRect.top - thumbH / 2;
+          const nextFrac = Math.max(0, Math.min(1, clickY / trackRange));
+          e.node.scrollTop = nextFrac * maxScroll;
+          syncEntry(e, true);
+        }
+        e.dragging = {
+          startY: ev.clientY,
+          startScrollTop: e.node.scrollTop,
+          trackRange,
+          maxScroll,
+          pointerId: ev.pointerId,
+        };
+        e.rail.classList.add('is-dragging', 'is-visible');
+        try { e.rail.setPointerCapture(ev.pointerId); } catch {}
+      });
+
+      e.rail.addEventListener('pointermove', (ev) => {
+        if (!e.dragging || ev.pointerId !== e.dragging.pointerId) return;
+        const dy = ev.clientY - e.dragging.startY;
+        const deltaScroll = (dy / e.dragging.trackRange) * e.dragging.maxScroll;
+        e.node.scrollTop = Math.max(0, Math.min(e.dragging.maxScroll, e.dragging.startScrollTop + deltaScroll));
+        syncEntry(e, true);
+      });
+
+      const endDrag = (ev) => {
+        if (!e.dragging || ev.pointerId !== e.dragging.pointerId) return;
+        try { e.rail.releasePointerCapture(ev.pointerId); } catch {}
+        e.dragging = null;
+        e.rail.classList.remove('is-dragging');
+        syncEntry(e, true);
+      };
+      e.rail.addEventListener('pointerup', endDrag);
+      e.rail.addEventListener('pointercancel', endDrag);
+    });
+
+    let syncRaf = 0;
+    const scheduleSync = () => {
+      if (syncRaf) return;
+      syncRaf = requestAnimationFrame(() => {
+        syncRaf = 0;
+        syncAll(false);
+      });
+    };
+
+    const ro = new ResizeObserver(scheduleSync);
+    entries.forEach((e) => ro.observe(e.node));
+    window.addEventListener('resize', scheduleSync);
+    const mo = new MutationObserver((muts) => {
+      for (const m of muts) {
+        if (!host.contains(m.target)) {
+          scheduleSync();
+          return;
+        }
+      }
+    });
+    mo.observe(el('appShell') || document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    const htmlMo = new MutationObserver(scheduleSync);
+    htmlMo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-surface'] });
+
+    scheduleSync();
+    archScrollSystem = { syncAll };
+    return archScrollSystem;
+  }
+
   // Bootstrap
   let inkDiagrams = null;
   applyTweaks();
   initArchitecturalSelects();
+  initArchitecturalScrollRails();
   if (window.ConduitEffortSlider && el('guardrailsEffortSlider')) {
     effortSlider = window.ConduitEffortSlider.mount(el('guardrailsEffortSlider'), {
       defaultValue: el('selectCodexEffort')?.value || 'high',
