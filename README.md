@@ -15,11 +15,12 @@
   4. **审查门禁**：针对工作区 Git 变更运行两级审查（`BLOCKING` vs `SUGGESTION`），命中 auth / payment / permission / deploy 等路径自动升档 `xhigh`
   5. **文案顾问**：请 Gemini 4 Neon 去除界面文案与交互说明中的 AI 解释腔
 * **附带三套独立 CLI 脚本 & 规则模板**：即使不开网页，也可以在终端或 Antigravity 中直接调用 `gemini-ask.mjs`、`codex-worker.mjs`、`codex-review.mjs`，并内置 `templates/GEMINI.md` 与 `templates/CODEX.md`。
-* **Codex 桌面端聊天流式界面 + Ink-Orbit / Liquid Metal / 树状思考轨 + 实时调参台（Tweaks）**：以 Awwwards SOTD 7.37 标杆 **DeepBook** 为视觉基调，采用 100vh 三栏桌面端布局（左侧分组会话栏 + 中央对话流与底部悬浮富指令输入框 + 右侧可折叠 Diff/审查/事件终端面板），原生融合：
-  * **Ink-Orbit 动态三联 SVG 架构图**：斜线工程底纹、悬停外扩折角 L 型护框、实时双模型协同流图、四工具矩阵中枢与可滑动刮擦吞吐曲线；
-  * **Liquid Metal（`21st.dev` `metal-fx` 共享 WebGL2 着色器）**：为 `派发协同`、`新建会话` 与圆形快捷按钮提供 60fps 液态金属高光边环（支持 `虹彩镀铬 / 冷晶银 / 关闭` 实时切换）；
-  * **`ai-thinking-and-tool-calls` SVG 树状思考与工具调用轨**：连续 SVG 竖干 + `Q` 圆弧分支 + 3.4s 扫光摘要 + 完成后自动折叠，支持展开查看命令输出与思考过程；
-  * **`21st.dev` 聊天交互全家桶**：`Chat Sidebar`（置顶/重命名/删除）、`Conversation`（智能吸底 + 跳至最新）、`Rich Prompt Input`（`/` 切模式 + `@` 引用工作区文件）、`Diff Viewer`（Unified/Split 双栏对比）、`Border Beam` 与 `Segmented Tabs`；右下角内置可完全收起的 **Tweaks 面板**（快捷键 `T` 呼出）。
+* **Codex 桌面端聊天流式界面 + 三节点交互画布 + ThinkingOrbs + 连续曲率圆角体系**：以 Awwwards SOTD 7.37 标杆 **DeepBook** 为视觉基调，全站统一采用**连续曲率圆角（Squircle 阶梯：`10px / 18px / 24px / 999px`）** 与胶囊按键几何呼应，原生融合：
+  * **全局自定义黑曜石模型选择器**：彻底替换原生操作系统 `<select>`，提供分组展示（`Gemini 4 Neon / Series / Orchestrator / 3.8 Flash`）、实时搜索、内联刷新与 Codex 自定义模型输入；
+  * **3D Fibonacci `ThinkingOrbs` 活体点球状态引擎（`public/thinking-orbs.js`）**：根据真实阶段自动切换 `reasoning-twins`（规划思考）、`working-gyro`（沙箱施工）、`searching-lighthouse`（Pre-CI 扫描）、`waiting`（等待拍板）与 `compacting-fuse`（汇报汇总），零依赖纯 SVG 矢量渲染；
+  * **交互式三节点 Agent 编排画布（顶栏一键切换 `对话流` / `节点画布`）**：点阵画布串联 `Gemini 架构规划师 → Codex 沙箱工程师 → Pre-CI 门禁与汇报`，配备电光钴蓝旋转锥形流光环、动态贝塞尔数据连线、与底部护栏双向同步的实时开关，以及单步执行与全链路演练/拦截预演；
+  * **FLIP 分支思路卡组（`Branching Reasoning Deck`）**：Gemini 规划阶段动态扇形展开 3 条架构路线并评分，完成后丝滑收拢为采纳路线卡片，可随时点击展开切换备选思路；
+  * **Ink-Orbit 动态三联 SVG 架构图 & Liquid Metal（`metal-fx` WebGL2 边环）& `ai-thinking-and-tool-calls` SVG 树状思考轨**：以及 `Chat Sidebar`、`Conversation`、`Rich Prompt Input`（`/` + `@`）、`Diff Viewer`（Unified/Split）、`Border Beam`、`Segmented Tabs` 与右下角可完全收起的 **Tweaks 调参台**（快捷键 `T`）。
 
 ---
 

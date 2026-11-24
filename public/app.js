@@ -9,6 +9,22 @@
     'copy-polish': '文案顾问',
   };
 
+  const MODE_SHORT = {
+    'full-pipeline': '全链路',
+    'plan-only': '独立规划',
+    'codex-exec': 'Codex直派',
+    'codex-review': '审查门禁',
+    'copy-polish': '文案顾问',
+  };
+
+  const MODE_ITEMS = [
+    { id: 'full-pipeline', title: '全链路协同', sub: 'Gemini 规划 → 人工拍板 → Codex 施工 → Pre-CI 审查', badge: '推荐' },
+    { id: 'plan-only', title: '独立规划', sub: '仅 Gemini 只读拆解架构与接口契约', badge: '只读' },
+    { id: 'codex-exec', title: 'Codex 直派', sub: '跳过规划，安全沙箱直接写代码（支持会话续跑）', badge: '沙箱' },
+    { id: 'codex-review', title: 'Pre-CI 审查门禁', sub: '两级分级拦截，高危路径自动升档 xhigh', badge: '门禁' },
+    { id: 'copy-polish', title: '文案与交互顾问', sub: 'Gemini 去 AI 味润色，输出前后对比表', badge: '润色' },
+  ];
+
   const SLASH_COMMANDS = [
     { key: '/pipeline', mode: 'full-pipeline', detail: '全链路协同（Gemini 规划 → 拍板 → Codex 施工 → 审查）' },
     { key: '/plan', mode: 'plan-only', detail: '独立规划（仅 Gemini 只读拆解契约）' },
@@ -31,12 +47,16 @@
 
   const appState = {
     health: null,
-    models: { agy: [], codex: [] },
+    models: { agy: { models: [] }, codex: [] },
+    customCodexModels: [],
     assets: null,
     runs: [],
     searchQuery: '',
     workspaceFiles: [],
     activeAsset: 'GEMINI.md',
+    stageView: 'chat',
+    activePicker: null,
+    geminiSearch: '',
     inspectorOpen: false,
     inspectorTab: 'diff',
     diffViewMode: 'unified',
@@ -50,6 +70,17 @@
     gateDirtyText: null,
     treeGroupOpen: new Map(), // key -> boolean (manual override)
     treeRowOpen: new Set(),   // key -> expanded row
+    branchDeckOpen: new Map(), // runId -> boolean
+    branchSelected: new Map(), // runId -> branchId
+    wf: {
+      statuses: ['idle', 'idle', 'idle'],
+      selected: 0,
+      demoRunning: false,
+      demoToken: 0,
+      failLast: false,
+      statusMsg: '就绪：点击任意节点上的「单步执行」可直连本机 CLI，或点击上方「运行链路演练」预览三节点协同动效。',
+      toggles: { readOnlyPlan: true, autoNewDiff: true, humanReport: true },
+    },
     palette: { open: false, trigger: '', query: '', startPos: 0, items: [], selectedIdx: 0 },
     tweaks: loadTweaks(),
   };
@@ -105,6 +136,7 @@
 
     if (waveEngine) waveEngine.sync();
     if (metalEngine) metalEngine.sync();
+    if (window.ConduitOrbs) window.ConduitOrbs.syncAll();
     requestAnimationFrame(syncAllFluidTracks);
   }
 
@@ -602,7 +634,13 @@
 
         ctx.fillStyle = isGate && hot ? colors.warn : hot ? colors.accent : colors.tick;
         ctx.globalAlpha = hot ? 0.95 : 0.52;
-        ctx.fillRect(x, midY - barH / 2, 1.5, barH);
+        if (typeof ctx.roundRect === 'function') {
+          ctx.beginPath();
+          ctx.roundRect(x, midY - barH / 2, 1.8, barH, 1);
+          ctx.fill();
+        } else {
+          ctx.fillRect(x, midY - barH / 2, 1.6, barH);
+        }
       }
       ctx.globalAlpha = 1;
     }
@@ -841,7 +879,7 @@
     const caret = ta.selectionStart || val.length;
 
     if (pal.trigger === '/' && item.mode) {
-      el('selectMode').value = item.mode;
+      setModeValue(item.mode);
       ta.value = (val.slice(0, pal.startPos) + val.slice(caret)).trimStart();
       ta.focus();
       showToast(`已切换至「${MODE_LABELS[item.mode]}」`);
@@ -963,6 +1001,7 @@
         try {
           const { run } = await api(`/api/runs/${encodeURIComponent(id)}`);
           closeMobileDrawers();
+          switchStageView('chat');
           attachToRun(run);
         } catch (err) {
           showToast(`载入会话失败: ${err.message}`);
@@ -1030,8 +1069,205 @@
     el('sendCtaGroup').classList.remove('hidden');
     el('composerShell').classList.remove('is-streaming');
     updatePipelinePills(null);
+    syncTopbarOrb(null);
     renderSidebarThreads();
+    if (appState.stageView === 'workflow') renderWorkflowCanvas();
     if (waveEngine) waveEngine.resize();
+  }
+
+  function renderOrbSvg(state, variant = 'default', size = 18, extraClass = '') {
+    return `<svg class="thinking-orb ${extraClass}" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" data-orb-state="${escapeHtml(state)}" data-orb-variant="${escapeHtml(variant)}" data-orb-size="${size}" aria-hidden="true"></svg>`;
+  }
+
+  function syncTopbarOrb(run) {
+    const orb = el('topbarOrb');
+    const wrap = el('topbarOrbWrap');
+    if (!orb || !wrap) return;
+
+    let state = 'base';
+    let variant = 'default';
+    let cls = '';
+
+    if (run) {
+      if (run.status === 'running') {
+        cls = 'is-live';
+        if (run.activeStage === 'exec') { state = 'working'; variant = 'gyro'; }
+        else if (run.activeStage === 'review') { state = 'searching'; variant = 'lighthouse'; }
+        else if (run.activeStage === 'summary') { state = 'compacting'; variant = 'fuse'; }
+        else { state = 'reasoning'; variant = 'twins'; }
+      } else if (run.status === 'awaiting_approval') {
+        state = 'waiting';
+        variant = 'default';
+        cls = 'is-gate';
+      } else if (run.status === 'completed') {
+        state = 'base';
+        variant = 'default';
+        cls = 'is-done';
+      } else if (run.status === 'failed' || run.status === 'blocked') {
+        state = 'retrying';
+        variant = 'default';
+        cls = 'is-err';
+      }
+    } else if (appState.wf.demoRunning) {
+      cls = 'is-live';
+      const idx = appState.wf.statuses.indexOf('running');
+      if (idx === 0) { state = 'reasoning'; variant = 'twins'; }
+      else if (idx === 1) { state = 'working'; variant = 'gyro'; }
+      else if (idx === 2) { state = 'searching'; variant = 'lighthouse'; }
+    }
+
+    wrap.classList.remove('is-live', 'is-gate', 'is-done', 'is-err');
+    if (cls) wrap.classList.add(cls);
+    orb.dataset.orbState = state;
+    orb.dataset.orbVariant = variant;
+    if (window.ConduitOrbs) window.ConduitOrbs.mountAll(wrap);
+  }
+
+  /* =========================================================================
+     Branching Reasoning Approach Deck (branching-reasoning-chat-input.tsx FLIP)
+     ========================================================================= */
+  function derivePlanBranches(run) {
+    const planText = String(run.gemini?.planText || '');
+    const headings = [];
+    planText.split(/\r?\n/).forEach((line) => {
+      const m = line.trim().match(/^#{2,3}\s+(.+)$/);
+      if (m && headings.length < 4) headings.push(m[1].replace(/[*`]/g, '').trim());
+    });
+    const planSnippet = headings.slice(0, 2).join(' · ');
+
+    const chosenId = appState.branchSelected.get(run.id) || 'contract-gate';
+    const base = [
+      {
+        id: 'minimal-patch',
+        title: '最小增量补丁',
+        note: '优先复用既有模块与接口，最小化改动范围与回滚成本。',
+        score: 76,
+      },
+      {
+        id: 'modular-refactor',
+        title: '模块解耦重构',
+        note: '先剥离高耦合边界与纯函数单测，再逐层接入前端调用。',
+        score: 85,
+      },
+      {
+        id: 'contract-gate',
+        title: '契约驱动 + 双门禁',
+        note: planSnippet
+          ? `围绕「${planSnippet.slice(0, 44)}」锁定契约，沙箱施工并过 Pre-CI 审查。`
+          : '先锁定接口契约与验收清单，人工拍板后派发 Codex 沙箱实现与 Pre-CI 审查。',
+        score: 94,
+      },
+    ];
+    return base.map((b) => ({ ...b, chosen: b.id === chosenId }));
+  }
+
+  function applyBranchDeckLayout(wrapEl, isExpanded, selectedId) {
+    const deck = wrapEl.querySelector('.branch-deck');
+    if (!deck) return;
+    const cards = Array.from(deck.querySelectorAll('.branch-card'));
+    const compact = (deck.clientWidth || 680) < 540;
+    const count = cards.length || 3;
+    const gap = 10;
+
+    if (isExpanded) {
+      if (compact) {
+        const cardH = 104;
+        deck.style.height = `${count * cardH + (count - 1) * gap}px`;
+        cards.forEach((card, i) => {
+          const sel = card.dataset.branchId === selectedId;
+          card.classList.toggle('is-selected', sel);
+          card.style.left = '0px';
+          card.style.top = `${i * (cardH + gap)}px`;
+          card.style.width = '100%';
+          card.style.height = `${cardH}px`;
+          card.style.opacity = '1';
+          card.style.pointerEvents = 'auto';
+          card.style.zIndex = sel ? '3' : '2';
+          card.style.transform = 'rotate(0deg) scale(1)';
+        });
+      } else {
+        const deckW = deck.clientWidth || 680;
+        const cardW = Math.floor((deckW - gap * (count - 1)) / count);
+        const cardH = 126;
+        const tilts = [-3.2, 0, 3.2];
+        const offsets = [5, 0, 5];
+        deck.style.height = `${cardH + 16}px`;
+        cards.forEach((card, i) => {
+          const sel = card.dataset.branchId === selectedId;
+          card.classList.toggle('is-selected', sel);
+          card.style.left = `${i * (cardW + gap)}px`;
+          card.style.top = `${offsets[i] ?? 0}px`;
+          card.style.width = `${cardW}px`;
+          card.style.height = `${cardH}px`;
+          card.style.opacity = '1';
+          card.style.pointerEvents = 'auto';
+          card.style.zIndex = sel ? '4' : String(i + 1);
+          card.style.transform = `rotate(${tilts[i] ?? 0}deg) scale(1)`;
+        });
+      }
+    } else {
+      const cardH = 92;
+      deck.style.height = `${cardH}px`;
+      cards.forEach((card) => {
+        const sel = card.dataset.branchId === selectedId;
+        card.classList.toggle('is-selected', sel);
+        card.style.left = '0px';
+        card.style.top = '0px';
+        card.style.width = '100%';
+        card.style.height = `${cardH}px`;
+        card.style.opacity = sel ? '1' : '0';
+        card.style.pointerEvents = sel ? 'auto' : 'none';
+        card.style.zIndex = sel ? '4' : '1';
+        card.style.transform = sel ? 'rotate(0deg) scale(1)' : 'rotate(0deg) scale(0.95)';
+      });
+    }
+  }
+
+  function renderBranchDeckHtml(run, isStreaming) {
+    if (!['full-pipeline', 'plan-only'].includes(run.mode)) return '';
+    const branches = derivePlanBranches(run);
+    const selected = branches.find((b) => b.chosen) || branches[branches.length - 1];
+    const manual = appState.branchDeckOpen.get(run.id);
+    const expanded = isStreaming ? true : Boolean(manual);
+
+    const cardsHtml = branches
+      .map(
+        (b, idx) => `
+        <button type="button" class="branch-card ${b.chosen ? 'is-selected' : ''}" data-branch-id="${escapeHtml(b.id)}">
+          <div class="branch-card-kicker">
+            <span>${b.chosen ? 'SELECTED APPROACH' : `APPROACH 0${idx + 1}`}</span>
+            <span>${b.chosen ? '✓' : '○'}</span>
+          </div>
+          <div class="branch-card-title">${escapeHtml(b.title)}</div>
+          <div class="branch-card-note">${escapeHtml(b.note)}</div>
+          <div class="branch-score-row">
+            <div class="branch-score-track"><div class="branch-score-fill" style="width:${b.score}%"></div></div>
+            <span class="branch-score-num">${b.score}</span>
+          </div>
+        </button>`
+      )
+      .join('');
+
+    return `
+      <div class="branch-deck-wrap" data-branch-run="${escapeHtml(run.id)}" data-branch-expanded="${expanded}" data-branch-selected="${escapeHtml(selected.id)}">
+        <div class="branch-head">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" />
+            <path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" /><path d="M12 12v3" />
+          </svg>
+          <span class="${isStreaming ? 'is-shimmer' : ''}">
+            ${isStreaming ? '正在并行权衡 3 条架构实现路径...' : `已权衡 3 条方案 · 采纳「${escapeHtml(selected.title)}」`}
+          </span>
+        </div>
+        <div class="branch-deck" style="height:${expanded ? '142px' : '92px'}">${cardsHtml}</div>
+        ${
+          !isStreaming
+            ? `<button type="button" class="branch-toggle-btn" data-branch-toggle="${escapeHtml(run.id)}">
+                <span>${expanded ? '▴ 收起备选方案' : '▾ 查看其余 2 个备选方案'}</span>
+              </button>`
+            : ''
+        }
+      </div>`;
   }
 
   function updatePipelinePills(run) {
@@ -1226,6 +1462,7 @@
     el('topbarTitle').textContent = run.title || '协同会话';
     el('topbarMeta').textContent = `${MODE_LABELS[run.mode] || run.mode} · ${totalTokens.toLocaleString()} TOKENS · ${totalSec}s`;
     updatePipelinePills(run);
+    syncTopbarOrb(run);
 
     // Update Inspector badge
     const badge = el('inspectorBadge');
@@ -1269,12 +1506,16 @@
           <div class="border-beam" aria-hidden="true"></div>
           <header class="agent-turn-head">
             <div class="agent-identity">
-              <span class="agent-avatar gemini">G</span>
+              <span class="agent-avatar gemini ${isStreamingG ? 'is-orb' : ''}">${isStreamingG ? renderOrbSvg('reasoning', 'twins', 18) : 'G'}</span>
               <span class="agent-role-name">${titleLabel}</span>
               <span class="agent-model-tag">${escapeHtml(run.config?.geminiModel || '')}</span>
             </div>
-            <span class="agent-status-pill ${escapeHtml(g.status || '')} ${isStreamingG ? 'is-shimmer' : ''}">${statusText}</span>
+            <span class="agent-status-pill ${escapeHtml(g.status || '')} ${isStreamingG ? 'is-shimmer' : ''}">
+              ${isStreamingG ? renderOrbSvg('reasoning', 'twins', 13) : ''}
+              <span>${statusText}</span>
+            </span>
           </header>
+          ${renderBranchDeckHtml(run, isStreamingG)}
           ${renderToolTraceHtml(run.events, 'gemini', isStreamingG, `${run.id}:gemini`)}
           ${text ? `<div class="markdown-output">${renderMarkdown(text)}</div>` : isStreamingG ? '<div class="mono-xs is-shimmer">正在拆解需求与接口契约...</div>' : ''}
           ${g.error && run.activeStage !== 'summary' ? `<div class="error-banner">${escapeHtml(g.error)}</div>` : ''}
@@ -1320,11 +1561,14 @@
           <div class="border-beam" aria-hidden="true"></div>
           <header class="agent-turn-head">
             <div class="agent-identity">
-              <span class="agent-avatar codex">C</span>
+              <span class="agent-avatar codex ${isStreamingC ? 'is-orb is-codex' : ''}">${isStreamingC ? renderOrbSvg('working', 'gyro', 18) : 'C'}</span>
               <span class="agent-role-name">Codex · 沙箱工程师</span>
               <span class="agent-model-tag">${escapeHtml(run.config?.codexModel || '默认')} · ${escapeHtml(run.config?.codexEffort || 'high')} · ${escapeHtml(run.config?.sandbox || 'workspace-write')}${run.worktreePath ? ' · WT' : ''}</span>
             </div>
-            <span class="agent-status-pill ${escapeHtml(c.status || '')} ${isStreamingC ? 'is-shimmer' : ''}">${statusText}</span>
+            <span class="agent-status-pill ${escapeHtml(c.status || '')} ${isStreamingC ? 'is-shimmer' : ''}">
+              ${isStreamingC ? renderOrbSvg('working', 'gyro', 13) : ''}
+              <span>${statusText}</span>
+            </span>
           </header>
           ${renderToolTraceHtml(run.events, 'codex', isStreamingC, `${run.id}:codex`)}
           ${c.execText ? `<div class="markdown-output">${renderMarkdown(c.execText)}</div>` : isStreamingC ? '<div class="mono-xs is-shimmer">Codex 正在读取工作区并编写代码...</div>' : ''}
@@ -1360,12 +1604,13 @@
           <div class="border-beam" aria-hidden="true"></div>
           <header class="agent-turn-head">
             <div class="agent-identity">
-              <span class="agent-avatar codex">R</span>
+              <span class="agent-avatar codex ${isStreamingR ? 'is-orb' : ''}">${isStreamingR ? renderOrbSvg('searching', 'lighthouse', 18) : 'R'}</span>
               <span class="agent-role-name">Pre-CI 代码审查门禁</span>
               <span class="agent-model-tag">ROUND ${run.reviewRound || 1} / ${run.mode === 'codex-review' ? 1 : (run.config?.maxReviewRounds || 2)}</span>
             </div>
             <span class="agent-status-pill ${v ? (v.passed ? 'done' : 'failed') : (isStreamingR ? 'running' : '')} ${isStreamingR ? 'is-shimmer' : ''}">
-              ${isStreamingR ? '深度审查中...' : v ? (v.passed ? 'PASS' : 'BLOCK') : 'PENDING'}
+              ${isStreamingR ? renderOrbSvg('searching', 'lighthouse', 13) : ''}
+              <span>${isStreamingR ? '深度审查中...' : v ? (v.passed ? 'PASS' : 'BLOCK') : 'PENDING'}</span>
             </span>
           </header>
           ${
@@ -1412,10 +1657,13 @@
           <div class="border-beam" aria-hidden="true"></div>
           <header class="agent-turn-head">
             <div class="agent-identity">
-              <span class="agent-avatar gemini">G</span>
+              <span class="agent-avatar gemini ${isStreamingS ? 'is-orb' : ''}">${isStreamingS ? renderOrbSvg('compacting', 'fuse', 18) : 'G'}</span>
               <span class="agent-role-name">Gemini · 最终交付汇报</span>
             </div>
-            <span class="agent-status-pill ${escapeHtml(g.status || '')} ${isStreamingS ? 'is-shimmer' : ''}">${isStreamingS ? '正在汇总汇报...' : 'REPORT'}</span>
+            <span class="agent-status-pill ${escapeHtml(g.status || '')} ${isStreamingS ? 'is-shimmer' : ''}">
+              ${isStreamingS ? renderOrbSvg('compacting', 'fuse', 13) : ''}
+              <span>${isStreamingS ? '正在汇总汇报...' : 'REPORT'}</span>
+            </span>
           </header>
           ${g.summaryText ? `<div class="markdown-output">${renderMarkdown(g.summaryText)}</div>` : ''}
           ${g.error && run.activeStage === 'summary' ? `<div class="error-banner">${escapeHtml(g.error)}</div>` : ''}
@@ -1428,7 +1676,9 @@
 
     container.innerHTML = parts.join('');
     bindThreadDynamicHandlers(container, run);
+    if (window.ConduitOrbs) window.ConduitOrbs.mountAll(container);
     renderInspectorContent(run);
+    if (appState.stageView === 'workflow') renderWorkflowCanvas();
 
     // Smart auto-follow (21st.dev Conversation #46450 — NEVER uses scrollIntoView!)
     const vp = el('conversationViewport');
@@ -1443,6 +1693,49 @@
   }
 
   function bindThreadDynamicHandlers(container, run) {
+    // FLIP Branching Reasoning Deck layout & smooth in-place toggling
+    container.querySelectorAll('.branch-deck-wrap').forEach((wrap) => {
+      let expanded = wrap.dataset.branchExpanded === 'true';
+      let selectedId = wrap.dataset.branchSelected || 'contract-gate';
+      const sync = () => {
+        applyBranchDeckLayout(wrap, expanded, selectedId);
+        const toggleBtn = wrap.querySelector('[data-branch-toggle]');
+        if (toggleBtn) {
+          toggleBtn.innerHTML = `<span>${expanded ? '▴ 收起备选方案' : '▾ 查看其余 2 个备选方案'}</span>`;
+        }
+      };
+      requestAnimationFrame(sync);
+
+      const toggleBtn = wrap.querySelector('[data-branch-toggle]');
+      if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+          expanded = !expanded;
+          appState.branchDeckOpen.set(run.id, expanded);
+          sync();
+        });
+      }
+
+      wrap.querySelectorAll('.branch-card').forEach((card) => {
+        card.addEventListener('click', () => {
+          const nextId = card.dataset.branchId;
+          if (!nextId) return;
+          selectedId = nextId;
+          appState.branchSelected.set(run.id, nextId);
+          const headText = wrap.querySelector('.branch-head span');
+          const title = card.querySelector('.branch-card-title')?.textContent || nextId;
+          if (headText && run.status !== 'running') {
+            headText.textContent = `已权衡 3 条方案 · 采纳「${title}」`;
+          }
+          wrap.querySelectorAll('.branch-card').forEach((c, idx) => {
+            const isSel = c.dataset.branchId === nextId;
+            const k = c.querySelector('.branch-card-kicker');
+            if (k) k.innerHTML = `<span>${isSel ? 'SELECTED APPROACH' : `APPROACH 0${idx + 1}`}</span><span>${isSel ? '✓' : '○'}</span>`;
+          });
+          sync();
+        });
+      });
+    });
+
     container.querySelectorAll('[data-tree-group]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const gid = btn.dataset.treeGroup;
@@ -1486,7 +1779,7 @@
         appState.resumeThreadId = tid;
         el('resumeThreadLabel').textContent = `${tid.slice(0, 14)}...`;
         el('resumeIndicator').classList.remove('hidden');
-        el('selectMode').value = 'codex-exec';
+        setModeValue('codex-exec');
         showToast('已锁定上次 Codex 会话并切至「Codex 直派」');
       });
     });
@@ -1811,43 +2104,747 @@
     }
   }
 
+  /* =========================================================================
+     Custom Obsidian Grouped Pickers (Zero Native OS <select> Dropdowns)
+     ========================================================================= */
+  function formatGeminiShort(id) {
+    if (!id) return 'Gemini';
+    const raw = String(id).trim();
+    const effortMap = { xhigh: 'XHigh', high: 'High', medium: 'Med', low: 'Low' };
+    const m4 = raw.match(/^gemini-4-([a-z0-9]+)-(xhigh|high|medium|low)$/i);
+    if (m4) {
+      const fam = m4[1].charAt(0).toUpperCase() + m4[1].slice(1);
+      return `${fam} · ${effortMap[m4[2].toLowerCase()] || m4[2]}`;
+    }
+    const m38 = raw.match(/^gemini-3\.8-flash-(xhigh|high|medium|low)$/i);
+    if (m38) {
+      return `Flash · ${effortMap[m38[1].toLowerCase()] || m38[1]}`;
+    }
+    const mo = raw.match(/^orchestrator-([a-z0-9]+)$/i);
+    if (mo) {
+      return `Orch · ${mo[1].charAt(0).toUpperCase() + mo[1].slice(1)}`;
+    }
+    return raw.replace(/^gemini-/i, 'G-').slice(0, 18);
+  }
+
+  function formatCodexShort(id) {
+    if (!id) return 'Codex · 默认';
+    const raw = String(id).trim();
+    if (/^gpt-/i.test(raw)) return raw.replace(/^gpt-/i, 'GPT ').replace(/-/g, ' ');
+    return raw.slice(0, 16);
+  }
+
+  function setModeValue(modeVal) {
+    const val = MODE_LABELS[modeVal] ? modeVal : 'full-pipeline';
+    el('selectMode').value = val;
+    const lbl = el('labelModePicker');
+    if (lbl) lbl.textContent = MODE_SHORT[val] || MODE_LABELS[val];
+    if (appState.stageView === 'workflow') renderWorkflowCanvas();
+  }
+
+  function setGeminiModelValue(id) {
+    const val = id || 'gemini-4-neon-high';
+    el('selectGeminiModel').value = val;
+    const lbl = el('labelGeminiPicker');
+    if (lbl) lbl.textContent = formatGeminiShort(val);
+    renderCliCommandCards();
+    if (appState.stageView === 'workflow') renderWorkflowCanvas();
+  }
+
+  function setCodexModelValue(id) {
+    const val = String(id || '').trim();
+    el('selectCodexModel').value = val;
+    const lbl = el('labelCodexPicker');
+    if (lbl) lbl.textContent = formatCodexShort(val);
+    renderCliCommandCards();
+    if (appState.stageView === 'workflow') renderWorkflowCanvas();
+  }
+
+  function closePickers() {
+    appState.activePicker = null;
+    [
+      ['menuModePicker', 'btnModePicker'],
+      ['menuGeminiPicker', 'btnGeminiPicker'],
+      ['menuCodexPicker', 'btnCodexPicker'],
+    ].forEach(([menuId, btnId]) => {
+      const m = el(menuId);
+      const b = el(btnId);
+      if (m) m.classList.add('hidden');
+      if (b) b.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  function positionPickerMenu(menuEl, btnEl) {
+    const shell = el('composerShell');
+    if (!menuEl || !btnEl || !shell) return;
+    const shellW = shell.clientWidth || 720;
+    const menuW = Math.min(320, shellW - 24);
+    const desiredLeft = btnEl.offsetLeft;
+    const clampedLeft = Math.max(12, Math.min(desiredLeft, shellW - menuW - 12));
+    menuEl.style.left = `${clampedLeft}px`;
+  }
+
+  function renderModePicker() {
+    const menu = el('menuModePicker');
+    if (!menu) return;
+    const current = el('selectMode').value || 'full-pipeline';
+    menu.innerHTML =
+      '<div class="picker-group-label">ORCHESTRATION MODE · 选择协同模式</div>' +
+      MODE_ITEMS.map(
+        (m) => `
+        <button type="button" class="picker-option ${m.id === current ? 'is-selected' : ''}" role="option" aria-selected="${m.id === current}" data-pick-mode="${escapeHtml(m.id)}">
+          <div class="picker-opt-main">
+            <span class="picker-opt-title">${escapeHtml(m.title)}</span>
+            <span class="picker-opt-sub">${escapeHtml(m.sub)}</span>
+          </div>
+          <div class="picker-opt-right">
+            <span class="picker-badge">${escapeHtml(m.badge)}</span>
+            ${m.id === current ? '<span class="picker-check">✓</span>' : ''}
+          </div>
+        </button>`
+      ).join('');
+
+    menu.querySelectorAll('[data-pick-mode]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        setModeValue(btn.dataset.pickMode);
+        closePickers();
+        showToast(`已切换至「${MODE_LABELS[btn.dataset.pickMode]}」`);
+      });
+    });
+  }
+
+  function groupGeminiModels(models) {
+    const groups = [
+      { key: 'neon', title: 'GEMINI 4 NEON · 推荐', items: [] },
+      { key: 'g4', title: 'GEMINI 4 SERIES', items: [] },
+      { key: 'orch', title: 'ORCHESTRATOR', items: [] },
+      { key: 'flash', title: 'GEMINI 3.8 FLASH', items: [] },
+      { key: 'other', title: 'OTHER MODELS', items: [] },
+    ];
+    models.forEach((m) => {
+      const id = String(m.id || '').toLowerCase();
+      if (id.includes('neon') && id.startsWith('gemini-4')) groups[0].items.push(m);
+      else if (id.startsWith('gemini-4')) groups[1].items.push(m);
+      else if (id.startsWith('orchestrator')) groups[2].items.push(m);
+      else if (id.includes('flash')) groups[3].items.push(m);
+      else groups[4].items.push(m);
+    });
+    return groups.filter((g) => g.items.length > 0);
+  }
+
+  function renderGeminiPicker() {
+    const menu = el('menuGeminiPicker');
+    if (!menu) return;
+    const current = el('selectGeminiModel').value || 'gemini-4-neon-high';
+    const rawModels = appState.models?.agy?.models || [
+      { id: 'gemini-4-neon-high', label: 'Gemini 4 Neon (High)' },
+      { id: 'gemini-4-neon-xhigh', label: 'Gemini 4 Neon (XHigh)' },
+      { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
+    ];
+    const q = appState.geminiSearch.trim().toLowerCase();
+    const filtered = rawModels.filter(
+      (m) => !q || String(m.id).toLowerCase().includes(q) || String(m.label || '').toLowerCase().includes(q)
+    );
+    const groups = groupGeminiModels(filtered);
+
+    const listHtml =
+      groups.length === 0
+        ? '<div class="picker-group-label">无匹配模型</div>'
+        : groups
+            .map(
+              (g) =>
+                `<div class="picker-group-label">${g.title}</div>` +
+                g.items
+                  .map((m) => {
+                    const effortMatch = String(m.id).match(/-(xhigh|high|medium|low)$/i);
+                    const effortBadge = effortMatch ? effortMatch[1].toUpperCase() : '';
+                    const sel = m.id === current;
+                    return `
+                      <button type="button" class="picker-option ${sel ? 'is-selected' : ''}" role="option" aria-selected="${sel}" data-pick-gemini="${escapeHtml(m.id)}">
+                        <div class="picker-opt-main">
+                          <span class="picker-opt-title">${escapeHtml(m.label || m.id)}</span>
+                          <span class="picker-opt-sub mono">${escapeHtml(m.id)}</span>
+                        </div>
+                        <div class="picker-opt-right">
+                          ${effortBadge ? `<span class="picker-badge">${effortBadge}</span>` : ''}
+                          ${sel ? '<span class="picker-check">✓</span>' : ''}
+                        </div>
+                      </button>`;
+                  })
+                  .join('')
+            )
+            .join('');
+
+    menu.innerHTML = `
+      <div class="picker-menu-top">
+        <input type="text" class="picker-search" id="inputGeminiSearch" placeholder="搜索本机 Gemini 模型..." value="${escapeHtml(appState.geminiSearch)}" autocomplete="off" />
+        <button type="button" class="link-btn" id="btnPickerRefreshGemini">刷新</button>
+      </div>
+      <div class="picker-list-body">${listHtml}</div>`;
+
+    const searchInput = el('inputGeminiSearch');
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        appState.geminiSearch = e.target.value;
+        const caret = e.target.selectionStart || e.target.value.length;
+        renderGeminiPicker();
+        const nextInp = el('inputGeminiSearch');
+        if (nextInp) {
+          nextInp.focus();
+          nextInp.setSelectionRange(caret, caret);
+        }
+      });
+    }
+
+    const refBtn = el('btnPickerRefreshGemini');
+    if (refBtn) {
+      refBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        loadModels(true);
+      });
+    }
+
+    menu.querySelectorAll('[data-pick-gemini]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        setGeminiModelValue(btn.dataset.pickGemini);
+        closePickers();
+      });
+    });
+  }
+
+  function renderCodexPicker() {
+    const menu = el('menuCodexPicker');
+    if (!menu) return;
+    const current = el('selectCodexModel').value || '';
+    const baseList = appState.models?.codex || [{ id: '', label: '默认（读取本机 CODEX_HOME 配置）' }];
+    const combined = [...baseList];
+    appState.customCodexModels.forEach((cid) => {
+      if (!combined.some((m) => m.id === cid)) combined.push({ id: cid, label: `${cid}（自定义）` });
+    });
+
+    const optsHtml = combined
+      .map((m) => {
+        const sel = m.id === current;
+        return `
+          <button type="button" class="picker-option ${sel ? 'is-selected' : ''}" role="option" aria-selected="${sel}" data-pick-codex="${escapeHtml(m.id)}">
+            <div class="picker-opt-main">
+              <span class="picker-opt-title">${escapeHtml(m.label || m.id || '默认配置')}</span>
+              <span class="picker-opt-sub mono">${escapeHtml(m.id || 'CODEX_HOME/config.toml')}</span>
+            </div>
+            <div class="picker-opt-right">
+              ${m.id === '' ? '<span class="picker-badge">AUTO</span>' : ''}
+              ${sel ? '<span class="picker-check">✓</span>' : ''}
+            </div>
+          </button>`;
+      })
+      .join('');
+
+    menu.innerHTML = `
+      <div class="picker-group-label">CODEX EXECUTION MODEL · 施工引擎</div>
+      ${optsHtml}
+      <div class="picker-custom-row">
+        <input type="text" class="picker-search mono" id="inputCustomCodex" placeholder="自定义模型名，如 gpt-5.4" autocomplete="off" />
+        <button type="button" class="btn-primary-sm" id="btnApplyCustomCodex">应用</button>
+      </div>`;
+
+    menu.querySelectorAll('[data-pick-codex]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        setCodexModelValue(btn.dataset.pickCodex);
+        closePickers();
+      });
+    });
+
+    const applyCustom = () => {
+      const val = (el('inputCustomCodex')?.value || '').trim();
+      if (!val) return;
+      if (!appState.customCodexModels.includes(val)) appState.customCodexModels.push(val);
+      setCodexModelValue(val);
+      closePickers();
+      showToast(`Codex 模型已设为 ${val}`);
+    };
+
+    const applyBtn = el('btnApplyCustomCodex');
+    if (applyBtn) applyBtn.addEventListener('click', applyCustom);
+    const customInp = el('inputCustomCodex');
+    if (customInp) {
+      customInp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          applyCustom();
+        }
+      });
+    }
+  }
+
+  function openPicker(kind) {
+    const already = appState.activePicker === kind;
+    closeAllPopovers();
+    closePromptPalette();
+    closePickers();
+    if (already) return;
+
+    appState.activePicker = kind;
+    if (kind === 'mode') {
+      renderModePicker();
+      positionPickerMenu(el('menuModePicker'), el('btnModePicker'));
+      el('menuModePicker').classList.remove('hidden');
+      el('btnModePicker').setAttribute('aria-expanded', 'true');
+    } else if (kind === 'gemini') {
+      appState.geminiSearch = '';
+      renderGeminiPicker();
+      positionPickerMenu(el('menuGeminiPicker'), el('btnGeminiPicker'));
+      el('menuGeminiPicker').classList.remove('hidden');
+      el('btnGeminiPicker').setAttribute('aria-expanded', 'true');
+      setTimeout(() => el('inputGeminiSearch')?.focus(), 20);
+    } else if (kind === 'codex') {
+      renderCodexPicker();
+      positionPickerMenu(el('menuCodexPicker'), el('btnCodexPicker'));
+      el('menuCodexPicker').classList.remove('hidden');
+      el('btnCodexPicker').setAttribute('aria-expanded', 'true');
+    }
+  }
+
   async function loadModels(refresh = false) {
     try {
       const data = await api(`/api/models${refresh ? '?refresh=1' : ''}`);
       appState.models = data;
 
-      const agySel = el('selectGeminiModel');
-      const prevAgy = agySel.value;
-      agySel.innerHTML = '';
-      (data.agy?.models || []).forEach((m) => {
-        const opt = document.createElement('option');
-        opt.value = m.id;
-        opt.textContent = m.label || m.id;
-        agySel.appendChild(opt);
-      });
-      if (prevAgy && Array.from(agySel.options).some((o) => o.value === prevAgy)) agySel.value = prevAgy;
-      else if (Array.from(agySel.options).some((o) => o.value === 'gemini-4-neon-high')) agySel.value = 'gemini-4-neon-high';
+      const agyModels = data.agy?.models || [];
+      const prevAgy = el('selectGeminiModel').value;
+      if (prevAgy && agyModels.some((m) => m.id === prevAgy)) {
+        setGeminiModelValue(prevAgy);
+      } else if (agyModels.some((m) => m.id === 'gemini-4-neon-high')) {
+        setGeminiModelValue('gemini-4-neon-high');
+      } else if (agyModels.length > 0) {
+        setGeminiModelValue(agyModels[0].id);
+      } else {
+        setGeminiModelValue('gemini-4-neon-high');
+      }
 
-      const fillCodex = (selId) => {
-        const sel = el(selId);
-        const prev = sel.value;
-        sel.innerHTML = '';
+      const prevCodex = el('selectCodexModel').value;
+      if (prevCodex && (data.codex || []).some((m) => m.id === prevCodex)) {
+        setCodexModelValue(prevCodex);
+      } else {
+        setCodexModelValue('');
+      }
+
+      const revSel = el('selectCodexReviewModel');
+      if (revSel) {
+        const prevRev = revSel.value;
+        revSel.innerHTML = '';
         (data.codex || []).forEach((m) => {
           const opt = document.createElement('option');
           opt.value = m.id;
           opt.textContent = m.label;
-          sel.appendChild(opt);
+          revSel.appendChild(opt);
         });
-        if (prev && Array.from(sel.options).some((o) => o.value === prev)) sel.value = prev;
-      };
-      fillCodex('selectCodexModel');
-      fillCodex('selectCodexReviewModel');
+        if (prevRev && Array.from(revSel.options).some((o) => o.value === prevRev)) revSel.value = prevRev;
+      }
 
+      if (appState.activePicker === 'gemini') renderGeminiPicker();
+      if (appState.activePicker === 'codex') renderCodexPicker();
       if (refresh) showToast('已刷新本机 agy Gemini 模型列表');
       renderCliCommandCards();
+      if (appState.stageView === 'workflow') renderWorkflowCanvas();
     } catch (err) {
       showToast(`模型列表加载失败: ${err.message}`);
     }
+  }
+
+  /* =========================================================================
+     Interactive AI Agent Workflow Canvas (AgentNodeCard + Bezier Connectors)
+     ========================================================================= */
+  function switchStageView(view) {
+    const next = view === 'workflow' ? 'workflow' : 'chat';
+    appState.stageView = next;
+    el('conversationViewport').classList.toggle('hidden', next !== 'chat');
+    el('workflowStage').classList.toggle('hidden', next !== 'workflow');
+    const tabs = el('stageViewTabs');
+    if (tabs) {
+      tabs.querySelectorAll('.stage-view-tab').forEach((b) => {
+        const active = b.dataset.stageView === next;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', String(active));
+      });
+    }
+    requestAnimationFrame(syncAllFluidTracks);
+    if (next === 'workflow') renderWorkflowCanvas();
+  }
+
+  function deriveWorkflowStatuses() {
+    const run = appState.currentRun;
+    if (!run || appState.wf.demoRunning) return appState.wf.statuses;
+
+    const s = ['idle', 'idle', 'idle'];
+    const g = run.gemini || {};
+    const c = run.codex || {};
+    if (run.mode === 'full-pipeline') {
+      if (g.status === 'running' && run.activeStage === 'plan') s[0] = 'running';
+      else if (g.planText || run.status === 'awaiting_approval' || c.status !== 'idle') s[0] = 'completed';
+      else if (g.status === 'failed') s[0] = 'error';
+
+      if (c.status === 'running' && run.activeStage === 'exec') s[1] = 'running';
+      else if (c.execText || run.reviewRound > 0 || run.status === 'completed') s[1] = 'completed';
+      else if (c.status === 'failed' && run.activeStage === 'exec') s[1] = 'error';
+
+      if (run.activeStage === 'review' || run.activeStage === 'summary') s[2] = run.status === 'running' ? 'running' : run.status === 'blocked' ? 'error' : 'completed';
+      else if (run.status === 'completed') s[2] = 'completed';
+      else if (run.status === 'blocked' || (run.status === 'failed' && run.reviewRound > 0)) s[2] = 'error';
+    } else if (run.mode === 'plan-only' || run.mode === 'copy-polish') {
+      s[0] = run.status === 'running' ? 'running' : run.status === 'completed' ? 'completed' : run.status === 'failed' ? 'error' : 'idle';
+    } else if (run.mode === 'codex-exec') {
+      s[1] = run.status === 'running' ? 'running' : run.status === 'completed' ? 'completed' : run.status === 'failed' ? 'error' : 'idle';
+    } else if (run.mode === 'codex-review') {
+      s[2] = run.status === 'running' ? 'running' : run.status === 'completed' ? 'completed' : (run.status === 'blocked' || run.status === 'failed') ? 'error' : 'idle';
+    }
+    return s;
+  }
+
+  function renderWorkflowConnector(fromTop, toTop, state) {
+    const portY = 36;
+    const width = 96;
+    const height = 380;
+    const y1 = fromTop + portY;
+    const y2 = toTop + portY;
+    const half = width / 2;
+    const d = `M 0 ${y1} C ${half} ${y1}, ${half} ${y2}, ${width} ${y2}`;
+    const color =
+      state === 'error'
+        ? 'var(--state-err)'
+        : state === 'idle'
+          ? 'var(--line-strong)'
+          : 'var(--accent-hex)';
+    const dashed = state === 'completed' ? '' : 'stroke-dasharray="6 6"';
+    const anim =
+      state === 'running' && appState.tweaks.motion
+        ? '<animate attributeName="stroke-dashoffset" from="0" to="-24" dur="0.7s" repeatCount="indefinite" />'
+        : '';
+    return `
+      <svg class="wf-connector-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-hidden="true">
+        <path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" ${dashed}>${anim}</path>
+      </svg>`;
+  }
+
+  function renderWorkflowCanvas() {
+    const track = el('wfCanvasTrack');
+    const bar = el('wfStatusBar');
+    if (!track) return;
+
+    const statuses = deriveWorkflowStatuses();
+    const gModel = formatGeminiShort(el('selectGeminiModel').value || 'gemini-4-neon-high');
+    const cModel = formatCodexShort(el('selectCodexModel').value || '');
+    const effort = el('selectCodexEffort')?.value || 'high';
+    const sandbox = el('selectSandbox')?.value || 'workspace-write';
+    const maxRounds = el('selectMaxRounds')?.value || '2';
+    const approvalOn = Boolean(el('chkApproval')?.checked);
+    const worktreeOn = Boolean(el('chkWorktree')?.checked);
+
+    const statusMeta = {
+      idle: { label: '就绪', btn: '单步执行' },
+      running: { label: '运行中', btn: '运行中...' },
+      completed: { label: '已完成', btn: '重新运行' },
+      error: { label: '已拦截', btn: '重试节点' },
+    };
+
+    const nodes = [
+      {
+        idx: 0,
+        top: 0,
+        title: 'Gemini · 架构规划师',
+        subtitle: '需求拆解与接口契约设计',
+        orbState: statuses[0] === 'running' ? 'reasoning' : 'base',
+        orbVariant: statuses[0] === 'running' ? 'twins' : 'default',
+        showIn: false,
+        showOut: true,
+        inLabel: '',
+        outLabel: 'Spec 契约',
+        params: [
+          { label: 'Model', value: gModel },
+          { label: 'Approach', value: '3 路分支权衡' },
+          { label: 'Gate', value: approvalOn ? '需人工拍板' : '直通放行' },
+        ],
+        toggles: [
+          { key: 'approval', label: '人工拍板闸门', desc: '派发施工前允许修改契约', checked: approvalOn },
+          { key: 'readOnlyPlan', label: '只读规划约束', desc: '禁止规划阶段写入磁盘', checked: appState.wf.toggles.readOnlyPlan },
+        ],
+        footer: statuses[0] === 'completed' ? '接口契约已锁定' : '等待任务需求',
+        errorMessage: '规划阶段超时或未生成有效契约，请检查 agy CLI 登录态后重试。',
+      },
+      {
+        idx: 1,
+        top: 52,
+        title: 'Codex · 沙箱工程师',
+        subtitle: '安全隔离区内编写并验证代码',
+        orbState: statuses[1] === 'running' ? 'working' : 'base',
+        orbVariant: statuses[1] === 'running' ? 'gyro' : 'default',
+        showIn: true,
+        showOut: true,
+        inLabel: 'Spec 契约',
+        outLabel: 'Git Diff',
+        params: [
+          { label: 'Model', value: cModel },
+          { label: 'Effort', value: effort },
+          { label: 'Sandbox', value: sandbox },
+        ],
+        toggles: [
+          { key: 'worktree', label: 'Git Worktree 隔离', desc: '独立分支目录零污染主干', checked: worktreeOn },
+          { key: 'autoNewDiff', label: '捕获新建未跟踪文件', desc: '完整进入右侧 Diff 对比器', checked: appState.wf.toggles.autoNewDiff },
+        ],
+        footer: statuses[1] === 'completed' ? '变更 Diff 已捕获' : '等待契约放行',
+        errorMessage: 'Codex 沙箱执行失败，请检查 CODEX_HOME 凭据或工作目录权限。',
+      },
+      {
+        idx: 2,
+        top: 16,
+        title: 'Pre-CI 门禁与终局汇报',
+        subtitle: '分级阻断审查 + Gemini 10秒汇报',
+        orbState: statuses[2] === 'running' ? 'searching' : statuses[2] === 'error' ? 'retrying' : 'base',
+        orbVariant: statuses[2] === 'running' ? 'lighthouse' : 'default',
+        showIn: true,
+        showOut: false,
+        inLabel: 'Git Diff',
+        outLabel: '',
+        params: [
+          { label: 'Max Rounds', value: `${maxRounds} 轮复审` },
+          { label: 'High-Risk', value: '自动升 xhigh' },
+          { label: 'Report', value: '10 秒人话总结' },
+        ],
+        toggles: [
+          { key: 'writable', label: '允许沙箱自动修复', desc: '关闭则锁定 read-only 审查', checked: sandbox === 'workspace-write' },
+          { key: 'humanReport', label: 'Gemini 终局人话汇报', desc: '将审查与 Diff 翻译为结论', checked: appState.wf.toggles.humanReport },
+        ],
+        footer: statuses[2] === 'completed' ? '门禁 PASS · 已生成汇报' : statuses[2] === 'error' ? '存在 BLOCKING 项' : '等待代码变更',
+        errorMessage: 'Pre-CI 审查拦截：命中高危鉴权边界变更 [BLOCKING]，已触发人工升级确认。',
+      },
+    ];
+
+    const renderNodeCard = (n) => {
+      const st = statuses[n.idx];
+      const running = st === 'running';
+      const meta = statusMeta[st] || statusMeta.idle;
+      const sel = appState.wf.selected === n.idx;
+
+      const chipIcon =
+        st === 'completed'
+          ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
+          : st === 'error'
+            ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>'
+            : `<span class="wf-chip-dot-wrap">${running ? '<span class="wf-chip-ping"></span>' : ''}<span class="wf-chip-dot"></span></span>`;
+
+      return `
+        <div class="wf-node-slot" style="margin-top:${n.top}px">
+          <div class="agent-node ${sel ? 'is-selected' : ''}" data-status="${st}" data-wf-select="${n.idx}" role="group" tabindex="0">
+            ${running ? '<span class="agent-node-glow" aria-hidden="true"></span>' : ''}
+            <div class="agent-node-surface">
+              ${running ? '<span class="agent-node-sweep-track" aria-hidden="true"><span class="agent-node-sweep"></span></span>' : ''}
+              <header class="agent-node-head">
+                <span class="agent-node-icon">${renderOrbSvg(n.orbState, n.orbVariant, 24)}</span>
+                <div class="agent-node-titles">
+                  <h3 class="agent-node-title">${escapeHtml(n.title)}</h3>
+                  <p class="agent-node-sub">${escapeHtml(n.subtitle)}</p>
+                </div>
+                <span class="wf-status-chip ${st}">${chipIcon}<span>${meta.label}</span></span>
+              </header>
+
+              <div class="agent-node-body">
+                <dl class="wf-params">
+                  ${n.params
+                    .map(
+                      (p) => `
+                      <div class="wf-param-row">
+                        <dt class="wf-param-label">${escapeHtml(p.label)}</dt>
+                        <dd class="wf-param-val">${escapeHtml(p.value)}</dd>
+                      </div>`
+                    )
+                    .join('')}
+                </dl>
+                <div class="wf-toggles">
+                  ${n.toggles
+                    .map(
+                      (t) => `
+                      <div class="wf-toggle-row">
+                        <div class="wf-toggle-text">
+                          <div class="wf-toggle-label">${escapeHtml(t.label)}</div>
+                          ${t.desc ? `<div class="wf-toggle-desc">${escapeHtml(t.desc)}</div>` : ''}
+                        </div>
+                        <button type="button" class="wf-switch" role="switch" aria-checked="${t.checked}" data-wf-toggle="${escapeHtml(t.key)}" aria-label="${escapeHtml(t.label)}">
+                          <span class="wf-switch-thumb"></span>
+                        </button>
+                      </div>`
+                    )
+                    .join('')}
+                </div>
+              </div>
+
+              ${st === 'error' ? `<div class="wf-node-error" role="alert">${escapeHtml(n.errorMessage)}</div>` : ''}
+
+              <footer class="agent-node-foot">
+                <span class="wf-foot-note">${escapeHtml(n.footer)}</span>
+                <button type="button" class="wf-run-btn ${st !== 'idle' ? 'is-secondary' : ''}" data-wf-run="${n.idx}" ${running ? 'disabled' : ''}>
+                  <span>${meta.btn}</span>
+                </button>
+              </footer>
+            </div>
+            ${running ? '<span class="agent-node-ring" aria-hidden="true"></span>' : ''}
+            ${
+              n.showIn
+                ? `<button type="button" class="wf-port wf-port-left is-connected" data-wf-port="输入端口 · ${escapeHtml(n.inLabel)}" aria-label="输入端口: ${escapeHtml(n.inLabel)}"><span class="wf-port-dot"></span><span class="wf-port-tip">${escapeHtml(n.inLabel)}</span></button>`
+                : ''
+            }
+            ${
+              n.showOut
+                ? `<button type="button" class="wf-port wf-port-right is-connected" data-wf-port="输出端口 · ${escapeHtml(n.outLabel)}" aria-label="输出端口: ${escapeHtml(n.outLabel)}"><span class="wf-port-dot"></span><span class="wf-port-tip">${escapeHtml(n.outLabel)}</span></button>`
+                : ''
+            }
+          </div>
+        </div>`;
+    };
+
+    track.innerHTML =
+      renderNodeCard(nodes[0]) +
+      renderWorkflowConnector(nodes[0].top, nodes[1].top, statuses[0]) +
+      renderNodeCard(nodes[1]) +
+      renderWorkflowConnector(nodes[1].top, nodes[2].top, statuses[1]) +
+      renderNodeCard(nodes[2]);
+
+    if (bar) bar.textContent = appState.wf.statusMsg;
+    if (window.ConduitOrbs) window.ConduitOrbs.mountAll(track);
+
+    track.querySelectorAll('[data-wf-select]').forEach((card) => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('button, [role="switch"]')) return;
+        appState.wf.selected = Number(card.dataset.wfSelect);
+        renderWorkflowCanvas();
+      });
+    });
+
+    track.querySelectorAll('[data-wf-port]').forEach((port) => {
+      port.addEventListener('click', (e) => {
+        e.stopPropagation();
+        appState.wf.statusMsg = `已检查数据通道：${port.dataset.wfPort}（数据契约已实时绑定当前工作区）`;
+        if (bar) bar.textContent = appState.wf.statusMsg;
+      });
+    });
+
+    track.querySelectorAll('[data-wf-toggle]').forEach((sw) => {
+      sw.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const key = sw.dataset.wfToggle;
+        if (key === 'approval') {
+          el('chkApproval').checked = !el('chkApproval').checked;
+          appState.wf.statusMsg = `人工拍板闸门已${el('chkApproval').checked ? '开启' : '关闭'}（与底部护栏参数实时同步）`;
+        } else if (key === 'worktree') {
+          el('chkWorktree').checked = !el('chkWorktree').checked;
+          appState.wf.statusMsg = `Git Worktree 隔离已${el('chkWorktree').checked ? '开启' : '关闭'}（与底部护栏参数实时同步）`;
+        } else if (key === 'writable') {
+          const nextSb = el('selectSandbox').value === 'workspace-write' ? 'read-only' : 'workspace-write';
+          el('selectSandbox').value = nextSb;
+          appState.wf.statusMsg = `Codex 沙箱已切换为 ${nextSb}`;
+        } else if (Object.prototype.hasOwnProperty.call(appState.wf.toggles, key)) {
+          appState.wf.toggles[key] = !appState.wf.toggles[key];
+          appState.wf.statusMsg = '已更新节点执行偏好设置。';
+        }
+        renderWorkflowCanvas();
+      });
+    });
+
+    track.querySelectorAll('[data-wf-run]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = Number(btn.dataset.wfRun);
+        runWfSingleNode(idx);
+      });
+    });
+  }
+
+  function waitMs(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function runWfDemo() {
+    const token = ++appState.wf.demoToken;
+    appState.wf.demoRunning = true;
+    appState.wf.statuses = ['idle', 'idle', 'idle'];
+    appState.wf.statusMsg = '正在执行三节点链路演练：Gemini 架构规划 → Codex 沙箱施工 → Pre-CI 审查...';
+    el('btnWfRunAll').disabled = true;
+    renderWorkflowCanvas();
+    syncTopbarOrb(null);
+
+    const durations = [1400, 1700, 1400];
+    const labels = ['Gemini 正在并行权衡 3 条架构路线...', 'Codex 正在安全沙箱写入代码与捕获 Diff...', 'Pre-CI 正在扫描高危路径并生成 10 秒汇报...'];
+
+    for (let i = 0; i < 3; i += 1) {
+      if (token !== appState.wf.demoToken) return;
+      appState.wf.statuses[i] = 'running';
+      appState.wf.selected = i;
+      appState.wf.statusMsg = labels[i];
+      renderWorkflowCanvas();
+      syncTopbarOrb(null);
+      await waitMs(durations[i]);
+      if (token !== appState.wf.demoToken) return;
+
+      const failed = appState.wf.failLast && i === 2;
+      appState.wf.statuses[i] = failed ? 'error' : 'completed';
+      renderWorkflowCanvas();
+      if (failed) {
+        appState.wf.demoRunning = false;
+        appState.wf.statusMsg = '演练在 Pre-CI 终局门禁处触发 [BLOCKING] 拦截，可点击节点「重试节点」或取消模拟拦截。';
+        el('btnWfRunAll').disabled = false;
+        renderWorkflowCanvas();
+        syncTopbarOrb(appState.currentRun);
+        return;
+      }
+    }
+
+    appState.wf.demoRunning = false;
+    appState.wf.statusMsg = '演练完成：三节点全链路 PASS！在底部输入框键入需求即可一键调起真实本机 CLI。';
+    el('btnWfRunAll').disabled = false;
+    renderWorkflowCanvas();
+    syncTopbarOrb(appState.currentRun);
+  }
+
+  async function runWfSingleNode(idx) {
+    const prompt = el('inputPrompt').value.trim();
+    const modeMap = ['plan-only', 'codex-exec', 'codex-review'];
+    if (prompt || idx === 2) {
+      setModeValue(modeMap[idx]);
+      if (!prompt && idx === 2) {
+        el('inputPrompt').value = '对当前工作区未提交变更执行 Pre-CI 代码审查门禁，重点检查高危路径与边界问题。';
+        autoGrowTextarea(el('inputPrompt'));
+      }
+      switchStageView('chat');
+      await startRun();
+      return;
+    }
+
+    // Dry-run single node preview when prompt is empty
+    const token = ++appState.wf.demoToken;
+    appState.wf.demoRunning = true;
+    appState.wf.selected = idx;
+    appState.wf.statuses[idx] = 'running';
+    appState.wf.statusMsg = `正在预演节点 0${idx + 1}（在底部输入需求即可直连真实本机 CLI）...`;
+    renderWorkflowCanvas();
+    syncTopbarOrb(null);
+    await waitMs(1300);
+    if (token !== appState.wf.demoToken) return;
+    const failed = appState.wf.failLast && idx === 2;
+    appState.wf.statuses[idx] = failed ? 'error' : 'completed';
+    appState.wf.demoRunning = false;
+    appState.wf.statusMsg = failed
+      ? '节点 03 触发模拟拦截。请修改配置后点击「重试节点」。'
+      : `节点 0${idx + 1} 预演通过！在下方输入框输入任务后点击即可直接调度真实 CLI。`;
+    renderWorkflowCanvas();
+    syncTopbarOrb(appState.currentRun);
+  }
+
+  function resetWfDemo() {
+    appState.wf.demoToken += 1;
+    appState.wf.demoRunning = false;
+    appState.wf.statuses = ['idle', 'idle', 'idle'];
+    appState.wf.statusMsg = '节点已重置为就绪态。';
+    el('btnWfRunAll').disabled = false;
+    renderWorkflowCanvas();
+    syncTopbarOrb(appState.currentRun);
   }
 
   async function inspectCurrentWorkspace() {
@@ -1989,6 +2986,7 @@
     if (exceptId !== 'guardrailsPopover') {
       el('btnGuardrailsPopover').setAttribute('aria-expanded', 'false');
     }
+    if (!exceptId) closePickers();
   }
 
   function closeMobileDrawers() {
@@ -2006,6 +3004,36 @@
 
   function bindEvents() {
     initFluidTrack(el('inspectorTabs'));
+    initFluidTrack(el('stageViewTabs'));
+
+    // Topbar View Switcher (对话流 / 节点画布) & Pipeline pills
+    el('stageViewTabs')?.querySelectorAll('.stage-view-tab').forEach((btn) => {
+      btn.addEventListener('click', () => switchStageView(btn.dataset.stageView));
+    });
+    el('topbarPipeline')?.querySelectorAll('[data-wf-node]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        appState.wf.selected = Number(btn.dataset.wfNode);
+        switchStageView('workflow');
+      });
+    });
+
+    // Workflow Canvas Controls & Guardrails Sync
+    el('btnWfRunAll')?.addEventListener('click', runWfDemo);
+    el('btnWfReset')?.addEventListener('click', resetWfDemo);
+    el('chkWfFailLast')?.addEventListener('change', (e) => {
+      appState.wf.failLast = e.target.checked;
+    });
+    ['chkApproval', 'chkWorktree', 'selectSandbox', 'selectCodexEffort', 'selectCodexReviewModel', 'selectMaxRounds'].forEach((id) => {
+      el(id)?.addEventListener('change', () => {
+        renderCliCommandCards();
+        if (appState.stageView === 'workflow') renderWorkflowCanvas();
+      });
+    });
+
+    // Custom Obsidian Picker Triggers
+    el('btnModePicker')?.addEventListener('click', (e) => { e.stopPropagation(); openPicker('mode'); });
+    el('btnGeminiPicker')?.addEventListener('click', (e) => { e.stopPropagation(); openPicker('gemini'); });
+    el('btnCodexPicker')?.addEventListener('click', (e) => { e.stopPropagation(); openPicker('codex'); });
 
     // Sidebar collapse & mobile toggle
     el('btnCollapseSidebar').addEventListener('click', () => {
@@ -2021,6 +3049,12 @@
       if (window.innerWidth > 820 && el('sidebar').classList.contains('is-mobile-open')) {
         closeMobileDrawers();
       }
+      document.querySelectorAll('.branch-deck-wrap').forEach((wrap) => {
+        const rid = wrap.dataset.branchRun;
+        const expanded = appState.currentRun?.status === 'running' ? true : Boolean(appState.branchDeckOpen.get(rid));
+        const selectedId = appState.branchSelected.get(rid) || wrap.dataset.branchSelected || 'contract-gate';
+        applyBranchDeckLayout(wrap, expanded, selectedId);
+      });
     });
 
     el('btnMobileSidebar').addEventListener('click', () => {
@@ -2031,6 +3065,7 @@
     el('drawerBackdrop').addEventListener('click', closeMobileDrawers);
     el('btnNewChat').addEventListener('click', () => {
       closeMobileDrawers();
+      switchStageView('chat');
       resetToNewChat();
       el('inputPrompt').focus();
     });
@@ -2043,7 +3078,7 @@
     // Starter copy buttons inside Ink-Orbit Bento
     document.querySelectorAll('[data-starter-mode]').forEach((card) => {
       card.addEventListener('click', () => {
-        el('selectMode').value = card.dataset.starterMode;
+        setModeValue(card.dataset.starterMode);
         const ta = el('inputPrompt');
         ta.value = card.dataset.starterPrompt;
         autoGrowTextarea(ta);
@@ -2211,9 +3246,12 @@
       paletteBlurTimer = setTimeout(() => { paletteBlurTimer = null; closePromptPalette(); }, 150);
     });
 
-    el('btnStartRun').addEventListener('click', startRun);
+    el('btnStartRun').addEventListener('click', () => {
+      if (appState.stageView === 'workflow') switchStageView('chat');
+      startRun();
+    });
     el('btnQuickPlan').addEventListener('click', () => {
-      el('selectMode').value = 'plan-only';
+      setModeValue('plan-only');
       showToast('已切换为「Gemini 独立规划」模式');
       el('inputPrompt').focus();
     });
@@ -2286,6 +3324,7 @@
       if (e.key === 'Escape') {
         toggleTweaks(false);
         closeAllPopovers();
+        closePickers();
         closePromptPalette();
         closeMobileDrawers();
       } else if (
@@ -2311,6 +3350,22 @@
           if (btnId === 'btnGuardrailsPopover') btn.setAttribute('aria-expanded', 'false');
         }
       });
+
+      if (appState.activePicker) {
+        const pickerMap = {
+          mode: ['menuModePicker', 'btnModePicker'],
+          gemini: ['menuGeminiPicker', 'btnGeminiPicker'],
+          codex: ['menuCodexPicker', 'btnCodexPicker'],
+        };
+        const pair = pickerMap[appState.activePicker];
+        if (pair) {
+          const menu = el(pair[0]);
+          const btn = el(pair[1]);
+          if (menu && btn && !menu.contains(e.target) && !btn.contains(e.target)) {
+            closePickers();
+          }
+        }
+      }
     });
   }
 
@@ -2321,6 +3376,8 @@
   waveEngine = initWaveEngine();
   inkDiagrams = initInkOrbitDiagrams();
   if (window.ConduitMetalFx) metalEngine = window.ConduitMetalFx.init();
+  if (window.ConduitOrbs) window.ConduitOrbs.mountAll(document);
+  setModeValue('full-pipeline');
   initGlobalEvents();
   loadHealth();
   loadModels(false);

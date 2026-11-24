@@ -125,26 +125,35 @@
               <line x1="2" y1="12" x2="14" y2="12" stroke="currentColor" stroke-width="1.35" />
             </svg>
           </button>
+          <span class="topbar-orb-wrap" id="topbarOrbWrap" title="当前协同引擎实时状态">
+            <svg class="thinking-orb topbar-orb" id="topbarOrb" width="22" height="22" viewBox="0 0 22 22" data-orb-state="base" data-orb-variant="default" data-orb-size="22" aria-hidden="true"></svg>
+          </span>
           <div class="topbar-title-wrap">
             <span class="topbar-title" id="topbarTitle">新协同会话</span>
             <span class="topbar-meta mono" id="topbarMeta">GEMINI 4 NEON × CODEX CLI</span>
           </div>
         </div>
 
-        <!-- Inline Compact 5-Stage Pipeline Strip -->
+        <!-- Inline Compact 5-Stage Pipeline Strip (click to inspect in Workflow Canvas) -->
         <div class="topbar-pipeline" id="topbarPipeline" aria-label="管线阶段">
-          <span class="pipe-step" data-stage="plan" id="pstep-plan">01 规划</span>
+          <button type="button" class="pipe-step" data-stage="plan" data-wf-node="0" id="pstep-plan">01 规划</button>
           <span class="pipe-arrow" aria-hidden="true"></span>
-          <span class="pipe-step" data-stage="gate" id="pstep-gate">02 拍板</span>
+          <button type="button" class="pipe-step" data-stage="gate" data-wf-node="0" id="pstep-gate">02 拍板</button>
           <span class="pipe-arrow" aria-hidden="true"></span>
-          <span class="pipe-step" data-stage="exec" id="pstep-exec">03 施工</span>
+          <button type="button" class="pipe-step" data-stage="exec" data-wf-node="1" id="pstep-exec">03 施工</button>
           <span class="pipe-arrow" aria-hidden="true"></span>
-          <span class="pipe-step" data-stage="review" id="pstep-review">04 审查</span>
+          <button type="button" class="pipe-step" data-stage="review" data-wf-node="2" id="pstep-review">04 审查</button>
           <span class="pipe-arrow" aria-hidden="true"></span>
-          <span class="pipe-step" data-stage="summary" id="pstep-summary">05 汇报</span>
+          <button type="button" class="pipe-step" data-stage="summary" data-wf-node="2" id="pstep-summary">05 汇报</button>
         </div>
 
         <div class="topbar-right">
+          <div class="fluid-seg-track stage-view-tabs" id="stageViewTabs" role="tablist" aria-label="工作区视图切换">
+            <span class="fluid-hover-pill" aria-hidden="true"></span>
+            <span class="fluid-active-pill" aria-hidden="true"></span>
+            <button type="button" class="stage-view-tab active" role="tab" aria-selected="true" data-stage-view="chat">对话流</button>
+            <button type="button" class="stage-view-tab" role="tab" aria-selected="false" data-stage-view="workflow">节点画布</button>
+          </div>
           <button type="button" class="inspector-toggle-btn" id="btnToggleInspector" aria-expanded="false">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <rect x="1.5" y="2" width="13" height="12" stroke="currentColor" stroke-width="1.25" />
@@ -239,19 +248,54 @@
         </button>
       </div>
 
-      <!-- Bottom Pinned Codex-Style Rich Prompt Composer (21st.dev Rich Prompt Input #46359) -->
+      <!-- Interactive AI Agent Workflow Canvas (adapted from interactive-ai-agent-workflow-node-card.tsx + thinking-orbs.tsx) -->
+      <section class="workflow-stage hidden" id="workflowStage" aria-label="双模型 Agent 节点编排画布">
+        <div class="wf-inner">
+          <header class="wf-header">
+            <div class="wf-head-copy">
+              <span class="wf-kicker mono">INTERACTIVE AGENT WORKFLOW · LIVE TOPOLOGY</span>
+              <h2 class="wf-title">Gemini × Codex 三节点编排画布</h2>
+              <p class="wf-sub">
+                每个节点与底部真实参数、护栏开关及当前运行态实时同步。可直接点击节点单步派发，或开启演练预览观察流动数据线与异常拦截态。
+              </p>
+            </div>
+            <div class="wf-toolbar">
+              <button type="button" class="btn-primary-sm wf-btn" id="btnWfRunAll">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5Z" /></svg>
+                <span>运行链路演练</span>
+              </button>
+              <button type="button" class="btn-secondary-sm wf-btn" id="btnWfReset">重置节点</button>
+              <label class="check-item wf-fail-check">
+                <input type="checkbox" id="chkWfFailLast" />
+                <span>模拟终局拦截</span>
+              </label>
+            </div>
+          </header>
+
+          <div class="wf-canvas-frame" role="region" aria-label="可横向滚动的 Agent 节点画布" tabindex="0">
+            <div class="wf-canvas-track" id="wfCanvasTrack"></div>
+          </div>
+
+          <div class="wf-status-bar mono-xs" id="wfStatusBar" role="status" aria-live="polite">
+            就绪：点击任意节点上的「单步执行」直接调起真实本机 CLI，或点击上方「运行链路演练」预览三节点协同动效。
+          </div>
+        </div>
+      </section>
+
+      <!-- Bottom Pinned Codex-Style Continuous-Curvature Composer -->
       <div class="composer-dock">
-        <div class="composer-shell instrument-frame" id="composerShell">
+        <div class="composer-shell" id="composerShell">
           <div class="border-beam" aria-hidden="true"></div>
-          <span class="crosshair tl" aria-hidden="true">+</span>
-          <span class="crosshair tr" aria-hidden="true">+</span>
-          <span class="crosshair bl" aria-hidden="true">+</span>
-          <span class="crosshair br" aria-hidden="true">+</span>
 
           <!-- Floating / Slash & @ File Mention Palette -->
           <div class="prompt-palette hidden" id="promptPalette" role="listbox" aria-label="快捷指令与文件引用菜单"></div>
 
-          <!-- Resume Session Context Chip (only when resuming a Codex thread) -->
+          <!-- Custom Obsidian Dropdown Menus (Replaces native OS <select> popups!) -->
+          <div class="custom-picker-menu hidden" id="menuModePicker" role="listbox" aria-label="选择协同模式"></div>
+          <div class="custom-picker-menu custom-picker-tall hidden" id="menuGeminiPicker" role="listbox" aria-label="选择 Gemini 模型"></div>
+          <div class="custom-picker-menu hidden" id="menuCodexPicker" role="listbox" aria-label="选择 Codex 模型"></div>
+
+          <!-- Resume Session Context Chip -->
           <div class="composer-context-bar hidden" id="resumeIndicator">
             <span class="mono-xs">续跑 Codex 会话（仅直派模式生效）：<strong id="resumeThreadLabel"></strong></span>
             <button type="button" class="link-btn" id="btnClearResume">清除</button>
@@ -264,28 +308,45 @@
             placeholder="输入需求，或输入 / 切换模式、@ 引用工作区文件...（Enter 换行，Ctrl+Enter 发送）"
           ></textarea>
 
-          <!-- Single-Row Codex-Style Inline Toolbar -->
+          <!-- Single-Row Codex-Style Inline Toolbar (Zero native OS selects) -->
           <div class="composer-bar">
             <div class="composer-bar-left">
-              <!-- Mode Pill -->
-              <select id="selectMode" class="pill-select mono" aria-label="协同模式" title="切换协同模式">
-                <option value="full-pipeline" selected>全链路协同</option>
-                <option value="plan-only">独立规划</option>
-                <option value="codex-exec">Codex 直派</option>
-                <option value="codex-review">审查门禁</option>
-                <option value="copy-polish">文案顾问</option>
-              </select>
+              <!-- Hidden synced inputs/selects kept only for clean state API compatibility -->
+              <input type="hidden" id="selectMode" value="full-pipeline" />
+              <input type="hidden" id="selectGeminiModel" value="gemini-4-neon-high" />
+              <input type="hidden" id="selectCodexModel" value="" />
 
-              <!-- Gemini Model Pill -->
-              <select id="selectGeminiModel" class="pill-select mono" aria-label="Gemini 模型" title="Gemini 主控模型 (agy)"></select>
+              <!-- Custom Mode Picker Pill -->
+              <button type="button" class="picker-pill" id="btnModePicker" aria-haspopup="listbox" aria-expanded="false">
+                <span class="picker-dot"></span>
+                <span class="picker-text" id="labelModePicker">全链路</span>
+                <svg class="picker-chev" width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
 
-              <!-- Codex Model Pill -->
-              <select id="selectCodexModel" class="pill-select mono" aria-label="Codex 施工模型" title="Codex 施工模型"></select>
+              <!-- Custom Gemini Model Picker Pill -->
+              <button type="button" class="picker-pill" id="btnGeminiPicker" aria-haspopup="listbox" aria-expanded="false">
+                <span class="picker-glyph mono">G</span>
+                <span class="picker-text mono" id="labelGeminiPicker">Neon · High</span>
+                <svg class="picker-chev" width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+
+              <!-- Custom Codex Model Picker Pill -->
+              <button type="button" class="picker-pill" id="btnCodexPicker" aria-haspopup="listbox" aria-expanded="false">
+                <span class="picker-glyph mono">C</span>
+                <span class="picker-text mono" id="labelCodexPicker">Codex · 默认</span>
+                <svg class="picker-chev" width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
 
               <button type="button" class="pill-action-btn mono" id="btnTriggerSlash" title="输入 / 快捷切模式">/</button>
               <button type="button" class="pill-action-btn mono" id="btnTriggerMention" title="输入 @ 引用当前目录文件">@</button>
 
-              <!-- Guardrails Popover Button (tucks advanced settings cleanly out of the main canvas) -->
+              <!-- Guardrails Popover Button -->
               <button type="button" class="pill-action-btn" id="btnGuardrailsPopover" aria-expanded="false" aria-controls="guardrailsPopover" title="配置沙箱、审查模型、推理深度与 Worktree">
                 <span class="mono-xs">护栏</span>
                 <span class="guardrail-dot" id="guardrailSummaryDot"></span>
@@ -293,10 +354,9 @@
             </div>
 
             <div class="composer-bar-right">
-              <span class="mono-xs shortcut-hint">Ctrl+Enter</span>
               <button type="button" class="btn-stop-icon hidden" id="btnCancelRun" title="中止当前进程">
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-                  <rect x="2" y="2" width="8" height="8" />
+                  <rect x="2" y="2" width="8" height="8" rx="1.5" />
                 </svg>
                 <span>停止</span>
               </button>
@@ -576,6 +636,7 @@
   <div class="toast-rack" id="toastRack" role="status" aria-live="polite"></div>
 
   <script src="/metal-fx.js" defer></script>
+  <script src="/thinking-orbs.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>
