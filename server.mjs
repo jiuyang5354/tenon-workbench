@@ -8,6 +8,13 @@ import {
   listAgyModels,
   CODEX_MODEL_PRESETS,
 } from './lib/cli-detect.mjs';
+import {
+  ProviderStore,
+  PROVIDER_PRESETS,
+  detectLocalAgents,
+  testProvider,
+  runProvider,
+} from './lib/providers.mjs';
 import { inspectWorkspace, getWorkspaceDiff } from './lib/workspace.mjs';
 import { RunStore } from './lib/store.mjs';
 import { Orchestrator, ValidationError } from './lib/orchestrator.mjs';
@@ -216,9 +223,12 @@ async function serveStatic(res, reqPath) {
 }
 
 export async function createWorkbenchServer(options = {}) {
-  const store = new RunStore(options.dataDir || DATA_DIR);
+  const dataDir = options.dataDir || DATA_DIR;
+  const store = new RunStore(dataDir);
   await store.init();
-  const orchestrator = new Orchestrator(store);
+  const providerStore = new ProviderStore(dataDir);
+  await providerStore.init();
+  const orchestrator = new Orchestrator(store, { providerStore });
 
   const server = http.createServer(async (req, res) => {
     const method = req.method || 'GET';
@@ -252,7 +262,92 @@ export async function createWorkbenchServer(options = {}) {
         return sendJson(res, 200, {
           agy,
           codex: CODEX_MODEL_PRESETS,
+          providers: providerStore.listPublic().filter((p) => p.enabled),
         });
+      }
+
+      if (pathname === '/api/providers' && method === 'GET') {
+        const force = url.searchParams.get('refresh') === '1';
+        const localAgents = await detectLocalAgents(force);
+        return sendJson(res, 200, {
+          providers: providerStore.listPublic(),
+          localAgents,
+          presets: PROVIDER_PRESETS,
+        });
+      }
+
+      if (pathname === '/api/providers' && method === 'POST') {
+        const body = await readJsonBody(req);
+        try {
+          const rec = await providerStore.upsert(body);
+          return sendJson(res, 200, {
+            provider: providerStore.toPublic(rec),
+            providers: providerStore.listPublic(),
+          });
+        } catch (err) {
+          throw new ValidationError(err.message);
+        }
+      }
+
+      if (pathname === '/api/providers/run' && method === 'POST') {
+        const body = await readJsonBody(req);
+        const provider = providerStore.get(String(body.providerId || '').trim());
+        if (!provider) return sendJson(res, 404, { error: '找不到指定的 Agent / API 接入配置' });
+        if (!provider.enabled) return sendJson(res, 400, { error: `接入「${provider.name}」当前未启用` });
+        const prompt = String(body.prompt || '').trim();
+        if (!prompt) throw new ValidationError('请输入要执行的任务需求');
+        const cwd = body.cwd ? path.resolve(String(body.cwd)) : __dirname;
+        const model = String(body.model || provider.defaultModel || '').trim();
+        const result = await runProvider(provider, {
+          prompt,
+          systemPrompt: String(body.systemPrompt || '').trim(),
+          model,
+          cwd,
+          timeoutMs: Math.min(240_000, Math.max(10_000, Number(body.timeoutMs) || 120_000)),
+        });
+        return sendJson(res, result.ok ? 200 : 502, {
+          ...result,
+          providerId: provider.id,
+          providerName: provider.name,
+          protocol: provider.protocol,
+          model,
+        });
+      }
+
+      const provMatch = pathname.match(/^\/api\/providers\/([^/]+)(?:\/(test))?$/);
+      if (provMatch) {
+        const provId = provMatch[1];
+        const sub = provMatch[2] || '';
+        const provider = providerStore.get(provId);
+        if (!provider) return sendJson(res, 404, { error: '找不到该 Agent / API 接入配置' });
+
+        if (!sub && method === 'DELETE') {
+          await providerStore.remove(provId);
+          return sendJson(res, 200, {
+            ok: true,
+            id: provId,
+            providers: providerStore.listPublic(),
+          });
+        }
+
+        if (sub === 'test' && method === 'POST') {
+          const result = await testProvider(provider);
+          const updated = await providerStore.updateTestStatus(
+            provId,
+            {
+              ok: result.ok,
+              testedAt: result.testedAt,
+              latencyMs: result.latencyMs,
+              detail: result.detail,
+            },
+            result.discoveredModels || []
+          );
+          return sendJson(res, 200, {
+            result,
+            provider: providerStore.toPublic(updated),
+            providers: providerStore.listPublic(),
+          });
+        }
       }
 
       if (pathname === '/api/workspace/inspect' && method === 'GET') {
@@ -427,7 +522,7 @@ export async function createWorkbenchServer(options = {}) {
     }
   });
 
-  return { server, store, orchestrator };
+  return { server, store, orchestrator, providerStore };
 }
 
 // Start standalone when run directly

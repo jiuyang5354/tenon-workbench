@@ -256,6 +256,7 @@
             <div class="ic-add-group" role="group" aria-label="添加 Agent 节点与节点组">
               <button type="button" class="ic-chip-btn" data-ic-add="gemini-plan" title="添加 Gemini 规划节点">+ Gemini</button>
               <button type="button" class="ic-chip-btn" data-ic-add="codex-exec" title="添加并行 Codex 沙箱工位">+ Codex</button>
+              <button type="button" class="ic-chip-btn" data-ic-add="custom-agent" title="添加已接入的外部本地 Agent 或 API 节点（Claude Code / Ollama / DeepSeek 等）">+ 外部 Agent</button>
               <button type="button" class="ic-chip-btn" data-ic-add="cluster-merge" title="添加多路集群聚合合并器">+ 合并器</button>
               <button type="button" class="ic-chip-btn" data-ic-add="codex-review" title="添加 Pre-CI 代码审查门禁">+ Pre-CI</button>
               <button type="button" class="ic-chip-btn is-group-add" id="btnWfAddGroup" title="创建 Blender 风格节点组容器 (Ctrl+G)">+ 节点组</button>
@@ -346,6 +347,10 @@
             </div>
             <div class="settings-nav-list" id="settingsNavList" role="tablist" aria-orientation="vertical">
               <button type="button" class="settings-nav-item active" role="tab" aria-selected="true" data-settings-sec="appearance">外观与画布清晰度</button>
+              <button type="button" class="settings-nav-item" role="tab" aria-selected="false" data-settings-sec="providers">
+                <span>Agent 与 API 接入</span>
+                <span class="c-tab-count mono-xs" id="settingsProviderCount">0</span>
+              </button>
               <button type="button" class="settings-nav-item" role="tab" aria-selected="false" data-settings-sec="telemetry">协同遥测与指标</button>
               <button type="button" class="settings-nav-item" role="tab" aria-selected="false" data-settings-sec="instructions">偏好指令</button>
               <button type="button" class="settings-nav-item" role="tab" aria-selected="false" data-settings-sec="memory">
@@ -452,6 +457,21 @@
                   </div>
                 </div>
               </div>
+            </div>
+
+            <!-- Section 1.2: Multi-Agent & API Provider Hub -->
+            <div class="settings-pane hidden" data-settings-pane="providers">
+              <header class="settings-pane-head">
+                <div>
+                  <span class="mono-xs settings-kicker">MULTI-AGENT &amp; API HUB</span>
+                  <h2>Agent 与 API 接入</h2>
+                </div>
+                <div class="settings-head-actions">
+                  <button type="button" class="btn-secondary-sm" id="btnScanProviders">重新扫描本机</button>
+                  <button type="button" class="btn-primary-sm" id="btnAddProvider">+ 新增接入</button>
+                </div>
+              </header>
+              <div id="settingsProvidersMount"></div>
             </div>
 
             <!-- Section 1.5: Telemetry & Metrics Dashboard -->

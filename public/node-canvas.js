@@ -195,6 +195,29 @@
       ],
       errorMessage: '视频渲染节点编码中止，请重试。',
     },
+    'custom-agent': {
+      kind: 'custom-agent',
+      roleCode: 'EXT AGENT',
+      provider: 'external',
+      title: '外部 Agent / API 工位',
+      subtitle: 'Claude Code / Ollama / DeepSeek / 自定义 API',
+      mode: 'custom-agent',
+      orbIdle: ['reasoning', 'default'],
+      orbRun: ['working', 'gyro'],
+      inLabel: '上游输入',
+      outLabel: 'Agent 产物',
+      inType: 'prompt',
+      outType: 'spec',
+      showIn: true,
+      showOut: true,
+      defaultPrompt: '基于当前工作区上下文，给出 3 条可落地的架构优化或实现建议。',
+      stepTemplates: [
+        { verb: '连接外部 Agent / API 适配器', detail: '按配置协议初始化本机 CLI 或流式 HTTP 连接' },
+        { verb: '实时流式推理与思考链捕获', detail: '实时接收正文输出与 reasoning / thinking 片段' },
+        { verb: '汇总结果并写入节点交付区', detail: '输出完整 Markdown 结论与耗时统计' },
+      ],
+      errorMessage: '外部 Agent 执行失败，请在「设置 → Agent 与 API 接入」中检查连通性与凭据。',
+    },
   };
 
   function makeStepsForNode(kind, customDetail = '') {
@@ -637,6 +660,8 @@
       getContext,
       onToggleSync,
       onDispatchRealCli,
+      onOpenProviderHub,
+      onRunProviderNode,
       onPresetChange,
       onStatusChange,
       onToast,
@@ -701,15 +726,35 @@
       };
     }
 
+    function parseNodeProviderRef(ref) {
+      const s = String(ref || '').trim();
+      if (!s.startsWith('provider:')) return null;
+      const rest = s.slice('provider:'.length);
+      const idx = rest.indexOf(':');
+      if (idx < 0) return { providerId: rest, model: '' };
+      return { providerId: rest.slice(0, idx), model: rest.slice(idx + 1) };
+    }
+
     function formatNodeModelLabel(node) {
       const ctx = getContext ? getContext() : {};
       const tpl = NODE_TEMPLATES[node.kind] || NODE_TEMPLATES['codex-exec'];
       if (node.model) {
+        const ext = parseNodeProviderRef(node.model);
+        if (ext) {
+          const prov = (ctx.providers || []).find((p) => p.id === ext.providerId);
+          const pname = prov ? prov.name.replace(/\s*\([^)]*\)\s*/g, '').trim() : '外部 Agent';
+          const out = ext.model ? `${pname} · ${ext.model}` : pname;
+          return out.length > 22 ? `${out.slice(0, 21)}…` : out;
+        }
         if (ctx.formatGeminiShort && /^gemini-|^orchestrator-/i.test(node.model)) {
           return ctx.formatGeminiShort(node.model);
         }
         if (ctx.formatCodexShort) return ctx.formatCodexShort(node.model);
         return node.model;
+      }
+      if (tpl.provider === 'external') {
+        const first = (ctx.providers || []).find((p) => p.enabled);
+        return first ? `${first.name.replace(/\s*\([^)]*\)\s*/g, '').trim()}` : '选择外部 Agent';
       }
       if (tpl.provider === 'gemini') return ctx.geminiModelShort || 'Neon · High';
       if (tpl.provider === 'both') return '3-Way 自动';
@@ -1662,14 +1707,42 @@
 
       const showGemini = tpl.provider === 'gemini' || tpl.provider === 'both';
       const showCodex = tpl.provider === 'codex' || tpl.provider === 'both';
+      const enabledProviders = (ctx.providers || []).filter((p) => p.enabled);
 
       const buildOptions = (q = '') => {
         const needle = q.trim().toLowerCase();
         const rows = [];
         const match = (id, label) => !needle || String(id).toLowerCase().includes(needle) || String(label).toLowerCase().includes(needle);
 
+        // External Local CLI Agents & HTTP API Providers (available on EVERY node!)
+        const extItems = [];
+        enabledProviders.forEach((p) => {
+          const models = Array.isArray(p.models) && p.models.length > 0 ? p.models : [p.defaultModel || ''];
+          models.slice(0, 6).forEach((mId) => {
+            const ref = `provider:${p.id}:${mId}`;
+            if (match(`${p.name} ${mId} ${p.protocol}`, `${p.name} ${mId}`)) {
+              extItems.push({
+                type: 'item',
+                id: ref,
+                label: p.name,
+                sub: mId || p.command || p.baseUrl || p.protocol,
+                badge: p.kind === 'cli' ? 'CLI' : 'API',
+                selected: node.model === ref,
+              });
+            }
+          });
+        });
+        if (extItems.length > 0) {
+          rows.push({ type: 'group', label: '外部 AGENT 与 API（实时直连）' });
+          rows.push(...extItems);
+        }
+
         // Default / inherit option
-        const defLabel = tpl.provider === 'both' ? '3-Way 本地自动合并（默认）' : '跟随全局工作台默认模型';
+        const defLabel = tpl.provider === 'both'
+          ? '3-Way 本地自动合并（默认）'
+          : tpl.provider === 'external'
+            ? '自动使用首个已启用的外部 Agent'
+            : '跟随全局工作台默认模型';
         if (match('', defLabel)) {
           rows.push({ type: 'item', id: '', label: defLabel, sub: 'AUTO', badge: '默认', selected: !node.model });
         }
@@ -1755,7 +1828,7 @@
 
       contextMenuEl.innerHTML = `
         <div class="ic-ctx-search-wrap">
-          <input type="text" class="ic-ctx-search" id="icCtxSearch" placeholder="搜索节点专属模型..." autocomplete="off" />
+          <input type="text" class="ic-ctx-search" id="icCtxSearch" placeholder="搜索本机模型或外部 Agent / API..." autocomplete="off" />
         </div>
         <div class="ic-ctx-body"></div>
         ${
@@ -1765,11 +1838,23 @@
                 <button type="button" class="btn-primary-sm wf-btn" id="btnApplyNodeCustomModel">应用</button>
               </div>`
             : ''
-        }`;
+        }
+        <div class="picker-manage-foot">
+          <button type="button" class="picker-manage-btn" id="btnCtxManageProviders">
+            <span>+ 管理外部 Agent 与 API 接入</span>
+            <span class="mono-xs">${enabledProviders.length} 已启用 →</span>
+          </button>
+        </div>`;
 
       renderList('');
       contextMenuEl.classList.remove('hidden');
-      placeMenuEdgeAware(clientX, clientY, 292);
+      placeMenuEdgeAware(clientX, clientY, 296);
+
+      contextMenuEl.querySelector('#btnCtxManageProviders')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeContextMenu();
+        if (onOpenProviderHub) onOpenProviderHub();
+      });
 
       const inp = contextMenuEl.querySelector('#icCtxSearch');
       if (inp) {
@@ -1877,7 +1962,8 @@
             { type: 'group', label: '新建 Agent 节点（落点在鼠标处）' },
             { id: 'add:gemini-plan', label: '+ Gemini · 架构规划师', shortcut: 'PLAN' },
             { id: 'add:codex-exec', label: '+ Codex · 沙箱工位', shortcut: 'WORK' },
-            { id: 'add:cluster-merge', label: '+ 集群聚合合并器 (Merge Hub)', shortcut: 'MERGE', accent: true },
+            { id: 'add:custom-agent', label: '+ 外部 Agent / API 工位', shortcut: 'EXT', accent: true },
+            { id: 'add:cluster-merge', label: '+ 集群聚合合并器 (Merge Hub)', shortcut: 'MERGE' },
             { id: 'add:codex-review', label: '+ Pre-CI 审查门禁', shortcut: 'GATE' },
             { id: 'add:gemini-copy', label: '+ Gemini · 文案与交互顾问', shortcut: 'COPY' },
             { id: 'add:image-gen', label: '+ 图像生成与变体工位', shortcut: 'IMG' },
@@ -2411,11 +2497,14 @@
 
       const id = `n-${kind.split('-')[1] || 'agent'}-${++state.seq}`;
       const num = state.graph.nodes.filter((n) => n.kind === kind).length + 1;
+      const ctx = getContext ? getContext() : {};
+      const firstEnabledProv = kind === 'custom-agent' ? (ctx.providers || []).find((p) => p.enabled) : null;
       const node = hydrateNode({
         id,
         kind,
-        title: `${tpl.title} #${num}`,
-        subtitle: tpl.subtitle,
+        title: kind === 'custom-agent' && firstEnabledProv ? `${firstEnabledProv.name} #${num}` : `${tpl.title} #${num}`,
+        subtitle: kind === 'custom-agent' && firstEnabledProv ? `${firstEnabledProv.protocol} · 实时直连` : tpl.subtitle,
+        model: firstEnabledProv ? `provider:${firstEnabledProv.id}:${firstEnabledProv.defaultModel || ''}` : '',
         x,
         y,
         params:
@@ -2423,11 +2512,13 @@
             ? [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Branching', v: '3 路权衡' }]
             : kind === 'codex-exec'
               ? [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Effort', dynamic: 'nodeEffort' }, { k: 'Worktree', v: `wt/worker-${num}` }]
-              : kind === 'cluster-merge'
-                ? [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Inputs', dynamic: 'inCount' }]
-                : kind === 'codex-review'
-                  ? [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Effort', dynamic: 'nodeEffort' }, { k: 'Max Rounds', dynamic: 'maxRounds' }]
-                  : [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Style', v: '去 AI 解释腔' }],
+              : kind === 'custom-agent'
+                ? [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Mode', v: '真实直连执行' }]
+                : kind === 'cluster-merge'
+                  ? [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Inputs', dynamic: 'inCount' }]
+                  : kind === 'codex-review'
+                    ? [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Effort', dynamic: 'nodeEffort' }, { k: 'Max Rounds', dynamic: 'maxRounds' }]
+                    : [{ k: 'Model', dynamic: 'nodeModel' }, { k: 'Style', v: '去 AI 解释腔' }],
         toggles:
           kind === 'codex-exec'
             ? [{ key: 'worktree', label: 'Worktree 隔离', desc: '独立分支防冲突' }]
@@ -2702,6 +2793,63 @@
       }
       const token = ++state.demoToken;
       const prompt = (node.prompt || commandInputEl?.value || state.lastTaskPrompt || '').trim();
+      const ctx = getContext ? getContext() : {};
+      let extRef = parseNodeProviderRef(node.model);
+      if (!extRef && node.kind === 'custom-agent') {
+        const first = (ctx.providers || []).find((p) => p.enabled);
+        if (first) extRef = { providerId: first.id, model: first.defaultModel || '' };
+      }
+
+      // Real live execution when node is bound to an external local CLI Agent or HTTP API Provider!
+      if (extRef && onRunProviderNode) {
+        state.demoRunning = true;
+        if (!isEditingInDrawer()) state.selectedId = nid;
+        node.status = 'running';
+        node.cotOpen = true;
+        node.steps = [
+          { id: 's-1', verb: '连接外部 Agent / API 引擎', detail: `目标：${formatNodeModelLabel(node)}`, status: 'completed', ms: 60 },
+          { id: 's-2', verb: '实时流式推理执行中...', detail: prompt.slice(0, 80) || '等待响应', status: 'active', ms: 0 },
+          { id: 's-3', verb: '整理交付成果', detail: '等待推理完成后落盘', status: 'pending', ms: 0 },
+        ];
+        setStatus(`正在实时调用外部引擎「${formatNodeModelLabel(node)}」...`);
+        renderAll();
+        if (onStatusChange) onStatusChange();
+
+        try {
+          const result = await onRunProviderNode(extRef.providerId, extRef.model, prompt || '请给出简短自检回复', node);
+          if (token !== state.demoToken) return;
+          node.durationMs = result.durationMs || 0;
+          node.steps[1].status = 'completed';
+          node.steps[1].ms = result.durationMs || 0;
+          node.steps[1].detail = result.reasoning ? result.reasoning.slice(0, 260) : `响应完成 (${((result.durationMs || 0) / 1000).toFixed(1)}s)`;
+          node.steps[2].status = 'completed';
+          node.steps[2].detail = `协议 ${result.protocol || 'custom'} · 模型 ${result.model || 'default'}`;
+          node.status = 'completed';
+          const reasoningSection = result.reasoning
+            ? `\n\n> **思考链摘要**\n> ${result.reasoning.replace(/\n+/g, '\n> ')}\n`
+            : '';
+          node.outputMd = `## ${node.title} · 真实外部执行交付\n\n- **引擎**：${result.providerName || formatNodeModelLabel(node)}（\`${result.model || result.protocol}\`）\n- **耗时**：\`${((result.durationMs || 0) / 1000).toFixed(2)}s\`${reasoningSection}\n\n---\n\n${result.text || '（无正文输出）'}`;
+          state.demoRunning = false;
+          setStatus(`外部引擎「${node.title}」执行完成（${((result.durationMs || 0) / 1000).toFixed(1)}s）。`);
+          renderAll();
+          openResultDrawer('node');
+          if (onStatusChange) onStatusChange();
+          return;
+        } catch (err) {
+          if (token !== state.demoToken) return;
+          node.steps[1].status = 'error';
+          node.steps[1].detail = err.message || '执行失败';
+          node.status = 'error';
+          node.outputMd = `## ${node.title} · 外部引擎调用失败\n\n- **目标引擎**：\`${formatNodeModelLabel(node)}\`\n- **错误详情**：${err.message || '未知错误'}\n\n> 可前往「设置 → Agent 与 API 接入」测试连接或检查 API Key / 本地 CLI。`;
+          state.demoRunning = false;
+          setStatus(`「${node.title}」外部调用失败：${err.message}`);
+          renderAll();
+          openResultDrawer('node');
+          if (onStatusChange) onStatusChange();
+          return;
+        }
+      }
+
       state.demoRunning = true;
       if (!isEditingInDrawer()) state.selectedId = nid;
       node.status = 'running';

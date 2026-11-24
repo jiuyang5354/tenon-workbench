@@ -7,6 +7,7 @@
     'codex-exec': 'Codex 直派',
     'codex-review': '审查门禁',
     'copy-polish': '文案顾问',
+    'custom-agent': '外部 Agent / API',
     'image-gen': '图像生成',
     'video-gen': '视频渲染',
   };
@@ -17,26 +18,29 @@
     'codex-exec': 'Codex直派',
     'codex-review': '审查门禁',
     'copy-polish': '文案顾问',
+    'custom-agent': '外部Agent',
     'image-gen': '图像输出',
     'video-gen': '视频输出',
   };
 
   const MODE_ITEMS = [
-    { id: 'full-pipeline', title: '全链路协同', sub: 'Gemini 规划 → 人工拍板 → Codex 施工 → Pre-CI 审查', badge: '推荐' },
-    { id: 'plan-only', title: '独立规划', sub: '仅 Gemini 只读拆解架构与接口契约', badge: '只读' },
+    { id: 'full-pipeline', title: '全链路协同', sub: '规划引擎拆解 → 人工拍板 → Codex 施工 → Pre-CI 审查', badge: '推荐' },
+    { id: 'plan-only', title: '独立规划', sub: '仅只读拆解架构与接口契约（支持切换外部模型）', badge: '只读' },
     { id: 'codex-exec', title: 'Codex 直派', sub: '跳过规划，安全沙箱直接写代码（支持会话续跑）', badge: '沙箱' },
     { id: 'codex-review', title: 'Pre-CI 审查门禁', sub: '两级分级拦截，高危路径自动升档 xhigh', badge: '门禁' },
-    { id: 'copy-polish', title: '文案与交互顾问', sub: 'Gemini 去 AI 味润色，输出前后对比表', badge: '润色' },
+    { id: 'custom-agent', title: '外部 Agent / API 直连', sub: '直连已接入的 Claude Code / Ollama / DeepSeek / OpenRouter / 自定义 CLI', badge: 'EXT' },
+    { id: 'copy-polish', title: '文案与交互顾问', sub: '去 AI 味润色，输出前后对比表', badge: '润色' },
     { id: 'image-gen', title: '图像输出与变体', sub: '渐进扫描揭示 · 4 组变体对比 · 放大 / 变体 / Lightbox', badge: 'IMG' },
     { id: 'video-gen', title: '视频渲染与播放', sub: '帧渐进揭示 · 悬浮自隐藏播放器 · 帧级拖拽 / 下载', badge: 'VID' },
   ];
 
   const SLASH_COMMANDS = [
-    { key: '/pipeline', mode: 'full-pipeline', detail: '全链路协同（Gemini 规划 → 拍板 → Codex 施工 → 审查）' },
-    { key: '/plan', mode: 'plan-only', detail: '独立规划（仅 Gemini 只读拆解契约）' },
+    { key: '/pipeline', mode: 'full-pipeline', detail: '全链路协同（Gemini/外部规划 → 拍板 → Codex 施工 → 审查）' },
+    { key: '/plan', mode: 'plan-only', detail: '独立规划（只读拆解契约）' },
     { key: '/codex', mode: 'codex-exec', detail: 'Codex 直派（安全沙箱直接写代码）' },
     { key: '/review', mode: 'codex-review', detail: 'Pre-CI 审查门禁（分级拦截 + 自动升 xhigh）' },
-    { key: '/copy', mode: 'copy-polish', detail: 'Gemini 文案与交互顾问' },
+    { key: '/agent', mode: 'custom-agent', detail: '外部 Agent / API 直连（Claude Code / Ollama / DeepSeek / 自定义 CLI）' },
+    { key: '/copy', mode: 'copy-polish', detail: '文案与交互顾问' },
     { key: '/image', mode: 'image-gen', detail: '图像输出（多变体渐进渲染、放大、参考图与 Lightbox）' },
     { key: '/video', mode: 'video-gen', detail: '视频渲染（渐进海报揭示、自定义浮动控制栏播放器）' },
   ];
@@ -56,7 +60,10 @@
 
   const appState = {
     health: null,
-    models: { agy: { models: [] }, codex: [] },
+    models: { agy: { models: [] }, codex: [], providers: [] },
+    providers: [],
+    localAgents: { clis: [], services: [] },
+    providerPresets: [],
     customCodexModels: [],
     assets: null,
     runs: [],
@@ -2119,34 +2126,41 @@
     const catchUpHtml = renderCatchUpCard(run);
     if (catchUpHtml) parts.push(catchUpHtml);
 
-    // 2. Gemini Turn (Plan or Copy Advisor)
+    // 2. Primary Planning / External Agent Turn (Gemini or Configured External Provider)
     const g = run.gemini || {};
-    const showGeminiFirst = ['full-pipeline', 'plan-only', 'copy-polish'].includes(run.mode);
+    const showGeminiFirst = ['full-pipeline', 'plan-only', 'copy-polish', 'custom-agent'].includes(run.mode);
     if (showGeminiFirst) {
       const text = run.mode === 'copy-polish' ? g.copyText : g.planText;
       const isStreamingG = g.status === 'running' && run.activeStage !== 'summary';
-      const titleLabel = run.mode === 'copy-polish' ? 'Gemini · 文案与交互顾问' : 'Gemini · 总指挥与架构师';
+      const hasExtProv = Boolean(run.config?.providerName);
+      const titleLabel = hasExtProv
+        ? `${run.config.providerName} · ${run.mode === 'custom-agent' ? '外部 Agent' : run.mode === 'copy-polish' ? '文案顾问' : '架构规划师'}`
+        : (run.mode === 'copy-polish' ? 'Gemini · 文案与交互顾问' : 'Gemini · 总指挥与架构师');
+      const modelBadgeText = hasExtProv
+        ? (run.config.providerModel || run.config.providerProtocol || 'EXTERNAL')
+        : (run.config?.geminiModel || '');
+      const avatarGlyph = hasExtProv ? (run.config.providerName.trim()[0] || 'A').toUpperCase() : 'G';
       const statusText = isStreamingG ? '正在流式推理...' : (g.status || 'idle').toUpperCase();
       parts.push(`
         <article class="agent-turn ${isStreamingG ? 'is-streaming' : ''}">
           <header class="agent-turn-head">
             <div class="agent-identity">
-              <span class="agent-avatar gemini ${isStreamingG ? 'is-orb' : ''}">${isStreamingG ? '<svg class="thinking-orb" width="18" height="18" viewBox="0 0 18 18" data-orb-family="ai" data-orb-state="ai-solving" data-orb-variant="ai" data-orb-size="18" aria-hidden="true"></svg>' : 'G'}</span>
-              <span class="agent-role-name">${titleLabel}</span>
-              <span class="agent-model-tag">${escapeHtml(run.config?.geminiModel || '')}</span>
+              <span class="agent-avatar gemini ${isStreamingG ? 'is-orb' : ''}">${isStreamingG ? '<svg class="thinking-orb" width="18" height="18" viewBox="0 0 18 18" data-orb-family="ai" data-orb-state="ai-solving" data-orb-variant="ai" data-orb-size="18" aria-hidden="true"></svg>' : escapeHtml(avatarGlyph)}</span>
+              <span class="agent-role-name">${escapeHtml(titleLabel)}</span>
+              <span class="agent-model-tag">${escapeHtml(modelBadgeText)}</span>
             </div>
             <span class="agent-status-pill ${escapeHtml(g.status || '')} ${isStreamingG ? 'is-shimmer' : ''}">
               <span>${statusText}</span>
             </span>
           </header>
-          ${renderBranchDeckHtml(run, isStreamingG)}
+          ${run.mode !== 'custom-agent' ? renderBranchDeckHtml(run, isStreamingG) : ''}
           ${renderToolTraceHtml(run.events, 'gemini', isStreamingG, `${run.id}:gemini`, run)}
-          ${text ? `<div class="markdown-output">${renderMarkdown(text)}</div>` : isStreamingG ? '<div class="mono-xs is-shimmer">正在拆解需求与接口契约...</div>' : ''}
+          ${text ? `<div class="markdown-output">${renderMarkdown(text)}</div>` : isStreamingG ? `<div class="mono-xs is-shimmer">${hasExtProv ? `正在调用 ${escapeHtml(run.config.providerName)} 实时流式推理...` : '正在拆解需求与接口契约...'}</div>` : ''}
           ${g.error && run.activeStage !== 'summary' ? `<div class="error-banner">${escapeHtml(g.error)}</div>` : ''}
           <footer class="agent-turn-foot">
             <span class="mono-xs">${(g.usage?.total_tokens || run.metrics?.geminiTokens || 0).toLocaleString()} TOKENS · ${((g.durationMs || 0) / 1000).toFixed(1)}s</span>
             <div class="turn-foot-actions">
-              ${text ? `<button type="button" class="link-btn" data-copy-slot="gemini-main">复制方案</button>` : ''}
+              ${text ? `<button type="button" class="link-btn" data-copy-slot="gemini-main">${run.mode === 'custom-agent' ? '复制回复' : '复制方案'}</button>` : ''}
             </div>
           </footer>
         </article>`);
@@ -3036,6 +3050,10 @@
       mode = 'video-gen';
       setModeValue('video-gen');
       prompt = rawPrompt.replace(/^\/video\s*/i, '').trim();
+    } else if (/^\/agent(?:\s|$)/i.test(rawPrompt)) {
+      mode = 'custom-agent';
+      setModeValue('custom-agent');
+      prompt = rawPrompt.replace(/^\/agent\s*/i, '').trim();
     }
 
     if (mode === 'image-gen' || mode === 'video-gen') {
@@ -3044,6 +3062,20 @@
       runLocalMediaGeneration(mode, prompt);
       return;
     }
+
+    let selectedPrimaryModel = el('selectGeminiModel').value;
+    if (mode === 'custom-agent' && !String(selectedPrimaryModel || '').startsWith('provider:')) {
+      const firstEnabled = (appState.providers || []).find((p) => p.enabled);
+      if (!firstEnabled) {
+        showToast('请先在「设置 → Agent 与 API 接入」中启用至少一个外部 Agent 或 API');
+        switchStageView('settings', 'providers');
+        return;
+      }
+      selectedPrimaryModel = `provider:${firstEnabled.id}:${firstEnabled.defaultModel || ''}`;
+      setGeminiModelValue(selectedPrimaryModel);
+    }
+
+    const parsedExtRef = parseProviderRefClient(selectedPrimaryModel);
 
     const rawEffort = el('selectCodexEffort').value || 'high';
     const cliEffort = window.ConduitEffortSlider
@@ -3062,7 +3094,9 @@
       mode,
       prompt: `${prompt}${refNotes}${prefNote}`,
       workspaceDir: el('inputWorkspace').value.trim(),
-      geminiModel: el('selectGeminiModel').value,
+      geminiModel: selectedPrimaryModel,
+      providerId: parsedExtRef?.providerId || '',
+      providerModel: parsedExtRef?.model || '',
       codexModel: el('selectCodexModel').value,
       codexReviewModel: el('selectCodexReviewModel').value,
       codexEffort: cliEffort,
@@ -3206,9 +3240,25 @@
   /* =========================================================================
      Custom Obsidian Grouped Pickers (Zero Native OS <select> Dropdowns)
      ========================================================================= */
+  function parseProviderRefClient(ref) {
+    const s = String(ref || '').trim();
+    if (!s.startsWith('provider:')) return null;
+    const rest = s.slice('provider:'.length);
+    const idx = rest.indexOf(':');
+    if (idx < 0) return { providerId: rest, model: '' };
+    return { providerId: rest.slice(0, idx), model: rest.slice(idx + 1) };
+  }
+
   function formatGeminiShort(id) {
     if (!id) return 'Gemini';
     const raw = String(id).trim();
+    const ext = parseProviderRefClient(raw);
+    if (ext) {
+      const prov = (appState.providers || []).find((p) => p.id === ext.providerId);
+      const baseName = prov ? prov.name.replace(/\s*\([^)]*\)\s*/g, '').trim() : '外部 Agent';
+      const label = ext.model ? `${baseName} · ${ext.model}` : baseName;
+      return label.length > 18 ? `${label.slice(0, 17)}…` : label;
+    }
     const effortMap = { xhigh: 'XHigh', high: 'High', medium: 'Med', low: 'Low' };
     const m4 = raw.match(/^gemini-4-([a-z0-9]+)-(xhigh|high|medium|low)$/i);
     if (m4) {
@@ -3246,6 +3296,8 @@
     el('selectGeminiModel').value = val;
     const lbl = el('labelGeminiPicker');
     if (lbl) lbl.textContent = formatGeminiShort(val);
+    const glyph = el('btnGeminiPicker')?.querySelector('.picker-glyph');
+    if (glyph) glyph.textContent = String(val).startsWith('provider:') ? 'A' : 'G';
     renderCliCommandCards();
     if (appState.stageView === 'workflow') renderWorkflowCanvas();
   }
@@ -3346,10 +3398,49 @@
     );
     const groups = groupGeminiModels(filtered);
 
+    const enabledProviders = (appState.providers || []).filter((p) => p.enabled);
+    const providerEntries = [];
+    enabledProviders.forEach((p) => {
+      const mlist = Array.isArray(p.models) && p.models.length > 0 ? p.models : [p.defaultModel || ''];
+      mlist.slice(0, 6).forEach((mId) => {
+        const ref = `provider:${p.id}:${mId}`;
+        const label = mId ? `${p.name} · ${mId}` : p.name;
+        if (!q || label.toLowerCase().includes(q) || String(p.protocol).toLowerCase().includes(q)) {
+          providerEntries.push({
+            ref,
+            title: p.name,
+            sub: mId || p.command || p.baseUrl || p.protocol,
+            badge: p.kind === 'cli' ? 'CLI' : 'API',
+          });
+        }
+      });
+    });
+
+    const extHtml = providerEntries.length
+      ? `<div class="picker-group-label">外部 AGENT 与 API（已启用）</div>` +
+        providerEntries
+          .map((item) => {
+            const sel = item.ref === current;
+            return `
+              <button type="button" class="picker-option ${sel ? 'is-selected' : ''}" role="option" aria-selected="${sel}" data-pick-gemini="${escapeHtml(item.ref)}">
+                <div class="picker-opt-main">
+                  <span class="picker-opt-title">${escapeHtml(item.title)}</span>
+                  <span class="picker-opt-sub mono">${escapeHtml(item.sub)}</span>
+                </div>
+                <div class="picker-opt-right">
+                  <span class="picker-badge">${escapeHtml(item.badge)}</span>
+                  ${sel ? '<span class="picker-check">✓</span>' : ''}
+                </div>
+              </button>`;
+          })
+          .join('')
+      : '';
+
     const listHtml =
-      groups.length === 0
+      !extHtml && groups.length === 0
         ? '<div class="picker-group-label">无匹配模型</div>'
-        : groups
+        : extHtml +
+          groups
             .map(
               (g) =>
                 `<div class="picker-group-label">${g.title}</div>` +
@@ -3376,10 +3467,16 @@
 
     menu.innerHTML = `
       <div class="picker-menu-top">
-        <input type="text" class="picker-search" id="inputGeminiSearch" placeholder="搜索本机 Gemini 模型..." value="${escapeHtml(appState.geminiSearch)}" autocomplete="off" />
+        <input type="text" class="picker-search" id="inputGeminiSearch" placeholder="搜索本机 Gemini 或外部 Agent / API..." value="${escapeHtml(appState.geminiSearch)}" autocomplete="off" />
         <button type="button" class="link-btn" id="btnPickerRefreshGemini">刷新</button>
       </div>
-      <div class="picker-list-body">${listHtml}</div>`;
+      <div class="picker-list-body">${listHtml}</div>
+      <div class="picker-manage-foot">
+        <button type="button" class="picker-manage-btn" id="btnPickerManageProviders">
+          <span>+ 管理外部 Agent 与 API 接入</span>
+          <span class="mono-xs">${enabledProviders.length} 已启用 →</span>
+        </button>
+      </div>`;
 
     const searchInput = el('inputGeminiSearch');
     if (searchInput) {
@@ -3400,8 +3497,14 @@
       refBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         loadModels(true);
+        loadProviders(true);
       });
     }
+
+    el('btnPickerManageProviders')?.addEventListener('click', () => {
+      closePickers();
+      switchStageView('settings', 'providers');
+    });
 
     menu.querySelectorAll('[data-pick-gemini]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -3510,7 +3613,7 @@
 
       const agyModels = data.agy?.models || [];
       const prevAgy = el('selectGeminiModel').value;
-      if (prevAgy && agyModels.some((m) => m.id === prevAgy)) {
+      if (prevAgy && (prevAgy.startsWith('provider:') || agyModels.some((m) => m.id === prevAgy))) {
         setGeminiModelValue(prevAgy);
       } else if (agyModels.some((m) => m.id === 'gemini-4-neon-high')) {
         setGeminiModelValue('gemini-4-neon-high');
@@ -3583,6 +3686,7 @@
           ...(appState.models?.codex || []),
           ...appState.customCodexModels.map((id) => ({ id, label: `${id}（自定义）` })),
         ],
+        providers: appState.providers || [],
         formatGeminiShort,
         formatCodexShort,
         geminiModelShort: formatGeminiShort(el('selectGeminiModel').value || 'gemini-4-neon-high'),
@@ -3593,6 +3697,22 @@
         approval: Boolean(el('chkApproval')?.checked),
         worktree: Boolean(el('chkWorktree')?.checked),
       }),
+      onOpenProviderHub: () => {
+        switchStageView('settings', 'providers');
+      },
+      onRunProviderNode: async (providerId, model, promptText, node) => {
+        const res = await api('/api/providers/run', {
+          method: 'POST',
+          body: JSON.stringify({
+            providerId,
+            model,
+            prompt: promptText,
+            systemPrompt: `你正在 CONDUIT 多 Agent 节点画布中执行节点「${node?.title || '外部 Agent'}」。请用结构化中文直接输出可执行交付结果。`,
+            cwd: el('inputWorkspace')?.value.trim() || '',
+          }),
+        });
+        return res;
+      },
       onPresetChange: (presetName) => {
         const sel = el('selectWfPreset');
         if (sel && presetName) {
@@ -3619,11 +3739,12 @@
           'codex-exec': 'codex-exec',
           'cluster-merge': 'full-pipeline',
           'codex-review': 'codex-review',
+          'custom-agent': 'custom-agent',
           'image-gen': 'image-gen',
           'video-gen': 'video-gen',
         };
         if (node?.model) {
-          if (node.kind === 'gemini-plan' || node.kind === 'gemini-copy' || /^gemini-|^orchestrator-/i.test(node.model)) {
+          if (String(node.model).startsWith('provider:') || node.kind === 'gemini-plan' || node.kind === 'gemini-copy' || /^gemini-|^orchestrator-/i.test(node.model)) {
             setGeminiModelValue(node.model);
           } else {
             setCodexModelValue(node.model);
@@ -3653,8 +3774,102 @@
     });
   }
 
+  async function loadProviders(refresh = false) {
+    try {
+      const data = await api(`/api/providers${refresh ? '?refresh=1' : ''}`);
+      appState.providers = data.providers || [];
+      appState.localAgents = data.localAgents || { clis: [], services: [] };
+      appState.providerPresets = data.presets || [];
+
+      const countBadge = el('settingsProviderCount');
+      if (countBadge) {
+        countBadge.textContent = String(appState.providers.filter((p) => p.enabled).length);
+      }
+
+      // Refresh composer pill label in case a provider name updated
+      if (String(el('selectGeminiModel')?.value || '').startsWith('provider:')) {
+        setGeminiModelValue(el('selectGeminiModel').value);
+      }
+      if (appState.activePicker === 'gemini') renderGeminiPicker();
+      if (appState.stageView === 'settings' && appState.settingsSection === 'providers') {
+        renderSettingsProviders();
+      }
+      if (appState.stageView === 'workflow') renderWorkflowCanvas();
+      if (refresh) showToast('已完成本机 Agent 与本地推理服务探测');
+    } catch (err) {
+      showToast(`加载接入列表失败: ${err.message}`);
+    }
+  }
+
+  function renderSettingsProviders() {
+    workspacePanels?.renderProvidersInto(el('settingsProvidersMount'), {
+      providers: appState.providers,
+      localAgents: appState.localAgents,
+      presets: appState.providerPresets,
+    });
+  }
+
+  async function saveProviderConfig(payload) {
+    try {
+      const data = await api('/api/providers', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      appState.providers = data.providers || appState.providers;
+      renderSettingsProviders();
+      if (appState.activePicker === 'gemini') renderGeminiPicker();
+      if (appState.stageView === 'workflow') renderWorkflowCanvas();
+      showToast(`已保存接入配置：${data.provider?.name || 'Provider'}`);
+      return true;
+    } catch (err) {
+      showToast(`保存失败: ${err.message}`);
+      return false;
+    }
+  }
+
+  async function testProviderById(id) {
+    try {
+      const data = await api(`/api/providers/${encodeURIComponent(id)}/test`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      appState.providers = data.providers || appState.providers;
+      renderSettingsProviders();
+      const r = data.result;
+      showToast(r?.ok ? `连接通过：${r.detail}` : `连接失败：${r?.detail || '未知错误'}`);
+    } catch (err) {
+      showToast(`测试连接失败: ${err.message}`);
+    }
+  }
+
+  async function deleteProviderById(id) {
+    try {
+      const data = await api(`/api/providers/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      appState.providers = data.providers || [];
+      renderSettingsProviders();
+      if (String(el('selectGeminiModel')?.value || '').startsWith(`provider:${id}:`)) {
+        setGeminiModelValue('gemini-4-neon-high');
+      }
+      if (appState.activePicker === 'gemini') renderGeminiPicker();
+      if (appState.stageView === 'workflow') renderWorkflowCanvas();
+      showToast('已删除该外部 Agent / API 接入');
+    } catch (err) {
+      showToast(`删除失败: ${err.message}`);
+    }
+  }
+
+  function useProviderInChat(provider) {
+    if (!provider) return;
+    const ref = `provider:${provider.id}:${provider.defaultModel || ''}`;
+    setModeValue('custom-agent');
+    setGeminiModelValue(ref);
+    switchStageView('chat');
+    showToast(`已切换对话流至外部引擎：${provider.name}`);
+    el('inputPrompt')?.focus();
+  }
+
   function openSettingsSection(section = 'appearance') {
-    const valid = new Set(['appearance', 'telemetry', 'instructions', 'memory', 'env', 'scripts', 'shortcuts']);
+    const valid = new Set(['appearance', 'providers', 'telemetry', 'instructions', 'memory', 'env', 'scripts', 'shortcuts']);
     const sec = valid.has(section) ? section : 'appearance';
     appState.settingsSection = sec;
 
@@ -3674,6 +3889,10 @@
       btn.classList.toggle('is-active', isSettings && match);
     });
 
+    if (sec === 'providers') {
+      renderSettingsProviders();
+      loadProviders(false);
+    }
     if (sec === 'scripts' && !appState.assets) loadAssets();
     if (sec === 'env') loadHealth();
     if (sec === 'telemetry') renderSettingsTelemetry();
@@ -4450,6 +4669,14 @@
     });
 
     // Dedicated Settings Page Appearance & Canvas Resolution Controls
+    el('btnScanProviders')?.addEventListener('click', () => loadProviders(true));
+    el('btnAddProvider')?.addEventListener('click', () => {
+      workspacePanels?.openNewProviderEditor(el('settingsProvidersMount'), {
+        providers: appState.providers,
+        localAgents: appState.localAgents,
+        presets: appState.providerPresets,
+      });
+    });
     el('btnToggleTweaks')?.addEventListener('click', () => {
       closeMobileDrawers();
       toggleTweaks();
@@ -4807,6 +5034,7 @@
       getContext: () => ({
         runs: appState.runs,
         geminiModels: appState.models?.agy?.models || [],
+        providers: appState.providers || [],
       }),
       onNewChat: () => {
         switchStageView('chat');
@@ -4826,6 +5054,11 @@
         setGeminiModelValue(id);
         showToast(`Gemini 模型已切换为 ${formatGeminiShort(id)}`);
       },
+      onSaveProvider: (payload) => saveProviderConfig(payload),
+      onTestProvider: (id) => testProviderById(id),
+      onDeleteProvider: (id) => deleteProviderById(id),
+      onUseProvider: (prov) => useProviderInChat(prov),
+      onRefreshProvidersView: () => renderSettingsProviders(),
       onToast: showToast,
     });
   }
@@ -4839,5 +5072,6 @@
   initGlobalEvents();
   loadHealth();
   loadModels(false);
+  loadProviders(false);
   loadRunsList();
 })();

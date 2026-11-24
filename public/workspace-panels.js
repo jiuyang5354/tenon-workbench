@@ -177,6 +177,11 @@
     let paletteQuery = '';
     let paletteIdx = 0;
 
+    // Provider Hub UI transient state
+    let providerDraft = null; // null = closed, object = editing/creating
+    let providerTestingId = null;
+    let providerSaving = false;
+
     function closeAllModals() {
       settingsModal?.classList.add('hidden');
       shortcutsModal?.classList.add('hidden');
@@ -532,6 +537,452 @@
       paint();
     }
 
+    const PROTOCOL_LABELS = {
+      'claude-cli': 'CLAUDE CLI',
+      'custom-cli': 'CUSTOM CLI',
+      'openai-compatible': 'OPENAI SSE',
+      anthropic: 'ANTHROPIC SSE',
+      'gemini-api': 'GEMINI REST',
+    };
+
+    function openProviderEditor(initial = null) {
+      providerDraft = initial
+        ? {
+            id: initial.id || '',
+            presetId: initial.presetId || '',
+            name: initial.name || '',
+            kind: initial.kind || 'api',
+            protocol: initial.protocol || (initial.kind === 'cli' ? 'custom-cli' : 'openai-compatible'),
+            enabled: initial.enabled !== false,
+            command: initial.command || '',
+            argsTemplate: initial.argsTemplate || '',
+            baseUrl: initial.baseUrl || '',
+            apiKey: '',
+            hasApiKey: Boolean(initial.hasApiKey),
+            apiKeyMasked: initial.apiKeyMasked || '',
+            defaultModel: initial.defaultModel || '',
+            modelsText: Array.isArray(initial.models) ? initial.models.join(', ') : '',
+            notes: initial.notes || '',
+          }
+        : {
+            id: '',
+            presetId: 'openai',
+            name: '',
+            kind: 'api',
+            protocol: 'openai-compatible',
+            enabled: true,
+            command: '',
+            argsTemplate: '',
+            baseUrl: 'https://api.openai.com/v1',
+            apiKey: '',
+            hasApiKey: false,
+            apiKeyMasked: '',
+            defaultModel: 'gpt-4.1',
+            modelsText: 'gpt-4.1, o3-mini',
+            notes: '',
+          };
+    }
+
+    function renderProvidersInto(mount, ctx = {}) {
+      if (!mount) return;
+      const providers = Array.isArray(ctx.providers) ? ctx.providers : [];
+      const localAgents = ctx.localAgents || { clis: [], services: [] };
+      const presets = Array.isArray(ctx.presets) ? ctx.presets : [];
+
+      const countBadge = document.getElementById('settingsProviderCount');
+      if (countBadge) {
+        countBadge.textContent = String(providers.filter((p) => p.enabled).length);
+      }
+
+      const detectedClis = localAgents.clis || [];
+      const detectedServices = localAgents.services || [];
+      const probeItems = [...detectedClis, ...detectedServices];
+
+      const probeHtml = probeItems
+        .map((item) => {
+          const isOnline = Boolean(item.installed || item.online);
+          const alreadyConfigured = item.builtin || providers.some(
+            (p) =>
+              (item.kind === 'cli' && p.kind === 'cli' && p.command === item.command) ||
+              (item.kind === 'api' && p.baseUrl && item.baseUrl && p.baseUrl.replace(/\/+$/, '') === item.baseUrl.replace(/\/+$/, ''))
+          );
+          const badge = item.builtin
+            ? '<span class="ph-probe-tag is-core mono-xs">内置核心</span>'
+            : isOnline && !alreadyConfigured
+              ? `<button type="button" class="ph-probe-add mono-xs" data-ph-quick-probe="${escapeHtml(item.id)}">+ 一键接入</button>`
+              : isOnline
+                ? '<span class="ph-probe-tag is-ok mono-xs">已接入</span>'
+                : '<span class="ph-probe-tag mono-xs">未检出</span>';
+          const titleTip = item.path || item.baseUrl || item.version || '';
+          return `
+            <div class="ph-probe-chip ${isOnline ? 'is-ready' : 'is-missing'}" title="${escapeHtml(titleTip)}">
+              <span class="ph-dot ${isOnline ? 'is-ok' : ''}" aria-hidden="true"></span>
+              <div class="ph-probe-meta">
+                <span class="ph-probe-name">${escapeHtml(item.name)}</span>
+                <span class="ph-probe-ver mono-xs">${escapeHtml(isOnline ? (item.version || 'ready') : '未安装 / 未启动')}</span>
+              </div>
+              ${badge}
+            </div>`;
+        })
+        .join('');
+
+      const presetsHtml = presets
+        .map(
+          (pr) => `
+          <button type="button" class="ph-preset-pill ${providerDraft?.presetId === pr.presetId && !providerDraft?.id ? 'is-active' : ''}" data-ph-preset="${escapeHtml(pr.presetId)}" title="${escapeHtml(pr.description || '')}">
+            <span class="ph-preset-name">${escapeHtml(pr.name)}</span>
+            <span class="ph-preset-badge mono-xs">${escapeHtml(pr.badge || pr.protocol)}</span>
+          </button>`
+        )
+        .join('');
+
+      const renderEditorHtml = () => {
+        if (!providerDraft) return '';
+        const d = providerDraft;
+        const isCli = d.kind === 'cli';
+        return `
+          <form class="settings-card ph-editor-card" id="phEditorForm" data-slot="provider-editor">
+            <div class="ph-editor-head">
+              <div>
+                <span class="mono-xs settings-kicker">${d.id ? 'EDIT PROVIDER' : 'NEW CONNECTION'}</span>
+                <h3>${d.id ? `编辑「${escapeHtml(d.name)}」` : '配置外部 Agent / API 接入'}</h3>
+              </div>
+              <button type="button" class="rail-icon-btn" id="btnPhCloseEditor" title="收起表单">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.35"/></svg>
+              </button>
+            </div>
+
+            <div class="ph-form-grid">
+              <label class="field-block">
+                <span class="field-label">接入显示名称</span>
+                <input type="text" class="text-input" id="phName" value="${escapeHtml(d.name)}" placeholder="例如：Claude Code CLI / DeepSeek R1 / 本机 Ollama" required />
+              </label>
+
+              <div class="field-block">
+                <span class="field-label">接入模式</span>
+                <div class="tweak-pills ph-kind-pills" role="radiogroup" aria-label="接入模式">
+                  <button type="button" data-ph-kind="cli" class="${isCli ? 'active' : ''}">本地 CLI Agent</button>
+                  <button type="button" data-ph-kind="api" class="${!isCli ? 'active' : ''}">HTTP 流式 API</button>
+                </div>
+              </div>
+
+              <label class="field-block">
+                <span class="field-label">适配器协议</span>
+                <select class="text-input mono" id="phProtocol">
+                  ${
+                    isCli
+                      ? `<option value="claude-cli" ${d.protocol === 'claude-cli' ? 'selected' : ''}>claude-cli（Claude Code stream-json 流式思维链）</option>
+                         <option value="custom-cli" ${d.protocol === 'custom-cli' ? 'selected' : ''}>custom-cli（通用本地 CLI / Gemini CLI / Aider / 脚本）</option>`
+                      : `<option value="openai-compatible" ${d.protocol === 'openai-compatible' ? 'selected' : ''}>openai-compatible（OpenAI / DeepSeek / OpenRouter / Ollama / Qwen / Kimi）</option>
+                         <option value="anthropic" ${d.protocol === 'anthropic' ? 'selected' : ''}>anthropic（Claude /v1/messages + thinking_delta）</option>
+                         <option value="gemini-api" ${d.protocol === 'gemini-api' ? 'selected' : ''}>gemini-api（Google Gemini REST streamGenerateContent）</option>`
+                  }
+                </select>
+              </label>
+
+              ${
+                isCli
+                  ? `<label class="field-block">
+                      <span class="field-label">可执行命令（PATH 或绝对路径）</span>
+                      <input type="text" class="text-input mono" id="phCommand" value="${escapeHtml(d.command)}" placeholder="如 claude / gemini / aider / opencode" required />
+                    </label>
+                    <label class="field-block ph-span-2">
+                      <span class="field-label">自定义参数模板（可选 · 支持 {prompt} / {model} / {cwd}，留空自动 stdin 传参）</span>
+                      <input type="text" class="text-input mono" id="phArgs" value="${escapeHtml(d.argsTemplate)}" placeholder="${d.protocol === 'claude-cli' ? 'Claude CLI 已内置 stream-json 参数，留空即可' : '例如：-p {prompt} --model {model}'}" />
+                    </label>`
+                  : `<label class="field-block">
+                      <span class="field-label">Base URL（端点基址）</span>
+                      <input type="url" class="text-input mono" id="phBaseUrl" value="${escapeHtml(d.baseUrl)}" placeholder="https://api.deepseek.com/v1 或 http://127.0.0.1:11434/v1" required />
+                    </label>
+                    <label class="field-block ph-span-2">
+                      <span class="field-label">API Key（仅保存在本机 gitignored data/providers.json，绝不回传明文）</span>
+                      <input type="password" class="text-input mono" id="phApiKey" value="${escapeHtml(d.apiKey)}" placeholder="${d.hasApiKey ? `已保存密钥 (${d.apiKeyMasked}) · 留空则保持不变` : '本地 Ollama / LM Studio 可留空；云端 API 粘贴 sk-...'}" autocomplete="new-password" />
+                    </label>`
+              }
+
+              <label class="field-block">
+                <span class="field-label">默认模型 ID</span>
+                <input type="text" class="text-input mono" id="phDefaultModel" value="${escapeHtml(d.defaultModel)}" placeholder="${isCli ? '如 claude-sonnet-4-5（留空跟 CLI 默认）' : '如 deepseek-reasoner / gpt-4.1 / qwen2.5-coder:14b'}" />
+              </label>
+
+              <label class="field-block">
+                <span class="field-label">可选模型清单（逗号分隔，测试连接时会自动拉取补全）</span>
+                <input type="text" class="text-input mono" id="phModels" value="${escapeHtml(d.modelsText)}" placeholder="deepseek-reasoner, deepseek-chat" />
+              </label>
+
+              <label class="field-block ph-span-2">
+                <span class="field-label">备注说明（可选）</span>
+                <input type="text" class="text-input" id="phNotes" value="${escapeHtml(d.notes)}" placeholder="例如：适合前端长上下文评审、本地隐私代码分析等" />
+              </label>
+            </div>
+
+            <div class="ph-editor-foot">
+              <span class="mono-xs ph-sec-hint">遵循 Vibe Kanban / Zed ACP 统一流协议，自动注入对话流与无限画布节点选择器</span>
+              <div class="ph-editor-btns">
+                <button type="button" class="btn-secondary-sm" id="btnPhCancel">取消</button>
+                <button type="submit" class="btn-primary-sm" id="btnPhSave" ${providerSaving ? 'disabled' : ''}>${providerSaving ? '保存中...' : '保存接入配置'}</button>
+              </div>
+            </div>
+          </form>`;
+      };
+
+      const listHtml =
+        providers.length === 0
+          ? `<div class="ph-empty mono-xs">尚未接入外部 Agent 或 API。点击上方「一键接入模板」或检测到的本机 CLI 即可秒级启用。</div>`
+          : providers
+              .map((p) => {
+                const isTesting = providerTestingId === p.id;
+                const endpoint = p.kind === 'cli'
+                  ? `$ ${p.command}${p.argsTemplate ? ` ${p.argsTemplate}` : ' (stdin/stream-json)'}`
+                  : p.baseUrl;
+                const keyBadge = p.kind === 'cli'
+                  ? '本机订阅 / 无需 Key'
+                  : p.hasApiKey
+                    ? `KEY ${p.apiKeyMasked}`
+                    : '免 Key / 本地服务';
+                const testOk = p.lastTest?.ok;
+                const testDetail = p.lastTest?.detail || '尚未测试连通性';
+                const modelCount = (p.models || []).length;
+                return `
+                  <article class="ph-provider-card ${p.enabled ? '' : 'is-disabled'}" data-provider-id="${escapeHtml(p.id)}">
+                    <div class="ph-card-top">
+                      <div class="ph-card-title-group">
+                        <span class="ph-kind-badge mono-xs ${p.kind === 'cli' ? 'is-cli' : 'is-api'}">${escapeHtml(PROTOCOL_LABELS[p.protocol] || p.protocol)}</span>
+                        <strong class="ph-card-name">${escapeHtml(p.name)}</strong>
+                        ${p.defaultModel ? `<span class="ph-model-pill mono-xs">${escapeHtml(p.defaultModel)}</span>` : ''}
+                        ${modelCount > 1 ? `<span class="ph-model-more mono-xs">+${modelCount - 1} 模型</span>` : ''}
+                      </div>
+                      <button type="button" class="wf-switch" role="switch" aria-checked="${Boolean(p.enabled)}" data-ph-toggle="${escapeHtml(p.id)}" title="${p.enabled ? '点击停用此接入' : '点击启用此接入'}">
+                        <span class="wf-switch-thumb"></span>
+                      </button>
+                    </div>
+
+                    <div class="ph-card-meta mono-xs">
+                      <span class="ph-endpoint" title="${escapeHtml(endpoint)}">${escapeHtml(endpoint)}</span>
+                      <span class="ph-sep">·</span>
+                      <span class="ph-key-tag">${escapeHtml(keyBadge)}</span>
+                    </div>
+
+                    ${p.notes ? `<p class="ph-card-notes">${escapeHtml(p.notes)}</p>` : ''}
+
+                    <div class="ph-card-foot">
+                      <div class="ph-test-status ${testOk === true ? 'is-ok' : testOk === false ? 'is-err' : ''}">
+                        <span class="ph-dot ${testOk === true ? 'is-ok' : testOk === false ? 'is-err' : ''}" aria-hidden="true"></span>
+                        <span class="mono-xs">${escapeHtml(testDetail)}</span>
+                      </div>
+                      <div class="ph-card-actions">
+                        <button type="button" class="btn-secondary-sm" data-ph-test="${escapeHtml(p.id)}" ${isTesting ? 'disabled' : ''}>${isTesting ? '探测中...' : '测试连接'}</button>
+                        ${p.enabled ? `<button type="button" class="btn-secondary-sm" data-ph-use="${escapeHtml(p.id)}">立即对话</button>` : ''}
+                        <button type="button" class="link-btn" data-ph-edit="${escapeHtml(p.id)}">编辑</button>
+                        <button type="button" class="link-btn mm-del-btn" data-ph-del="${escapeHtml(p.id)}">删除</button>
+                      </div>
+                    </div>
+                  </article>`;
+              })
+              .join('');
+
+      mount.innerHTML = `
+        <div class="ph-wrap" data-slot="provider-hub">
+          <div class="settings-card">
+            <div class="ph-section-head">
+              <div>
+                <div class="section-cap mono-label">LOCAL AGENT &amp; RUNTIME DISCOVERY · 本机自动探测</div>
+                <p class="ph-section-sub">自动发现本机 PATH 中的编程 Agent CLI 与本地大模型推理服务（Ollama / LM Studio）</p>
+              </div>
+              <span class="mono-xs ph-scan-count">${probeItems.filter((x) => x.installed || x.online).length} / ${probeItems.length} 就绪</span>
+            </div>
+            <div class="ph-probe-grid">${probeHtml || '<div class="mono-xs">正在扫描本机环境...</div>'}</div>
+          </div>
+
+          <div class="settings-card">
+            <div class="ph-section-head">
+              <div>
+                <div class="section-cap mono-label">ONE-CLICK PRESETS · 一键接入模板</div>
+                <p class="ph-section-sub">覆盖本地 CLI、本地推理服务与三大云端流式协议（OpenAI 兼容 / Anthropic / Gemini REST）</p>
+              </div>
+            </div>
+            <div class="ph-presets-row">${presetsHtml}</div>
+          </div>
+
+          ${renderEditorHtml()}
+
+          <div class="settings-card">
+            <div class="ph-section-head">
+              <div>
+                <div class="section-cap mono-label">CONNECTED PROVIDERS · 已接入列表（${providers.length}）</div>
+                <p class="ph-section-sub">启用的接入会自动出现在「对话流模型选择器」与「无限画布节点 Model 菜单」中</p>
+              </div>
+            </div>
+            <div class="ph-provider-list">${listHtml}</div>
+          </div>
+        </div>`;
+
+      // Bind quick-add from local probe
+      mount.querySelectorAll('[data-ph-quick-probe]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const item = probeItems.find((x) => x.id === btn.dataset.phQuickProbe);
+          if (!item) return;
+          const preset = presets.find((pr) => pr.presetId === item.presetId);
+          if (item.kind === 'cli') {
+            openProviderEditor({
+              presetId: item.presetId || 'custom-cli',
+              name: item.name,
+              kind: 'cli',
+              protocol: item.id === 'claude' ? 'claude-cli' : 'custom-cli',
+              command: item.command,
+              argsTemplate: item.id === 'claude' ? '' : '-p {prompt}',
+              defaultModel: preset?.defaultModel || '',
+              models: preset?.models || [],
+              notes: `本机自动检测：${item.path || item.version || ''}`,
+            });
+          } else {
+            openProviderEditor({
+              presetId: item.presetId || 'ollama',
+              name: item.name,
+              kind: 'api',
+              protocol: 'openai-compatible',
+              baseUrl: item.baseUrl,
+              defaultModel: item.models?.[0] || preset?.defaultModel || '',
+              models: item.models?.length ? item.models : (preset?.models || []),
+              notes: `自动发现本地服务 (${item.baseUrl})`,
+            });
+          }
+          renderProvidersInto(mount, ctx);
+          mount.querySelector('#phName')?.focus();
+        });
+      });
+
+      // Bind one-click preset pills
+      mount.querySelectorAll('[data-ph-preset]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const pr = presets.find((x) => x.presetId === btn.dataset.phPreset);
+          if (!pr) return;
+          openProviderEditor(pr);
+          renderProvidersInto(mount, ctx);
+          mount.querySelector('#phName')?.focus();
+        });
+      });
+
+      // Bind editor controls
+      const form = mount.querySelector('#phEditorForm');
+      if (form && providerDraft) {
+        const readDraftFromForm = () => {
+          providerDraft.name = form.querySelector('#phName')?.value ?? providerDraft.name;
+          providerDraft.protocol = form.querySelector('#phProtocol')?.value ?? providerDraft.protocol;
+          providerDraft.command = form.querySelector('#phCommand')?.value ?? providerDraft.command;
+          providerDraft.argsTemplate = form.querySelector('#phArgs')?.value ?? providerDraft.argsTemplate;
+          providerDraft.baseUrl = form.querySelector('#phBaseUrl')?.value ?? providerDraft.baseUrl;
+          providerDraft.apiKey = form.querySelector('#phApiKey')?.value ?? providerDraft.apiKey;
+          providerDraft.defaultModel = form.querySelector('#phDefaultModel')?.value ?? providerDraft.defaultModel;
+          providerDraft.modelsText = form.querySelector('#phModels')?.value ?? providerDraft.modelsText;
+          providerDraft.notes = form.querySelector('#phNotes')?.value ?? providerDraft.notes;
+        };
+
+        form.querySelectorAll('[data-ph-kind]').forEach((kbtn) => {
+          kbtn.addEventListener('click', () => {
+            readDraftFromForm();
+            const nextKind = kbtn.dataset.phKind;
+            if (providerDraft.kind === nextKind) return;
+            providerDraft.kind = nextKind;
+            providerDraft.protocol = nextKind === 'cli' ? 'custom-cli' : 'openai-compatible';
+            if (nextKind === 'api' && !providerDraft.baseUrl) providerDraft.baseUrl = 'https://api.openai.com/v1';
+            if (nextKind === 'cli' && !providerDraft.command) providerDraft.command = 'claude';
+            renderProvidersInto(mount, ctx);
+          });
+        });
+
+        form.querySelector('#phProtocol')?.addEventListener('change', () => {
+          readDraftFromForm();
+          renderProvidersInto(mount, ctx);
+        });
+
+        const closeEditor = () => {
+          providerDraft = null;
+          renderProvidersInto(mount, ctx);
+        };
+        form.querySelector('#btnPhCloseEditor')?.addEventListener('click', closeEditor);
+        form.querySelector('#btnPhCancel')?.addEventListener('click', closeEditor);
+
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          readDraftFromForm();
+          const payload = {
+            id: providerDraft.id || undefined,
+            presetId: providerDraft.presetId || undefined,
+            name: providerDraft.name.trim(),
+            kind: providerDraft.kind,
+            protocol: providerDraft.protocol,
+            enabled: providerDraft.enabled !== false,
+            command: providerDraft.command.trim(),
+            argsTemplate: providerDraft.argsTemplate.trim(),
+            baseUrl: providerDraft.baseUrl.trim(),
+            apiKey: providerDraft.apiKey.trim(),
+            defaultModel: providerDraft.defaultModel.trim(),
+            models: providerDraft.modelsText,
+            notes: providerDraft.notes.trim(),
+          };
+          providerSaving = true;
+          renderProvidersInto(mount, ctx);
+          try {
+            const ok = await hooks.onSaveProvider?.(payload);
+            providerSaving = false;
+            if (ok) providerDraft = null;
+          } catch {
+            providerSaving = false;
+          }
+          hooks.onRefreshProvidersView?.();
+        });
+      }
+
+      // Bind provider list actions
+      mount.querySelectorAll('[data-ph-toggle]').forEach((sw) => {
+        sw.addEventListener('click', async () => {
+          const p = providers.find((x) => x.id === sw.dataset.phToggle);
+          if (!p) return;
+          await hooks.onSaveProvider?.({ id: p.id, enabled: !p.enabled });
+        });
+      });
+
+      mount.querySelectorAll('[data-ph-test]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = btn.dataset.phTest;
+          providerTestingId = id;
+          renderProvidersInto(mount, ctx);
+          try {
+            await hooks.onTestProvider?.(id);
+          } finally {
+            providerTestingId = null;
+            hooks.onRefreshProvidersView?.();
+          }
+        });
+      });
+
+      mount.querySelectorAll('[data-ph-use]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const p = providers.find((x) => x.id === btn.dataset.phUse);
+          if (p) hooks.onUseProvider?.(p);
+        });
+      });
+
+      mount.querySelectorAll('[data-ph-edit]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const p = providers.find((x) => x.id === btn.dataset.phEdit);
+          if (!p) return;
+          openProviderEditor(p);
+          renderProvidersInto(mount, ctx);
+          mount.querySelector('#phName')?.focus();
+        });
+      });
+
+      mount.querySelectorAll('[data-ph-del]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = btn.dataset.phDel;
+          if (providerDraft?.id === id) providerDraft = null;
+          await hooks.onDeleteProvider?.(id);
+        });
+      });
+    }
+
     function renderTelemetryInto(mount, ctx = {}) {
       if (!mount) return;
       const runs = Array.isArray(ctx.runs) ? ctx.runs : [];
@@ -868,6 +1319,7 @@
         { title: '切换至对话流视图', sub: 'Gemini × Codex 流式协作主界面', keys: [], run: () => hooks.onSwitchView?.('chat') },
         { title: '生成图像变体预览 (/image)', sub: '打开图像多变体渐进渲染与 Lightbox 预览', keys: ['/image'], run: () => hooks.onQuickMedia?.('image') },
         { title: '生成视频渲染预览 (/video)', sub: '打开视频渐进揭示与自定义视频播放器', keys: ['/video'], run: () => hooks.onQuickMedia?.('video') },
+        { title: 'Agent 与 API 接入中心', sub: '接入 Claude Code / Ollama / DeepSeek / OpenRouter / Anthropic / 自定义 CLI', keys: [], run: () => openSettings('providers') },
         { title: '打开协同遥测与指标总览', sub: '查看实时会话统计、环形分布图与 24 段进度条', keys: [], run: () => openSettings('telemetry') },
         { title: '偏好指令（Custom Instructions）', sub: '配置回复风格与跨会话规则', keys: [], run: () => openSettings('instructions') },
         { title: '持久记忆库（Memory Manager）', sub: `查看、编辑或检索 ${memories.length} 条工作记忆`, keys: [], run: () => openSettings('memory') },
@@ -896,8 +1348,19 @@
           run: () => hooks.onPickGemini?.(m.id),
         }));
 
+      const providerItems = (ctx.providers || [])
+        .filter((p) => p.enabled && (match(p.name) || match(p.defaultModel) || match(p.protocol)))
+        .slice(0, 6)
+        .map((p) => ({
+          title: `切换外部 Agent: ${p.name}`,
+          sub: `${p.defaultModel || p.command || p.protocol} · ${p.kind === 'cli' ? 'LOCAL CLI' : 'API'}`,
+          keys: [],
+          run: () => hooks.onUseProvider?.(p),
+        }));
+
       return [
         { label: '快捷操作', items: actionItems },
+        { label: '外部 Agent 与 API', items: providerItems },
         { label: '最近会话', items: threadItems },
         { label: '本机模型', items: modelItems },
       ].filter((g) => g.items.length > 0);
@@ -1033,6 +1496,12 @@
       renderMemoryInto,
       renderShortcutsInto,
       renderTelemetryInto,
+      renderProvidersInto,
+      openNewProviderEditor: (mount, ctx) => {
+        openProviderEditor(null);
+        renderProvidersInto(mount, ctx);
+        mount?.querySelector('#phName')?.focus();
+      },
       getInstructionContext,
       getMemories: () => memories,
     };
