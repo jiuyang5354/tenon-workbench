@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, Menu, shell, dialog } from 'electron';
+import { app, BrowserWindow, Menu, shell, dialog, ipcMain, nativeTheme } from 'electron';
 import { createWorkbenchServer } from '../server.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -80,8 +80,45 @@ async function startEmbeddedWorkbench() {
   return serverUrl;
 }
 
+function resolveTitleBarPalette(surface = 'weave') {
+  if (surface === 'charcoal') {
+    return { themeSource: 'dark', bg: '#1c1e21', overlayColor: '#1c1e21', symbolColor: '#e6eaf2' };
+  }
+  if (surface === 'paper') {
+    return { themeSource: 'light', bg: '#f3f2ee', overlayColor: '#f3f2ee', symbolColor: '#141413' };
+  }
+  return { themeSource: 'light', bg: '#eff1f4', overlayColor: '#eff1f4', symbolColor: '#111315' };
+}
+
+function applyWindowChromeTheme(win, surface = 'weave') {
+  const pal = resolveTitleBarPalette(surface);
+  nativeTheme.themeSource = pal.themeSource;
+  if (!win || win.isDestroyed()) return;
+  try {
+    win.setBackgroundColor(pal.bg);
+  } catch { /* ignore */ }
+  if (process.platform !== 'darwin' && typeof win.setTitleBarOverlay === 'function') {
+    try {
+      win.setTitleBarOverlay({
+        color: pal.overlayColor,
+        symbolColor: pal.symbolColor,
+        height: 47,
+      });
+    } catch { /* ignore */ }
+  }
+}
+
+ipcMain.on('tenon:titlebar-theme', (event, surface) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  applyWindowChromeTheme(win, surface);
+});
+
 function createMainWindow(url) {
   const iconPath = path.join(ROOT_DIR, 'build', 'icon.ico');
+  const isMac = process.platform === 'darwin';
+  const initialPal = resolveTitleBarPalette('charcoal');
+  nativeTheme.themeSource = initialPal.themeSource;
+
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -89,7 +126,17 @@ function createMainWindow(url) {
     minHeight: 680,
     title: 'TENON（榫）— 多模型协同工作台',
     icon: iconPath,
-    backgroundColor: '#141618',
+    backgroundColor: initialPal.bg,
+    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
+    ...(isMac
+      ? {}
+      : {
+          titleBarOverlay: {
+            color: initialPal.overlayColor,
+            symbolColor: initialPal.symbolColor,
+            height: 47,
+          },
+        }),
     autoHideMenuBar: true,
     show: false,
     webPreferences: {

@@ -161,6 +161,12 @@
     root.dataset.motion = t.motion ? 'on' : 'off';
     root.style.setProperty('--base-font-size', `${t.fontSize}px`);
 
+    if (window.TenonDesktop?.isDesktopApp) {
+      root.dataset.desktop = 'electron';
+      root.dataset.platform = window.TenonDesktop.platform || '';
+      window.TenonDesktop.setTitleBarTheme?.(t.surface);
+    }
+
     const isDark = t.surface === 'charcoal';
     const ttBtn = el('btnThemeToggle');
     if (ttBtn) {

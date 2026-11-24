@@ -3378,36 +3378,65 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
 .env-row .mono { color: var(--ink-primary); text-align: right; word-break: break-all; }
 
 .btn-primary-sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   height: 32px;
   padding: 0 13px;
   background: var(--accent);
   color: var(--accent-ink);
   font-size: 12px;
   font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  border: 1px solid transparent;
   border-radius: var(--radius-sharp);
+  transition: filter 130ms ease, opacity 130ms ease;
+}
+
+.btn-primary-sm:hover {
+  filter: brightness(1.06);
 }
 
 .btn-secondary-sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   height: 32px;
   padding: 0 12px;
   background: var(--bg-surface-1);
   color: var(--ink-primary);
   font-size: 12px;
   font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sharp);
   transition: background 130ms ease, border-color 130ms ease;
 }
 
-.btn-secondary-sm:hover {
+.btn-secondary-sm:hover,
+a.btn-secondary-sm:hover {
   background: var(--bg-surface-2);
+  text-decoration: none;
 }
 
 .btn-danger-sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   height: 32px;
   padding: 0 12px;
   color: var(--state-err);
   font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
   border: 1px solid var(--state-err);
   border-radius: var(--radius-sharp);
 }
@@ -8191,6 +8220,51 @@ html[data-surface="charcoal"] .mg-grain {
 .stage-topbar {
   padding: 0 20px;
   gap: 16px;
+}
+
+/* Electron Unified Frameless Titlebar Overlay (Zero White OS Bar Clash!) */
+html[data-desktop="electron"] .sidebar-head,
+html[data-desktop="electron"] .stage-topbar,
+html[data-desktop="electron"] .inspector-head {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+html[data-desktop="electron"] .sidebar-head button,
+html[data-desktop="electron"] .sidebar-head a,
+html[data-desktop="electron"] .stage-topbar button,
+html[data-desktop="electron"] .stage-topbar a,
+html[data-desktop="electron"] .stage-topbar .fluid-seg-track,
+html[data-desktop="electron"] .inspector-head button,
+html[data-desktop="electron"] .inspector-head a,
+html[data-desktop="electron"] .inspector-head .fluid-seg-track {
+  -webkit-app-region: no-drag;
+}
+
+html[data-desktop="electron"]:not([data-platform="darwin"]) .app-shell:has(.inspector-pane.hidden) .stage-topbar {
+  padding-right: 156px;
+}
+
+html[data-desktop="electron"]:not([data-platform="darwin"]) .inspector-pane {
+  position: relative;
+  padding-top: var(--topbar-h);
+}
+
+html[data-desktop="electron"]:not([data-platform="darwin"]) .inspector-pane::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--topbar-h);
+  background: var(--bg-canvas);
+  border-bottom: 1px solid var(--line-subtle);
+  -webkit-app-region: drag;
+  pointer-events: auto;
+}
+
+html[data-desktop="electron"][data-platform="darwin"] .sidebar-head {
+  padding-left: 78px;
 }
 
 .topbar-right {

@@ -1,6 +1,6 @@
 {
   "name": "tenon-workbench",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "TENON（榫）— 本地优先的多 Agent 与多协议 API 协同建筑工作台（Gemini / Codex / Claude Code / Ollama / DeepSeek / 无限节点画布）",
   "author": "jiuyang5354",
   "type": "module",

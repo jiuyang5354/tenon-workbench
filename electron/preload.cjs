@@ -1,6 +1,6 @@
 'use strict';
 
-const { contextBridge } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('TenonDesktop', {
   isDesktopApp: true,
@@ -10,5 +10,12 @@ contextBridge.exposeInMainWorld('TenonDesktop', {
     electron: process.versions.electron,
     node: process.versions.node,
     chrome: process.versions.chrome,
+  },
+  setTitleBarTheme: (surface) => {
+    try {
+      ipcRenderer.send('tenon:titlebar-theme', String(surface || 'weave'));
+    } catch {
+      // Ignore IPC errors during shutdown
+    }
   },
 });
