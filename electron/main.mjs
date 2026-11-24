@@ -57,6 +57,18 @@ async function startEmbeddedWorkbench() {
     defaultWorkspace: os.homedir(),
     runtime: 'electron',
     appVersion: app.getVersion(),
+    onPickDirectory: async (defaultPath) => {
+      const targetWin = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+      const result = await dialog.showOpenDialog(targetWin, {
+        title: '选择目标工程目录',
+        defaultPath: defaultPath || os.homedir(),
+        properties: ['openDirectory'],
+      });
+      if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+        return null;
+      }
+      return result.filePaths[0];
+    },
     onRequestQuit: () => {
       app.quit();
     },

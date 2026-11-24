@@ -4,7 +4,11 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { classifyRiskFiles } from '../lib/workspace.mjs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { classifyRiskFiles, discoverWorkspaces } from '../lib/workspace.mjs';
+
+const execFileAsync = promisify(execFile);
 import { parseReviewVerdict, parseProviderRef } from '../lib/orchestrator.mjs';
 import { sanitizeAgentText } from '../lib/runners.mjs';
 import {
@@ -429,5 +433,169 @@ test('Updater compares SemVer, enforces GitHub SSRF allowlist, and checks mock G
     await new Promise((resolve) => server.close(resolve));
     await new Promise((resolve) => mockGh.close(resolve));
     await fs.rm(tmpData, { recursive: true, force: true });
+  }
+});
+
+test('discoverWorkspaces detects Codex, Claude, TENON & Git repos and exposes workspace APIs', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tenon-ws-disc-'));
+  const fakeHome = path.join(root, 'home');
+  const fakeTmp = path.join(root, 'ignored-tmp');
+  const codexHome = path.join(fakeHome, '.codex');
+  const claudeDir = path.join(fakeHome, '.claude');
+  const claudeJson = path.join(fakeHome, '.claude.json');
+  const projectsRoot = path.join(root, 'projects');
+  const repoA = path.join(projectsRoot, 'alpha-api');
+  const repoB = path.join(projectsRoot, 'beta-web');
+  const claudeOnlyDir = path.join(projectsRoot, 'claude-notes');
+  const tmpNoiseDir = path.join(fakeTmp, 'scratch-repo');
+  const tmpData = path.join(root, 'server-data');
+
+  try {
+    await Promise.all([
+      fs.mkdir(path.join(codexHome, 'sessions', '2026'), { recursive: true }),
+      fs.mkdir(claudeDir, { recursive: true }),
+      fs.mkdir(repoA, { recursive: true }),
+      fs.mkdir(repoB, { recursive: true }),
+      fs.mkdir(claudeOnlyDir, { recursive: true }),
+      fs.mkdir(tmpNoiseDir, { recursive: true }),
+      fs.mkdir(tmpData, { recursive: true }),
+    ]);
+
+    // Initialize repoA with a real commit + 1 dirty high-risk file
+    await execFileAsync('git', ['init', '-b', 'main'], { cwd: repoA, windowsHide: true });
+    await execFileAsync('git', ['config', 'user.email', 'test@tenon.local'], { cwd: repoA, windowsHide: true });
+    await execFileAsync('git', ['config', 'user.name', 'Tenon Test'], { cwd: repoA, windowsHide: true });
+    await fs.writeFile(path.join(repoA, 'README.md'), '# alpha\n', 'utf8');
+    await execFileAsync('git', ['add', 'README.md'], { cwd: repoA, windowsHide: true });
+    await execFileAsync('git', ['commit', '-m', 'init'], { cwd: repoA, windowsHide: true });
+    await fs.writeFile(path.join(repoA, 'auth-guard.mjs'), 'export const ok = true;\n', 'utf8');
+
+    // Initialize repoB with a real commit (clean)
+    await execFileAsync('git', ['init', '-b', 'main'], { cwd: repoB, windowsHide: true });
+    await execFileAsync('git', ['config', 'user.email', 'test@tenon.local'], { cwd: repoB, windowsHide: true });
+    await execFileAsync('git', ['config', 'user.name', 'Tenon Test'], { cwd: repoB, windowsHide: true });
+    await fs.writeFile(path.join(repoB, 'index.html'), '<h1>beta</h1>\n', 'utf8');
+    await execFileAsync('git', ['add', 'index.html'], { cwd: repoB, windowsHide: true });
+    await execFileAsync('git', ['commit', '-m', 'init'], { cwd: repoB, windowsHide: true });
+
+    // Write Codex global state + rollout session pointing to repoA & noise tmp dir
+    await fs.writeFile(
+      path.join(codexHome, '.codex-global-state.json'),
+      JSON.stringify({ 'active-workspace-roots': [repoA, tmpNoiseDir] }),
+      'utf8'
+    );
+    await fs.writeFile(
+      path.join(codexHome, 'sessions', '2026', 'rollout-001.jsonl'),
+      `${JSON.stringify({ type: 'session_meta', payload: { cwd: repoA, timestamp: new Date().toISOString() } })}\n`,
+      'utf8'
+    );
+
+    // Write Claude history + .claude.json pointing to repoA + claudeOnlyDir + missing dir
+    await fs.writeFile(
+      path.join(claudeDir, 'history.jsonl'),
+      [
+        JSON.stringify({ project: claudeOnlyDir, timestamp: Date.now() }),
+        JSON.stringify({ project: repoA, timestamp: Date.now() - 5000 }),
+        JSON.stringify({ project: path.join(projectsRoot, 'deleted-folder'), timestamp: Date.now() }),
+      ].join('\n') + '\n',
+      'utf8'
+    );
+    await fs.writeFile(
+      claudeJson,
+      JSON.stringify({ projects: { [claudeOnlyDir]: {}, [fakeHome]: {} } }),
+      'utf8'
+    );
+
+    const discovery = await discoverWorkspaces({
+      homeDir: fakeHome,
+      tmpDir: fakeTmp,
+      noisePatterns: [],
+      codexHome,
+      claudeDir,
+      claudeJsonPath: claudeJson,
+      geminiDir: path.join(fakeHome, '.gemini'),
+      scanRoots: [projectsRoot],
+    });
+
+    assert.equal(discovery.ok, true);
+    assert.equal(discovery.recommended.toLowerCase(), repoA.toLowerCase());
+
+    const foundA = discovery.workspaces.find((w) => w.path.toLowerCase() === repoA.toLowerCase());
+    assert.ok(foundA, 'repoA should be discovered');
+    assert.equal(foundA.isGitRepo, true);
+    assert.equal(foundA.hasCommits, true);
+    assert.equal(foundA.branch, 'main');
+    assert.equal(foundA.changedCount, 1);
+    assert.equal(foundA.highRiskCount, 1);
+    assert.equal(foundA.activeAgent, true);
+    assert.ok(foundA.sources.includes('codex'));
+    assert.ok(foundA.sources.includes('claude'));
+
+    const foundB = discovery.workspaces.find((w) => w.path.toLowerCase() === repoB.toLowerCase());
+    assert.ok(foundB, 'repoB should be discovered via local git scan');
+
+    const foundClaudeOnly = discovery.workspaces.find((w) => w.path.toLowerCase() === claudeOnlyDir.toLowerCase());
+    assert.ok(foundClaudeOnly, 'claude-only non-git folder should remain visible');
+    assert.equal(foundClaudeOnly.isGitRepo, false);
+    assert.ok(foundClaudeOnly.sources.includes('claude'));
+
+    // Noise paths & bare homeDir must be excluded
+    assert.equal(
+      discovery.workspaces.some((w) => w.path.toLowerCase() === tmpNoiseDir.toLowerCase()),
+      false
+    );
+    assert.equal(
+      discovery.workspaces.some((w) => w.path.toLowerCase() === fakeHome.toLowerCase()),
+      false
+    );
+
+    // Verify HTTP routes (/api/health, /api/workspace/discover, /api/workspace/pick)
+    const { server } = await createWorkbenchServer({
+      dataDir: tmpData,
+      defaultWorkspace: projectsRoot,
+      onPickDirectory: async () => repoB,
+      workspaceDiscoveryOptions: {
+        homeDir: fakeHome,
+        tmpDir: fakeTmp,
+        noisePatterns: [],
+        codexHome,
+        claudeDir,
+        claudeJsonPath: claudeJson,
+        geminiDir: path.join(fakeHome, '.gemini'),
+        scanRoots: [projectsRoot],
+      },
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+    const base = `http://127.0.0.1:${port}`;
+
+    try {
+      const healthRes = await fetch(`${base}/api/health`);
+      assert.equal(healthRes.status, 200);
+      const health = await healthRes.json();
+      assert.equal(health.recommendedWorkspace.toLowerCase(), repoA.toLowerCase());
+      assert.equal(health.capabilities.nativeFolderPicker, true);
+
+      const discRes = await fetch(`${base}/api/workspace/discover?refresh=1`);
+      assert.equal(discRes.status, 200);
+      const disc = await discRes.json();
+      assert.equal(disc.recommended.toLowerCase(), repoA.toLowerCase());
+      assert.ok(disc.workspaces.length >= 3);
+
+      const pickRes = await fetch(`${base}/api/workspace/pick`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ defaultPath: repoA }),
+      });
+      assert.equal(pickRes.status, 200);
+      const picked = await pickRes.json();
+      assert.equal(picked.supported, true);
+      assert.equal(picked.canceled, false);
+      assert.equal(picked.path.toLowerCase(), repoB.toLowerCase());
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
   }
 });

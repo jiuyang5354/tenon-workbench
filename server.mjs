@@ -16,7 +16,7 @@ import {
   runProvider,
 } from './lib/providers.mjs';
 import { UpdateManager, readCurrentAppVersion } from './lib/updater.mjs';
-import { inspectWorkspace, getWorkspaceDiff } from './lib/workspace.mjs';
+import { inspectWorkspace, getWorkspaceDiff, discoverWorkspaces } from './lib/workspace.mjs';
 import { RunStore } from './lib/store.mjs';
 import { Orchestrator, ValidationError } from './lib/orchestrator.mjs';
 
@@ -244,6 +244,27 @@ export async function createWorkbenchServer(options = {}) {
   });
   await updater.init();
   const orchestrator = new Orchestrator(store, { providerStore });
+  const onPickDirectory = typeof options.onPickDirectory === 'function' ? options.onPickDirectory : null;
+
+  let discoveryCache = { at: 0, data: null };
+  const getDiscoveredWorkspaces = async (force = false) => {
+    const now = Date.now();
+    if (!force && discoveryCache.data && now - discoveryCache.at < 20_000) {
+      return discoveryCache.data;
+    }
+    const recentRunDirs = store
+      .list()
+      .slice(0, 12)
+      .map((r) => ({ path: r.workspaceDir, timestamp: r.updatedAt || r.createdAt }))
+      .filter((r) => r.path);
+    const data = await discoverWorkspaces({
+      scanRoots: [__dirname, path.resolve(__dirname, '..'), defaultWorkspaceDir],
+      recentRunDirs,
+      ...(options.workspaceDiscoveryOptions || {}),
+    });
+    discoveryCache = { at: Date.now(), data };
+    return data;
+  };
 
   const server = http.createServer(async (req, res) => {
     const method = req.method || 'GET';
@@ -263,12 +284,20 @@ export async function createWorkbenchServer(options = {}) {
 
       // --- API Routes ---
       if (pathname === '/api/health' && method === 'GET') {
-        const health = await checkEnvironmentHealth();
+        const [health, discovery] = await Promise.all([
+          checkEnvironmentHealth(),
+          getDiscoveredWorkspaces(false).catch(() => ({ recommended: null, summary: null })),
+        ]);
         return sendJson(res, 200, {
           ...health,
           appVersion,
           runtime: updater.runtime,
           defaultWorkspace: defaultWorkspaceDir,
+          recommendedWorkspace: discovery?.recommended || defaultWorkspaceDir,
+          discoveredSummary: discovery?.summary || null,
+          capabilities: {
+            nativeFolderPicker: Boolean(onPickDirectory),
+          },
           workbenchDir: __dirname,
         });
       }
@@ -403,6 +432,25 @@ export async function createWorkbenchServer(options = {}) {
             providers: providerStore.listPublic(),
           });
         }
+      }
+
+      if (pathname === '/api/workspace/discover' && method === 'GET') {
+        const force = url.searchParams.get('refresh') === '1';
+        const data = await getDiscoveredWorkspaces(force);
+        return sendJson(res, 200, data);
+      }
+
+      if (pathname === '/api/workspace/pick' && method === 'POST') {
+        const body = await readJsonBody(req);
+        if (!onPickDirectory) {
+          return sendJson(res, 200, { supported: false, canceled: true, path: null });
+        }
+        const picked = await onPickDirectory(String(body.defaultPath || '').trim() || defaultWorkspaceDir);
+        return sendJson(res, 200, {
+          supported: true,
+          canceled: !picked,
+          path: picked || null,
+        });
       }
 
       if (pathname === '/api/workspace/inspect' && method === 'GET') {

@@ -75,6 +75,10 @@
     runs: [],
     searchQuery: '',
     workspaceFiles: [],
+    discoveredWorkspaces: [],
+    discoveredSummary: null,
+    wsDiscoverFilter: 'all',
+    wsDiscovering: false,
     activeAsset: 'GEMINI.md',
     stageView: 'chat',
     lastWorkView: 'chat',
@@ -3212,9 +3216,25 @@
       el('dotCodex').className = `status-dot ${data.codex.installed ? 'ok' : 'err'}`;
       el('welcomeEnvTag').textContent = `GEMINI CLI ${data.agy.installed ? 'READY' : 'MISSING'} · CODEX CLI ${data.codex.installed ? 'READY' : 'MISSING'}`;
 
+      const pickBtn = el('btnPickWsFolder');
+      if (pickBtn) {
+        pickBtn.classList.toggle('hidden', !data.capabilities?.nativeFolderPicker);
+      }
+
       if (!el('inputWorkspace').value) {
-        el('inputWorkspace').value = data.defaultWorkspace || data.workbenchDir || '';
-        inspectCurrentWorkspace();
+        const savedDir = loadSavedWorkspace();
+        const fallbackDir = data.recommendedWorkspace || data.defaultWorkspace || data.workbenchDir || '';
+        const initialDir = savedDir || fallbackDir;
+        el('inputWorkspace').value = initialDir;
+        const ok = await inspectCurrentWorkspace({ persist: Boolean(savedDir) });
+        if (!ok && savedDir && fallbackDir && normalizeWsKey(savedDir) !== normalizeWsKey(fallbackDir)) {
+          el('inputWorkspace').value = fallbackDir;
+          await inspectCurrentWorkspace({ persist: true });
+        }
+      }
+
+      if (!appState.discoveredWorkspaces.length && !appState.wsDiscovering) {
+        loadDiscoveredWorkspaces(false);
       }
 
       const profiles = data.codex?.config?.profiles || [];
@@ -4101,7 +4121,181 @@
     });
   }
 
-  async function inspectCurrentWorkspace() {
+  function normalizeWsKey(p) {
+    return String(p || '').trim().replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase();
+  }
+
+  function loadSavedWorkspace() {
+    try {
+      return String(localStorage.getItem('tenon_last_workspace') || '').trim();
+    } catch {
+      return '';
+    }
+  }
+
+  function saveWorkspacePath(dir) {
+    try {
+      const clean = String(dir || '').trim();
+      if (clean) localStorage.setItem('tenon_last_workspace', clean);
+    } catch {
+      // Ignore storage quota / private mode
+    }
+  }
+
+  function formatSourceLabel(src, activeAgent) {
+    if (src === 'codex') return activeAgent ? 'CODEX 活跃' : 'CODEX';
+    if (src === 'claude') return 'CLAUDE';
+    if (src === 'gemini') return 'GEMINI';
+    if (src === 'tenon') return 'TENON';
+    if (src === 'git') return 'GIT';
+    return String(src || '').toUpperCase();
+  }
+
+  function renderDiscoveredWorkspaces() {
+    const list = el('wsDiscoveredList');
+    const summaryEl = el('wsDiscoverSummary');
+    if (!list) return;
+
+    const items = appState.discoveredWorkspaces || [];
+    const s = appState.discoveredSummary;
+    if (summaryEl) {
+      if (appState.wsDiscovering) {
+        summaryEl.textContent = '正在扫描本机 Codex / Claude / Git 仓库...';
+      } else if (s && s.total > 0) {
+        const parts = [];
+        if (s.codex) parts.push(`Codex ${s.codex}`);
+        if (s.claude) parts.push(`Claude ${s.claude}`);
+        if (s.gemini) parts.push(`Gemini ${s.gemini}`);
+        if (s.tenon) parts.push(`历史 ${s.tenon}`);
+        if (s.git) parts.push(`Git ${s.git}`);
+        summaryEl.textContent = `自动探测 ${s.total} 项${parts.length ? `（${parts.join(' · ')}）` : ''}`;
+      } else {
+        summaryEl.textContent = '未探测到活跃 Agent 目录，请手动输入路径';
+      }
+    }
+
+    el('wsFilterPills')?.querySelectorAll('.ws-filter-pill').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.wsFilter === appState.wsDiscoverFilter);
+    });
+
+    if (appState.wsDiscovering && items.length === 0) {
+      list.innerHTML = '<div class="ws-discover-empty mono-xs">正在扫描 Codex / Claude / 本机 Git 仓库...</div>';
+      return;
+    }
+
+    const filtered = items.filter((w) => {
+      if (appState.wsDiscoverFilter === 'agent') {
+        return (w.sources || []).some((src) => src !== 'git');
+      }
+      if (appState.wsDiscoverFilter === 'dirty') {
+        return Number(w.changedCount) > 0;
+      }
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      const hint = appState.wsDiscoverFilter === 'dirty'
+        ? '当前探测到的仓库均无未提交变更'
+        : appState.wsDiscoverFilter === 'agent'
+          ? '未检测到 Codex / Claude / Gemini 历史工作目录'
+          : '未探测到本机工程目录，可在下方手动填写路径';
+      list.innerHTML = `<div class="ws-discover-empty mono-xs">${escapeHtml(hint)}</div>`;
+      return;
+    }
+
+    const activeKey = normalizeWsKey(el('inputWorkspace')?.value || '');
+    list.innerHTML = '';
+
+    filtered.forEach((w) => {
+      const isActive = activeKey && normalizeWsKey(w.path) === activeKey;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `ws-discover-item${isActive ? ' is-active' : ''}`;
+      btn.setAttribute('role', 'option');
+      btn.setAttribute('aria-selected', String(Boolean(isActive)));
+      btn.title = w.path;
+
+      const agentSources = (w.sources || []).filter((src) => src !== 'git');
+      const displaySources = agentSources.length > 0 ? agentSources.slice(0, 2) : ['git'];
+      const srcHtml = displaySources
+        .map((src) => {
+          const isLive = Boolean(w.activeAgent && src === 'codex');
+          return `<span class="ws-src-tag${isLive ? ' is-live' : ''}">${escapeHtml(formatSourceLabel(src, isLive))}</span>`;
+        })
+        .join('');
+
+      let dirtyHtml = '';
+      if (w.isGitRepo && w.highRiskCount > 0) {
+        dirtyHtml = `<span class="ws-dirty-tag is-risk">${w.changedCount} 变更 · 高危</span>`;
+      } else if (w.isGitRepo && w.changedCount > 0) {
+        dirtyHtml = `<span class="ws-dirty-tag">${w.changedCount} 变更</span>`;
+      } else if (!w.isGitRepo) {
+        dirtyHtml = '<span class="ws-dirty-tag">NO-GIT</span>';
+      }
+
+      const branchText = w.isGitRepo ? (w.branch || 'HEAD') : '';
+
+      btn.innerHTML = `
+        <div class="ws-item-top">
+          <div class="ws-item-title-group">
+            <span class="ws-item-dot" aria-hidden="true"></span>
+            <span class="ws-item-name">${escapeHtml(w.name)}</span>
+          </div>
+          <div class="ws-item-badges">${srcHtml}${dirtyHtml}</div>
+        </div>
+        <div class="ws-item-bottom">
+          <span class="ws-item-path">${escapeHtml(w.path)}</span>
+          ${branchText ? `<span class="ws-item-branch">${escapeHtml(branchText)}</span>` : ''}
+        </div>
+      `;
+
+      btn.addEventListener('click', () => {
+        selectWorkspace(w.path, { closePopover: true, notify: true });
+      });
+
+      list.appendChild(btn);
+    });
+  }
+
+  async function loadDiscoveredWorkspaces(force = false) {
+    appState.wsDiscovering = true;
+    renderDiscoveredWorkspaces();
+    try {
+      const data = await api(`/api/workspace/discover${force ? '?refresh=1' : ''}`);
+      appState.discoveredWorkspaces = Array.isArray(data.workspaces) ? data.workspaces : [];
+      appState.discoveredSummary = data.summary || null;
+      if (force) {
+        showToast(`已扫描完成：发现 ${appState.discoveredWorkspaces.length} 个工作目录`);
+      }
+    } catch (err) {
+      if (force) showToast(`自动探测目录失败: ${err.message}`);
+    } finally {
+      appState.wsDiscovering = false;
+      renderDiscoveredWorkspaces();
+    }
+  }
+
+  async function selectWorkspace(dir, opts = {}) {
+    const clean = String(dir || '').trim();
+    if (!clean) return;
+    el('inputWorkspace').value = clean;
+    saveWorkspacePath(clean);
+    if (appState.resumeThreadId) {
+      appState.resumeThreadId = '';
+      el('resumeIndicator')?.classList.add('hidden');
+    }
+    renderDiscoveredWorkspaces();
+    const ok = await inspectCurrentWorkspace({ persist: true });
+    if (opts.closePopover) {
+      el('wsPopover')?.classList.add('hidden');
+    }
+    if (opts.notify && ok) {
+      const baseName = clean.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || clean;
+      showToast(`已切换工作目录：${baseName}`);
+    }
+  }
+
+  async function inspectCurrentWorkspace(opts = {}) {
     const dir = el('inputWorkspace').value.trim();
     const box = el('wsTelemetry');
     if (!dir) {
@@ -4109,17 +4303,28 @@
       el('wsBranchPill').textContent = '—';
       el('wsSubStatus').textContent = '点击配置目录路径';
       appState.workspaceFiles = [];
-      return;
+      return false;
     }
 
     const baseName = dir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || dir;
     el('wsShortName').textContent = baseName;
+    el('wsShortName').title = dir;
+    el('btnWsPopover').title = `当前工作目录：${dir}\n点击切换或重新扫描 Agent 目录`;
 
     try {
       const info = await api(`/api/workspace/inspect?dir=${encodeURIComponent(dir)}`);
+      if (opts.persist !== false) saveWorkspacePath(dir);
+      const matched = (appState.discoveredWorkspaces || []).find(
+        (w) => normalizeWsKey(w.path) === normalizeWsKey(dir)
+      );
+      const agentTags = matched ? (matched.sources || []).filter((s) => s !== 'git') : [];
       const bits = [];
+      if (agentTags.length > 0) {
+        bits.push(`<span class="branch-flag">AGENT: ${escapeHtml(agentTags.map((s) => s.toUpperCase()).join(' · '))}</span>`);
+      }
       if (info.isGitRepo) {
         el('wsBranchPill').textContent = info.branch || 'HEAD';
+        el('wsBranchPill').title = info.branch || 'HEAD';
         el('wsSubStatus').textContent =
           info.highRiskFiles.length > 0
             ? `${info.changedFiles.length} 变更 · ${info.highRiskFiles.length} 高危 (xhigh)`
@@ -4147,11 +4352,14 @@
       });
       appState.workspaceFiles = mentions;
       renderCliCommandCards();
+      renderDiscoveredWorkspaces();
+      return true;
     } catch (err) {
       el('wsBranchPill').textContent = 'ERR';
       el('wsSubStatus').textContent = err.message;
       box.innerHTML = `<span class="risk-flag">${escapeHtml(err.message)}</span>`;
       appState.workspaceFiles = [];
+      return false;
     }
   }
 
@@ -4583,16 +4791,48 @@
       const open = el('wsPopover').classList.contains('hidden');
       closeAllPopovers(open ? 'wsPopover' : '');
       el('wsPopover').classList.toggle('hidden', !open);
-      if (open) el('inputWorkspace').focus();
+      if (open) {
+        if (appState.discoveredWorkspaces.length === 0 && !appState.wsDiscovering) {
+          loadDiscoveredWorkspaces(false);
+        } else {
+          renderDiscoveredWorkspaces();
+        }
+      }
     });
     el('btnCloseWsPopover').addEventListener('click', () => el('wsPopover').classList.add('hidden'));
-    el('btnInspectWs').addEventListener('click', inspectCurrentWorkspace);
+    el('btnRescanWs')?.addEventListener('click', () => loadDiscoveredWorkspaces(true));
+    el('wsFilterPills')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.ws-filter-pill');
+      if (!btn || !btn.dataset.wsFilter) return;
+      appState.wsDiscoverFilter = btn.dataset.wsFilter;
+      renderDiscoveredWorkspaces();
+    });
+    el('btnPickWsFolder')?.addEventListener('click', async () => {
+      try {
+        const res = await api('/api/workspace/pick', {
+          method: 'POST',
+          body: JSON.stringify({ defaultPath: el('inputWorkspace').value.trim() }),
+        });
+        if (res.path) {
+          await selectWorkspace(res.path, { closePopover: true, notify: true });
+        }
+      } catch (err) {
+        showToast(`打开文件夹选择器失败: ${err.message}`);
+      }
+    });
+    el('btnInspectWs').addEventListener('click', () => inspectCurrentWorkspace({ persist: true }));
     el('inputWorkspace').addEventListener('change', () => {
       if (appState.resumeThreadId) {
         appState.resumeThreadId = '';
         el('resumeIndicator').classList.add('hidden');
       }
-      inspectCurrentWorkspace();
+      inspectCurrentWorkspace({ persist: true });
+    });
+    el('inputWorkspace').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        inspectCurrentWorkspace({ persist: true });
+      }
     });
 
     el('btnGuardrailsPopover').addEventListener('click', () => {

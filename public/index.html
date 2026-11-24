@@ -785,18 +785,38 @@
        ON-DEMAND POPOVERS & DRAWERS (Zero clutter in main viewport!)
        ======================================================================= -->
 
-  <!-- Workspace Path Popover -->
-  <aside class="floating-popover hidden" id="wsPopover" aria-label="目标工程目录设置">
+  <!-- Workspace Path & Agent Auto-Discovery Popover -->
+  <aside class="floating-popover ws-popover hidden" id="wsPopover" aria-label="目标工程目录与 Agent 自动探测">
     <div class="popover-head">
-      <span class="mono-label">WORKSPACE &amp; RISK INSPECTOR</span>
-      <button type="button" class="link-btn" id="btnCloseWsPopover">关闭</button>
+      <span class="mono-label">WORKSPACE · AGENT 自动探测</span>
+      <div class="popover-head-actions">
+        <button type="button" class="link-btn" id="btnRescanWs">重新扫描</button>
+        <button type="button" class="link-btn" id="btnCloseWsPopover">关闭</button>
+      </div>
     </div>
     <div class="popover-stack">
+      <div class="ws-discover-section">
+        <div class="ws-discover-bar">
+          <span class="ws-discover-summary mono-xs" id="wsDiscoverSummary">正在扫描本地 Agent 与 Git 仓库...</span>
+          <div class="ws-filter-pills" id="wsFilterPills" role="tablist" aria-label="工作目录筛选">
+            <button type="button" class="ws-filter-pill active" data-ws-filter="all">全部</button>
+            <button type="button" class="ws-filter-pill" data-ws-filter="agent">Agent</button>
+            <button type="button" class="ws-filter-pill" data-ws-filter="dirty">有变更</button>
+          </div>
+        </div>
+        <div class="ws-discover-list" id="wsDiscoveredList" role="listbox" aria-label="自动探测到的工作目录">
+          <div class="ws-discover-empty mono-xs">正在扫描 Codex / Claude / 本地 Git 仓库...</div>
+        </div>
+      </div>
+
+      <div class="ws-manual-divider"></div>
+
       <label class="field-block">
-        <span class="field-label">本地工程路径</span>
+        <span class="field-label">手动指定本地工程路径</span>
         <input type="text" id="inputWorkspace" class="text-input mono" placeholder="例如 D:\my-project" autocomplete="off" />
       </label>
       <div class="popover-row-end">
+        <button type="button" class="btn-secondary-sm hidden" id="btnPickWsFolder">浏览文件夹...</button>
         <button type="button" class="btn-primary-sm" id="btnInspectWs">探测 Git 与高危路径</button>
       </div>
       <div class="ws-probe-result" id="wsTelemetry">
