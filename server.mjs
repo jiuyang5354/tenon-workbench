@@ -16,7 +16,12 @@ import {
   runProvider,
 } from './lib/providers.mjs';
 import { UpdateManager, readCurrentAppVersion } from './lib/updater.mjs';
-import { inspectWorkspace, getWorkspaceDiff, discoverWorkspaces } from './lib/workspace.mjs';
+import {
+  inspectWorkspace,
+  getWorkspaceDiff,
+  discoverWorkspaces,
+  createWorkspaceProject,
+} from './lib/workspace.mjs';
 import { RunStore } from './lib/store.mjs';
 import { Orchestrator, ValidationError } from './lib/orchestrator.mjs';
 
@@ -451,6 +456,19 @@ export async function createWorkbenchServer(options = {}) {
           canceled: !picked,
           path: picked || null,
         });
+      }
+
+      if (pathname === '/api/workspace/create' && method === 'POST') {
+        const body = await readJsonBody(req);
+        const result = await createWorkspaceProject({
+          parentDir: String(body.parentDir || '').trim() || defaultWorkspaceDir,
+          name: body.name,
+          appendDate: body.appendDate !== false,
+          initGit: body.initGit !== false,
+          createReadme: body.createReadme !== false,
+        });
+        discoveryCache = { at: 0, data: null };
+        return sendJson(res, 201, result);
       }
 
       if (pathname === '/api/workspace/inspect' && method === 'GET') {

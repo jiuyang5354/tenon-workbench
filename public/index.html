@@ -788,13 +788,16 @@
   <!-- Workspace Path & Agent Auto-Discovery Popover -->
   <aside class="floating-popover ws-popover hidden" id="wsPopover" aria-label="目标工程目录与 Agent 自动探测">
     <div class="popover-head">
-      <span class="mono-label">WORKSPACE · AGENT 自动探测</span>
+      <span class="mono-label" id="wsPopoverTitle">WORKSPACE · AGENT 自动探测</span>
       <div class="popover-head-actions">
+        <button type="button" class="link-btn ws-new-trigger" id="btnToggleNewWs">+ 新建工程</button>
         <button type="button" class="link-btn" id="btnRescanWs">重新扫描</button>
         <button type="button" class="link-btn" id="btnCloseWsPopover">关闭</button>
       </div>
     </div>
-    <div class="popover-stack">
+
+    <!-- Browse & Auto-Discovery View -->
+    <div class="popover-stack" id="wsBrowseView">
       <div class="ws-discover-section">
         <div class="ws-discover-bar">
           <span class="ws-discover-summary mono-xs" id="wsDiscoverSummary">正在扫描本地 Agent 与 Git 仓库...</span>
@@ -821,6 +824,36 @@
       </div>
       <div class="ws-probe-result" id="wsTelemetry">
         <span class="mono-xs">等待探测...</span>
+      </div>
+    </div>
+
+    <!-- Create New Project View -->
+    <div class="popover-stack ws-create-panel hidden" id="wsCreatePanel">
+      <label class="field-block">
+        <span class="field-label">新工程名称</span>
+        <input type="text" id="inputNewWsName" class="text-input" placeholder="例如 智能客服工作流 或 my-service" autocomplete="off" />
+      </label>
+      <label class="field-block">
+        <span class="field-label">存放父目录</span>
+        <div class="ws-parent-row">
+          <input type="text" id="inputNewWsParent" class="text-input mono" placeholder="例如 D:\gemini" autocomplete="off" />
+          <button type="button" class="btn-secondary-sm hidden" id="btnPickNewWsParent">浏览...</button>
+        </div>
+      </label>
+      <div class="ws-create-checks">
+        <label class="check-item">
+          <input type="checkbox" id="chkNewWsDate" checked />
+          <span>自动附带今日日期后缀（<code class="mono-xs">_YYYY-MM-DD</code>）</span>
+        </label>
+        <label class="check-item">
+          <input type="checkbox" id="chkNewWsGit" checked />
+          <span>初始化 Git 仓库、README 与首个提交（立即可用 Diff 与审查）</span>
+        </label>
+      </div>
+      <div class="ws-create-preview mono-xs" id="wsCreatePreview">请输入工程名称以预览创建路径</div>
+      <div class="popover-row-end">
+        <button type="button" class="btn-secondary-sm" id="btnCancelNewWs">返回列表</button>
+        <button type="button" class="btn-primary-sm" id="btnCreateWsSubmit">创建并切换</button>
       </div>
     </div>
   </aside>

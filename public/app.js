@@ -3220,6 +3220,14 @@
       if (pickBtn) {
         pickBtn.classList.toggle('hidden', !data.capabilities?.nativeFolderPicker);
       }
+      const pickParentBtn = el('btnPickNewWsParent');
+      if (pickParentBtn) {
+        pickParentBtn.classList.toggle('hidden', !data.capabilities?.nativeFolderPicker);
+      }
+      const newParentInput = el('inputNewWsParent');
+      if (newParentInput && !newParentInput.value) {
+        newParentInput.value = data.defaultWorkspace || '';
+      }
 
       if (!el('inputWorkspace').value) {
         const savedDir = loadSavedWorkspace();
@@ -4275,6 +4283,93 @@
     }
   }
 
+  function formatTodayStamp() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  function updateNewWsPreview() {
+    const preview = el('wsCreatePreview');
+    if (!preview) return;
+    const rawName = (el('inputNewWsName')?.value || '').trim();
+    const parent = (el('inputNewWsParent')?.value || '').trim().replace(/[\\/]+$/, '');
+    const withDate = Boolean(el('chkNewWsDate')?.checked);
+    if (!rawName) {
+      preview.textContent = '请输入工程名称以预览创建路径';
+      return;
+    }
+    const hasDate = /_\d{4}-\d{2}-\d{2}$/.test(rawName);
+    const folder = withDate && !hasDate ? `${rawName}_${formatTodayStamp()}` : rawName;
+    const sep = parent.includes('/') && !parent.includes('\\') ? '/' : '\\';
+    preview.textContent = parent ? `将创建：${parent}${sep}${folder}` : `将创建：${folder}`;
+  }
+
+  function setWsPopoverMode(mode) {
+    const isCreate = mode === 'create';
+    el('wsBrowseView')?.classList.toggle('hidden', isCreate);
+    el('wsCreatePanel')?.classList.toggle('hidden', !isCreate);
+    el('btnRescanWs')?.classList.toggle('hidden', isCreate);
+    const toggleBtn = el('btnToggleNewWs');
+    if (toggleBtn) toggleBtn.textContent = isCreate ? '返回列表' : '+ 新建工程';
+    const titleEl = el('wsPopoverTitle');
+    if (titleEl) titleEl.textContent = isCreate ? 'WORKSPACE · 新建本地工程' : 'WORKSPACE · AGENT 自动探测';
+
+    if (isCreate) {
+      const parentInput = el('inputNewWsParent');
+      if (parentInput && !parentInput.value.trim()) {
+        const cur = (el('inputWorkspace')?.value || '').trim();
+        const curParent = cur ? cur.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]+$/, '') : '';
+        parentInput.value = appState.health?.defaultWorkspace || curParent || '';
+      }
+      updateNewWsPreview();
+      requestAnimationFrame(() => el('inputNewWsName')?.focus());
+    }
+  }
+
+  async function submitCreateWorkspace() {
+    const btn = el('btnCreateWsSubmit');
+    const name = (el('inputNewWsName')?.value || '').trim();
+    const parentDir = (el('inputNewWsParent')?.value || '').trim();
+    const appendDate = Boolean(el('chkNewWsDate')?.checked);
+    const initGit = Boolean(el('chkNewWsGit')?.checked);
+    if (!name) {
+      showToast('请输入新工程名称');
+      el('inputNewWsName')?.focus();
+      return;
+    }
+    if (!parentDir) {
+      showToast('请指定存放父目录');
+      el('inputNewWsParent')?.focus();
+      return;
+    }
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '正在创建...';
+    }
+    try {
+      const res = await api('/api/workspace/create', {
+        method: 'POST',
+        body: JSON.stringify({ name, parentDir, appendDate, initGit, createReadme: true }),
+      });
+      if (el('inputNewWsName')) el('inputNewWsName').value = '';
+      setWsPopoverMode('browse');
+      await selectWorkspace(res.path, { closePopover: true, notify: false });
+      loadDiscoveredWorkspaces(true);
+      const gitMsg = res.gitInitialized ? '（已初始化 Git）' : '';
+      showToast(`已新建并切换工程：${res.name}${gitMsg}`);
+    } catch (err) {
+      showToast(`新建工程失败: ${err.message}`);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '创建并切换';
+      }
+    }
+  }
+
   async function selectWorkspace(dir, opts = {}) {
     const clean = String(dir || '').trim();
     if (!clean) return;
@@ -4792,6 +4887,7 @@
       closeAllPopovers(open ? 'wsPopover' : '');
       el('wsPopover').classList.toggle('hidden', !open);
       if (open) {
+        setWsPopoverMode('browse');
         if (appState.discoveredWorkspaces.length === 0 && !appState.wsDiscovering) {
           loadDiscoveredWorkspaces(false);
         } else {
@@ -4799,7 +4895,39 @@
         }
       }
     });
-    el('btnCloseWsPopover').addEventListener('click', () => el('wsPopover').classList.add('hidden'));
+    el('btnCloseWsPopover').addEventListener('click', () => {
+      setWsPopoverMode('browse');
+      el('wsPopover').classList.add('hidden');
+    });
+    el('btnToggleNewWs')?.addEventListener('click', () => {
+      const inCreate = !el('wsCreatePanel')?.classList.contains('hidden');
+      setWsPopoverMode(inCreate ? 'browse' : 'create');
+    });
+    el('btnCancelNewWs')?.addEventListener('click', () => setWsPopoverMode('browse'));
+    el('inputNewWsName')?.addEventListener('input', updateNewWsPreview);
+    el('inputNewWsParent')?.addEventListener('input', updateNewWsPreview);
+    el('chkNewWsDate')?.addEventListener('change', updateNewWsPreview);
+    el('inputNewWsName')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitCreateWorkspace();
+      }
+    });
+    el('btnCreateWsSubmit')?.addEventListener('click', submitCreateWorkspace);
+    el('btnPickNewWsParent')?.addEventListener('click', async () => {
+      try {
+        const res = await api('/api/workspace/pick', {
+          method: 'POST',
+          body: JSON.stringify({ defaultPath: el('inputNewWsParent')?.value.trim() || '' }),
+        });
+        if (res.path && el('inputNewWsParent')) {
+          el('inputNewWsParent').value = res.path;
+          updateNewWsPreview();
+        }
+      } catch (err) {
+        showToast(`选择父目录失败: ${err.message}`);
+      }
+    });
     el('btnRescanWs')?.addEventListener('click', () => loadDiscoveredWorkspaces(true));
     el('wsFilterPills')?.addEventListener('click', (e) => {
       const btn = e.target.closest('.ws-filter-pill');

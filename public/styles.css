@@ -3221,6 +3221,53 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
   margin: 2px 0;
 }
 
+.ws-new-trigger {
+  color: var(--ink-primary);
+  font-weight: 600;
+  text-decoration: none;
+  padding: 2px 7px;
+  border-radius: var(--radius-sharp);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-surface-2);
+}
+
+.ws-new-trigger:hover {
+  background: var(--bg-surface-3);
+}
+
+[data-surface="charcoal"] .ws-new-trigger {
+  border-color: var(--cta-border);
+  color: var(--effort-accent);
+  background: rgba(238, 255, 130, 0.08);
+}
+
+.ws-parent-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ws-parent-row .text-input {
+  flex: 1 1 auto;
+}
+
+.ws-create-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 2px 0;
+}
+
+.ws-create-preview {
+  padding: 8px 10px;
+  border-radius: var(--radius-sharp);
+  border: 1px dashed var(--line-strong);
+  background: var(--bg-surface-2);
+  color: var(--ink-secondary);
+  word-break: break-all;
+  line-height: 1.45;
+}
+
 .guardrails-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

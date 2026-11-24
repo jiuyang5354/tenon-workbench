@@ -6,7 +6,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { classifyRiskFiles, discoverWorkspaces } from '../lib/workspace.mjs';
+import { classifyRiskFiles, discoverWorkspaces, createWorkspaceProject } from '../lib/workspace.mjs';
 
 const execFileAsync = promisify(execFile);
 import { parseReviewVerdict, parseProviderRef } from '../lib/orchestrator.mjs';
@@ -596,6 +596,88 @@ test('discoverWorkspaces detects Codex, Claude, TENON & Git repos and exposes wo
       await new Promise((resolve) => server.close(resolve));
     }
   } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('createWorkspaceProject & POST /api/workspace/create scaffold git repo safely and block traversal/duplicates', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tenon-ws-create-'));
+  const tmpData = path.join(root, 'data');
+  const parentDir = path.join(root, 'parent');
+  await Promise.all([
+    fs.mkdir(tmpData, { recursive: true }),
+    fs.mkdir(parentDir, { recursive: true }),
+  ]);
+
+  const { server } = await createWorkbenchServer({
+    dataDir: tmpData,
+    defaultWorkspace: parentDir,
+    workspaceDiscoveryOptions: {
+      homeDir: path.join(root, 'home'),
+      tmpDir: path.join(root, 'ignored-tmp'),
+      noisePatterns: [],
+      codexHome: '',
+      claudeDir: '',
+      claudeJsonPath: '',
+      geminiDir: '',
+      scanRoots: [parentDir],
+    },
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+
+  try {
+    // 1. Valid creation with date suffix + Git init + initial commit
+    const createRes = await fetch(`${base}/api/workspace/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: '智能客服后端',
+        parentDir,
+        appendDate: true,
+        initGit: true,
+      }),
+    });
+    assert.equal(createRes.status, 201);
+    const created = await createRes.json();
+    assert.equal(created.ok, true);
+    assert.match(created.name, /^智能客服后端_\d{4}-\d{2}-\d{2}$/);
+    assert.equal(created.gitInitialized, true);
+    assert.equal(created.workspace.isGitRepo, true);
+    assert.equal(created.workspace.hasCommits, true);
+    assert.equal(created.workspace.changedFiles.length, 0);
+
+    // 2. Duplicate creation -> 409 Conflict
+    const dupRes = await fetch(`${base}/api/workspace/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: created.name,
+        parentDir,
+        appendDate: false,
+      }),
+    });
+    assert.equal(dupRes.status, 409);
+
+    // 3. Path traversal / illegal filename -> 400
+    const badRes = await fetch(`${base}/api/workspace/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: '..\\escape',
+        parentDir,
+      }),
+    });
+    assert.equal(badRes.status, 400);
+
+    // 4. Direct helper sanity check (reserved Windows device name)
+    await assert.rejects(
+      () => createWorkspaceProject({ parentDir, name: 'CON' }),
+      (err) => err.statusCode === 400
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
     await fs.rm(root, { recursive: true, force: true });
   }
 });
