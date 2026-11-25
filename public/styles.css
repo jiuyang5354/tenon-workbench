@@ -11116,3 +11116,184 @@ html[data-surface="charcoal"] .wf-port.is-wire-candidate .wf-port-dot {
   font-size: 11px;
   box-shadow: var(--shadow-card);
 }
+
+/* =========================================================================
+   12. v1.0.8 Dedicated Canvas Summary Card (画布卡片总结框) & Free Model Picker
+   ========================================================================= */
+.ic-chip-btn.is-summary-add {
+  color: var(--ink-primary);
+  font-weight: 600;
+  background: var(--bg-surface-2);
+  border-color: var(--line-subtle);
+}
+
+.ic-chip-btn.is-summary-add:hover {
+  background: var(--cta-bg);
+  border-color: var(--cta-border);
+  color: var(--cta-ink);
+}
+
+.ic-node-wrap.is-summary-card .agent-node-surface {
+  border-color: var(--line-strong);
+  box-shadow: 0 2px 6px rgba(17, 19, 21, 0.05), 0 12px 30px -16px rgba(17, 19, 21, 0.16);
+}
+
+.ic-node-wrap.is-summary-card .ic-ext-role {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--cta-bg);
+  color: var(--cta-ink);
+}
+
+.ic-summary-panel {
+  border: 1px solid var(--line-subtle);
+  border-left: 2.5px solid var(--ink-primary);
+  border-radius: var(--radius-sharp);
+  background: var(--bg-surface-2);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+html[data-surface="charcoal"] .ic-summary-panel {
+  border-left-color: #eeff82;
+}
+
+.ic-summary-panel.is-live {
+  border-color: var(--line-strong);
+}
+
+.ic-summary-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line-subtle);
+  background: var(--bg-surface-1);
+}
+
+.ic-summary-panel-title {
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.ic-summary-panel-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ic-summary-badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--line-subtle);
+  color: var(--ink-secondary);
+}
+
+.ic-summary-copy-btn {
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--line-subtle);
+  background: var(--bg-surface-1);
+  color: var(--ink-secondary);
+  font-size: 11px;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.ic-summary-copy-btn:hover {
+  background: var(--bg-surface-3);
+  border-color: var(--line-strong);
+  color: var(--ink-primary);
+}
+
+.ic-summary-output {
+  padding: 9px 11px;
+  max-height: 220px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  font-size: 12.5px;
+  line-height: 1.58;
+  user-select: text;
+  cursor: text;
+}
+
+.ic-summary-output::-webkit-scrollbar {
+  display: none;
+}
+
+.ic-summary-output h3 {
+  font-size: 12px;
+  margin: 6px 0 3px;
+  color: var(--ink-primary);
+}
+
+.ic-summary-output h3:first-child {
+  margin-top: 0;
+}
+
+.ic-summary-output p {
+  margin: 4px 0;
+}
+
+.ic-summary-output ul,
+.ic-summary-output ol {
+  margin: 4px 0;
+  padding-left: 16px;
+}
+
+.ic-summary-placeholder {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-muted);
+}
+
+/* Free Per-Node Model Picker Engine Filter Tabs */
+.ic-model-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+  margin-top: 6px;
+  padding: 2px;
+  border-radius: var(--radius-sharp);
+  background: var(--bg-surface-2);
+  border: 1px solid var(--line-subtle);
+}
+
+.ic-model-tab {
+  height: 23px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-secondary);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.ic-model-tab:hover {
+  color: var(--ink-primary);
+}
+
+.ic-model-tab.active {
+  background: var(--bg-surface-1);
+  color: var(--ink-primary);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(17, 19, 21, 0.08);
+}
+
+/* Make External Per-Node Model Pill Clearly Clickable */
+.ic-ext-model {
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+.ic-ext-model:hover {
+  background: var(--bg-surface-1);
+  border-color: var(--line-strong);
+  text-decoration: none;
+}

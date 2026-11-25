@@ -216,6 +216,30 @@
       ],
       errorMessage: '外部模型调用失败，请在「设置 → Agent 与 API 接入」中检查配置。',
     },
+    'summary-card': {
+      kind: 'summary-card',
+      roleCode: '总结框',
+      provider: 'any',
+      title: '画布卡片总结框',
+      subtitle: '汇总最终结论并用直白语言复述核心内容',
+      mode: 'agent-chat',
+      orbIdle: ['reasoning', 'default'],
+      orbRun: ['reasoning', 'twins'],
+      inLabel: '上游结果',
+      outLabel: '结论输出',
+      inType: 'multi',
+      outType: 'gate',
+      showIn: true,
+      showOut: true,
+      defaultWidth: 368,
+      defaultPrompt: '基于上游全部节点的输出，提炼清晰准确的最终结论，并用通俗易懂的口语化中文向我复述核心改动、关键发现与后续建议。',
+      stepTemplates: [
+        { verb: '汇总上游节点结论', detail: '收集所有接入上游节点的产出与对话执行记录' },
+        { verb: '提炼最终核心结论', detail: '按选定模型提炼关键结果、改动影响与风险提示' },
+        { verb: '生成复述内容并呈现', detail: '以清晰易读的要点直接展示在画布总结框卡片内' },
+      ],
+      errorMessage: '生成总结失败，请检查所选模型登录态或外部 API 配置后重试。',
+    },
   };
 
   function makeStepsForNode(kind, customDetail = '') {
@@ -270,7 +294,7 @@
       effort: typeof obj.effort === 'string' ? obj.effort.trim() : '',
       x: Number.isFinite(Number(obj.x)) ? Number(obj.x) : 80,
       y: Number.isFinite(Number(obj.y)) ? Number(obj.y) : 120,
-      w: Number.isFinite(Number(obj.w)) ? clampNum(Math.round(Number(obj.w)), MIN_NODE_W, MAX_NODE_W) : NODE_WIDTH,
+      w: Number.isFinite(Number(obj.w)) ? clampNum(Math.round(Number(obj.w)), MIN_NODE_W, MAX_NODE_W) : (tpl.defaultWidth || NODE_WIDTH),
       h: Number.isFinite(Number(obj.h)) && Number(obj.h) > 0 ? clampNum(Math.round(Number(obj.h)), MIN_NODE_H, MAX_NODE_H) : null,
       status: sanitizeStatus(obj.status, VALID_NODE_STATUS, 'idle'),
       muted: Boolean(obj.muted),
@@ -280,6 +304,7 @@
       toggles: safeToggles,
       steps: safeSteps,
       outputMd: typeof obj.outputMd === 'string' ? obj.outputMd : '',
+      summarySource: typeof obj.summarySource === 'string' ? obj.summarySource : '',
       durationMs: Number.isFinite(Number(obj.durationMs)) ? Number(obj.durationMs) : 0,
     };
   }
@@ -330,12 +355,21 @@
         hydrateNode({
           id: 'n-review',
           kind: 'codex-review',
-          title: '代码审查与总结',
-          subtitle: '排查严重缺陷并生成简明说明',
+          title: '代码审查',
+          subtitle: '排查严重缺陷并核对改动风险',
           x: 1260,
           y: 230,
           params: [{ k: '模型', dynamic: 'nodeModel' }, { k: '推理深度', dynamic: 'nodeEffort' }, { k: '复审上限', dynamic: 'maxRounds' }],
-          toggles: [{ key: 'humanReport', label: '生成简明总结', desc: '汇总改动重点与注意事项' }],
+        }),
+        hydrateNode({
+          id: 'n-summary',
+          kind: 'summary-card',
+          title: '画布卡片总结框',
+          subtitle: '汇总最终结论并用直白语言复述核心内容',
+          x: 1656,
+          y: 196,
+          w: 368,
+          params: [{ k: '模型', dynamic: 'nodeModel' }, { k: '输入路数', dynamic: 'inCount' }],
         }),
       ],
       edges: [
@@ -344,6 +378,7 @@
         { id: 'e-3', source: 'n-codex-fe', target: 'n-merge' },
         { id: 'e-4', source: 'n-codex-be', target: 'n-merge' },
         { id: 'e-5', source: 'n-merge', target: 'n-review' },
+        { id: 'e-6', source: 'n-review', target: 'n-summary' },
       ],
       groups: [
         {
@@ -436,10 +471,20 @@
           id: 'mc-review',
           kind: 'codex-review',
           title: '最终代码审查',
-          subtitle: '全面排查隐患并输出简明结论',
+          subtitle: '全面排查隐患并核验改动质量',
           x: 1540,
           y: 315,
           params: [{ k: '模型', dynamic: 'nodeModel' }, { k: '复审上限', dynamic: 'maxRounds' }],
+        }),
+        hydrateNode({
+          id: 'mc-summary',
+          kind: 'summary-card',
+          title: '画布卡片总结框',
+          subtitle: '汇总最终结论并用直白语言复述核心内容',
+          x: 1930,
+          y: 280,
+          w: 368,
+          params: [{ k: '模型', dynamic: 'nodeModel' }, { k: '输入路数', dynamic: 'inCount' }],
         }),
       ],
       edges: [
@@ -454,6 +499,7 @@
         { id: 'me-9', source: 'mc-merge-a', target: 'mc-master' },
         { id: 'me-10', source: 'mc-merge-b', target: 'mc-master' },
         { id: 'me-11', source: 'mc-master', target: 'mc-review' },
+        { id: 'me-12', source: 'mc-review', target: 'mc-summary' },
       ],
       groups: [
         {
@@ -500,17 +546,27 @@
         hydrateNode({
           id: 'n-review',
           kind: 'codex-review',
-          title: '代码审查与总结',
-          subtitle: '排查严重缺陷并生成简明说明',
+          title: '代码审查',
+          subtitle: '排查严重缺陷并确认风险边界',
           x: 880,
           y: 160,
           params: [{ k: '模型', dynamic: 'nodeModel' }, { k: '复审上限', dynamic: 'maxRounds' }],
-          toggles: [{ key: 'humanReport', label: '生成简明总结', desc: '输出易懂的改动说明' }],
+        }),
+        hydrateNode({
+          id: 'n-summary',
+          kind: 'summary-card',
+          title: '画布卡片总结框',
+          subtitle: '汇总最终结论并用直白语言复述核心内容',
+          x: 1272,
+          y: 128,
+          w: 368,
+          params: [{ k: '模型', dynamic: 'nodeModel' }, { k: '输入路数', dynamic: 'inCount' }],
         }),
       ],
       edges: [
         { id: 'e-lin-1', source: 'n-plan', target: 'n-codex' },
         { id: 'e-lin-2', source: 'n-codex', target: 'n-review' },
+        { id: 'e-lin-3', source: 'n-review', target: 'n-summary' },
       ],
     };
   }
@@ -635,7 +691,10 @@
       return `## ${node.title} · 预演输出\n\n${notice}\n\n- **汇总方式**：\`${modelLabel}\`\n- **汇入上游**：共 **${upstreamTitles.length || 1} 路**（${upStr}）\n- **阶段职责**：核对上游各路接口一致性并整理统一改动。`;
     }
     if (node.kind === 'codex-review') {
-      return `## ${node.title} · 预演输出\n\n${notice}\n\n- **审查模型**：\`${modelLabel}\`\n- **承接上游**：${upStr}\n- **阶段职责**：只读排查高风险隐患，并生成简明改动说明。`;
+      return `## ${node.title} · 预演输出\n\n${notice}\n\n- **审查模型**：\`${modelLabel}\`\n- **承接上游**：${upStr}\n- **阶段职责**：只读排查高风险隐患并输出审查结论。`;
+    }
+    if (node.kind === 'summary-card') {
+      return `### 最终结论（流程预演）\n\n已汇合 **${upStr}** 的全部上游步骤，流程依赖清晰完整。\n\n### 给你的复述要点\n- **目标范围**：${topic}\n- **总结模型**：\`${modelLabel}\`（可随时点击卡片上方模型自由切换）\n- **下一步**：点击本卡片下方 **「生成总结」**，即可直接调用选定模型汇总真实内容并在这里复述。`;
     }
     return `## ${node.title} · 预演输出\n\n${notice}\n\n- **配置模型**：\`${modelLabel}\`\n- **处理内容**：${topic}`;
   }
@@ -661,6 +720,7 @@
       onDispatchRealCli,
       onOpenProviderHub,
       onRunProviderNode,
+      onRunCanvasNode,
       onPresetChange,
       onStatusChange,
       onToast,
@@ -743,9 +803,14 @@
         const ext = parseNodeProviderRef(node.model);
         if (ext) {
           const prov = (ctx.providers || []).find((p) => p.id === ext.providerId);
-          const pname = prov ? prov.name.replace(/\s*\([^)]*\)\s*/g, '').trim() : '外部 Agent';
+          const pname = prov ? prov.name.replace(/\s*\([^)]*\)\s*/g, '').trim() : '外部模型';
           const out = ext.model ? `${pname} · ${ext.model}` : pname;
           return out.length > 22 ? `${out.slice(0, 21)}…` : out;
+        }
+        if (node.model === 'codex:default') return 'Codex · 默认';
+        if (node.model.startsWith('codex:')) {
+          const inner = node.model.slice('codex:'.length).trim();
+          return ctx.formatCodexShort ? ctx.formatCodexShort(inner) : `Codex · ${inner}`;
         }
         if (ctx.formatGeminiShort && /^gemini-|^orchestrator-/i.test(node.model)) {
           return ctx.formatGeminiShort(node.model);
@@ -757,7 +822,7 @@
         const first = (ctx.providers || []).find((p) => p.enabled);
         return first ? `${first.name.replace(/\s*\([^)]*\)\s*/g, '').trim()}` : '选择外部模型';
       }
-      if (tpl.provider === 'gemini') return ctx.geminiModelShort || 'Neon · High';
+      if (tpl.provider === 'gemini' || tpl.provider === 'any') return ctx.geminiModelShort || 'Neon · High';
       if (tpl.provider === 'both') return '自动汇总';
       return ctx.codexModelShort || 'Codex · 默认';
     }
@@ -878,9 +943,12 @@
         } else if (n.kind === 'cluster-merge') {
           if (run.activeStage === 'review' || run.status === 'completed') st = 'completed';
         } else if (n.kind === 'codex-review') {
-          if (run.activeStage === 'review' || run.activeStage === 'summary') st = run.status === 'running' ? 'running' : run.status === 'blocked' ? 'error' : 'completed';
-          else if (run.status === 'completed') st = 'completed';
+          if (run.activeStage === 'review') st = run.status === 'running' ? 'running' : run.status === 'blocked' ? 'error' : 'completed';
+          else if (run.activeStage === 'summary' || run.status === 'completed') st = 'completed';
           else if (run.status === 'blocked') st = 'error';
+        } else if (n.kind === 'summary-card') {
+          if (run.activeStage === 'summary' && run.status === 'running') st = 'running';
+          else if (g.summaryText || run.status === 'completed') st = 'completed';
         }
         map.set(n.id, st);
       });
@@ -1290,6 +1358,49 @@
       return false;
     }
 
+    function resolveSummaryCardDisplay(node) {
+      if (node.outputMd && node.outputMd.trim()) {
+        const srcLabel = node.summarySource === 'live'
+          ? '模型生成'
+          : node.summarySource === 'preview'
+            ? '流程预演'
+            : '已生成';
+        return { text: node.outputMd, sourceLabel: srcLabel, isEmpty: false };
+      }
+      const ctx = getContext ? getContext() : {};
+      const run = ctx.currentRun;
+      if (run) {
+        const g = run.gemini || {};
+        const c = run.codex || {};
+        if (g.summaryText && g.summaryText.trim()) {
+          return { text: g.summaryText.trim(), sourceLabel: '同步当前对话', isEmpty: false };
+        }
+        const lastAsst = Array.isArray(run.messages)
+          ? [...run.messages].reverse().find((m) => m.role === 'assistant' && m.content && m.content.trim())
+          : null;
+        if (lastAsst) {
+          return { text: lastAsst.content.trim(), sourceLabel: '同步当前对话', isEmpty: false };
+        }
+        const fallbackParts = [];
+        if (run.reviewVerdict?.summary) {
+          fallbackParts.push(`**审查结论**：${run.reviewVerdict.passed ? '通过' : '拦截'} — ${run.reviewVerdict.summary}`);
+        }
+        if (c.execText && c.execText.trim()) {
+          fallbackParts.push(c.execText.trim());
+        } else if (g.planText && g.planText.trim()) {
+          fallbackParts.push(g.planText.trim());
+        }
+        if (fallbackParts.length > 0) {
+          return { text: fallbackParts.join('\n\n'), sourceLabel: '同步当前对话', isEmpty: false };
+        }
+      }
+      return {
+        text: '',
+        sourceLabel: '等待汇总',
+        isEmpty: true,
+      };
+    }
+
     function renderNodes() {
       const statusMap = effectiveStatuses();
       const statusMeta = {
@@ -1314,6 +1425,12 @@
           const meta = statusMeta[st] || statusMeta.idle;
           const [orbState, orbVariant] = running ? tpl.orbRun : st === 'error' ? ['retrying', 'default'] : tpl.orbIdle;
           const isMerge = n.kind === 'cluster-merge';
+          const isSummaryCard = n.kind === 'summary-card';
+          const summaryInfo = isSummaryCard ? resolveSummaryCardDisplay(n) : null;
+          const mdRender = renderMarkdown || ((s) => `<pre>${escapeHtml(s)}</pre>`);
+          const runBtnText = isSummaryCard
+            ? (running ? '总结中...' : n.muted ? '已跳过' : (summaryInfo && !summaryInfo.isEmpty ? '重新总结' : '生成总结'))
+            : (n.muted ? '已跳过' : meta.btn);
 
           const paramsHtml = (n.params || [])
             .map(
@@ -1350,11 +1467,11 @@
           const nh = !n.collapsed ? nodeHeight(n) : null;
 
           return `
-            <div class="ic-node-wrap ${sel ? 'is-selected' : ''} ${isMerge ? 'is-merge-hub' : ''} ${n.muted ? 'is-muted' : ''} ${n.collapsed ? 'is-collapsed' : ''} ${hiddenInGroup ? 'is-group-hidden' : ''}" data-node-id="${escapeHtml(n.id)}" data-status="${safeSt}" style="width:${nw}px;transform:translate(${Math.round(n.x)}px,${Math.round(n.y)}px)">
+            <div class="ic-node-wrap ${sel ? 'is-selected' : ''} ${isMerge ? 'is-merge-hub' : ''} ${isSummaryCard ? 'is-summary-card' : ''} ${n.muted ? 'is-muted' : ''} ${n.collapsed ? 'is-collapsed' : ''} ${hiddenInGroup ? 'is-group-hidden' : ''}" data-node-id="${escapeHtml(n.id)}" data-status="${safeSt}" style="width:${nw}px;transform:translate(${Math.round(n.x)}px,${Math.round(n.y)}px)">
               <div class="ic-node-ext-meta mono">
                 <div class="ic-ext-left">
                   <span class="ic-ext-role">${escapeHtml(extRole)}</span>
-                  <button type="button" class="ic-ext-model" data-ic-pick-model="${escapeHtml(n.id)}" title="点击快速切换此节点模型">${escapeHtml(extModel)}</button>
+                  <button type="button" class="ic-ext-model" data-ic-pick-model="${escapeHtml(n.id)}" title="点击自由切换此节点模型（支持 Gemini / Codex / 外部 API）">${escapeHtml(extModel)} ▾</button>
                 </div>
                 <span class="ic-ext-status ${safeSt}">
                   <span class="ic-ext-dot ${running ? 'is-pulse' : ''}"></span>
@@ -1380,12 +1497,34 @@
                   </header>
 
                   <div class="agent-node-body">
+                    ${
+                      isSummaryCard
+                        ? `<div class="ic-summary-panel ${running ? 'is-live' : ''}">
+                            <div class="ic-summary-panel-head">
+                              <span class="ic-summary-panel-title">最终结论与复述</span>
+                              <div class="ic-summary-panel-actions">
+                                <span class="ic-summary-badge mono-xs">${escapeHtml(running ? '正在总结...' : summaryInfo.sourceLabel)}</span>
+                                ${!summaryInfo.isEmpty ? `<button type="button" class="ic-summary-copy-btn" data-ic-copy-summary="${escapeHtml(n.id)}" title="复制总结与复述内容">复制</button>` : ''}
+                              </div>
+                            </div>
+                            <div class="ic-summary-output markdown-output">
+                              ${
+                                running
+                                  ? '<p class="ic-summary-placeholder is-shimmer">正在汇总上游节点输出并整理复述结论...</p>'
+                                  : !summaryInfo.isEmpty
+                                    ? mdRender(summaryInfo.text)
+                                    : '<p class="ic-summary-placeholder">接入上游节点后，点击下方「生成总结」即可在这里直接查看最终结论与复述内容；也可随时自由切换上方模型。</p>'
+                              }
+                            </div>
+                          </div>`
+                        : ''
+                    }
                     <div class="ic-node-prompt-box">
                       <div class="ic-prompt-head">
-                        <span class="mono-xs">节点指令</span>
+                        <span class="mono-xs">${isSummaryCard ? '总结与复述要求' : '节点指令'}</span>
                         <span class="mono-xs ic-prompt-hint">Ctrl+Enter 运行</span>
                       </div>
-                      <textarea class="ic-inline-prompt" rows="2" data-ic-prompt="${escapeHtml(n.id)}" placeholder="填写该节点的具体职责或提示词...">${escapeHtml(n.prompt)}</textarea>
+                      <textarea class="ic-inline-prompt" rows="2" data-ic-prompt="${escapeHtml(n.id)}" placeholder="${isSummaryCard ? '例如：用简洁直白的话总结最终结论，并列出 3 条关键要点...' : '填写该节点的具体职责或提示词...'}">${escapeHtml(n.prompt)}</textarea>
                     </div>
                     ${paramsHtml ? `<dl class="wf-params">${paramsHtml}</dl>` : ''}
                     ${renderNodeCoTTree(n, st)}
@@ -1403,8 +1542,8 @@
                       <button type="button" class="wf-run-btn is-secondary" data-ic-preview="${escapeHtml(n.id)}" ${running || n.muted ? 'disabled' : ''} title="仅在画布内预演步骤，不改本地文件">
                         <span>预演</span>
                       </button>
-                      <button type="button" class="wf-run-btn" data-ic-run="${escapeHtml(n.id)}" ${running || n.muted ? 'disabled' : ''} title="使用此节点的模型与指令发起真实执行">
-                        <span>${n.muted ? '已跳过' : meta.btn}</span>
+                      <button type="button" class="wf-run-btn" data-ic-run="${escapeHtml(n.id)}" ${running || n.muted ? 'disabled' : ''} title="${isSummaryCard ? '调用所选模型实时总结上游内容并在本卡片内复述' : '使用此节点的模型与指令发起真实执行'}">
+                        <span>${runBtnText}</span>
                       </button>
                     </div>
                   </footer>
@@ -1553,6 +1692,27 @@
         });
       });
 
+      nodesLayerEl.querySelectorAll('.ic-summary-output').forEach((box) => {
+        box.addEventListener('pointerdown', (e) => e.stopPropagation());
+        box.addEventListener('wheel', (e) => {
+          if (box.scrollHeight > box.clientHeight) e.stopPropagation();
+        }, { passive: true });
+      });
+
+      nodesLayerEl.querySelectorAll('[data-ic-copy-summary]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const n = state.graph.nodes.find((x) => x.id === btn.dataset.icCopySummary);
+          if (!n) return;
+          const info = resolveSummaryCardDisplay(n);
+          if (info.text && navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(info.text).then(() => {
+              if (onToast) onToast('已复制总结与复述内容');
+            }).catch(() => {});
+          }
+        });
+      });
+
       nodesLayerEl.querySelectorAll('[data-ic-prompt]').forEach((ta) => {
         ta.addEventListener('pointerdown', (e) => { e.stopPropagation(); selectNodeQuietly(ta.dataset.icPrompt); });
         ta.addEventListener('wheel', (e) => {
@@ -1569,7 +1729,7 @@
           if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
             e.preventDefault();
             e.stopPropagation();
-            runSinglePreview(ta.dataset.icPrompt);
+            runSingleRealOrInline(ta.dataset.icPrompt);
           }
         });
       });
@@ -1750,7 +1910,7 @@
       contextMenuEl.style.transformOrigin = `${Math.max(0, Math.min(menuW, localX - left))}px ${Math.max(0, Math.min(measuredH, localY - top))}px`;
     }
 
-    /** Per-Node Model Picker (Gemini grouped models / Codex presets + custom input / Merge both!) */
+    /** Unrestricted Per-Node Free Model Picker (ALL Gemini + ALL Codex + ALL External APIs + Custom Model ID on EVERY node!) */
     function openModelPicker(nodeId, clientX, clientY) {
       if (!contextMenuEl) return;
       const node = state.graph.nodes.find((n) => n.id === nodeId);
@@ -1758,104 +1918,139 @@
       const tpl = NODE_TEMPLATES[node.kind] || NODE_TEMPLATES['codex-exec'];
       const ctx = getContext ? getContext() : {};
       const geminiModels = ctx.geminiModels || [];
-      const codexModels = ctx.codexModels || [{ id: '', label: '默认（读取本机 CODEX_HOME 配置）' }];
+      const codexModels = ctx.codexModels || [];
+      const enabledProviders = (ctx.providers || []).filter((p) => p.enabled);
 
       state.selectedId = nodeId;
       state.ctxMenu = { open: true, kind: 'model', worldX: node.x, worldY: node.y, nodeId };
+      let activeTab = 'all';
 
-      const showGemini = tpl.provider === 'gemini' || tpl.provider === 'both';
-      const showCodex = tpl.provider === 'codex' || tpl.provider === 'both';
-      const enabledProviders = (ctx.providers || []).filter((p) => p.enabled);
-
-      const buildOptions = (q = '') => {
+      const buildOptions = (q = '', tab = 'all') => {
         const needle = q.trim().toLowerCase();
         const rows = [];
         const match = (id, label) => !needle || String(id).toLowerCase().includes(needle) || String(label).toLowerCase().includes(needle);
 
-        // External Local CLI Agents & HTTP API Providers (available on EVERY node!)
-        const extItems = [];
-        enabledProviders.forEach((p) => {
-          const models = Array.isArray(p.models) && p.models.length > 0 ? p.models : [p.defaultModel || ''];
-          models.slice(0, 6).forEach((mId) => {
-            const ref = `provider:${p.id}:${mId}`;
-            if (match(`${p.name} ${mId} ${p.protocol}`, `${p.name} ${mId}`)) {
-              extItems.push({
-                type: 'item',
-                id: ref,
-                label: p.name,
-                sub: mId || p.command || p.baseUrl || p.protocol,
-                badge: p.kind === 'cli' ? 'CLI' : 'API',
-                selected: node.model === ref,
-              });
-            }
-          });
-        });
-        if (extItems.length > 0) {
-          rows.push({ type: 'group', label: '外部 AGENT 与 API（实时直连）' });
-          rows.push(...extItems);
+        // Default / inherit option (always shown in 'all')
+        if (tab === 'all') {
+          const defLabel = tpl.provider === 'both'
+            ? '自动汇总（跟随默认）'
+            : tpl.provider === 'external'
+              ? '自动使用首个已启用的外部模型'
+              : '跟随工作台全局默认模型';
+          if (match('', defLabel)) {
+            rows.push({ type: 'item', id: '', label: defLabel, sub: 'AUTO', badge: '默认', selected: !node.model });
+          }
         }
 
-        // Default / inherit option
-        const defLabel = tpl.provider === 'both'
-          ? '自动汇总（默认）'
-          : tpl.provider === 'external'
-            ? '自动使用首个已启用的外部模型'
-            : '跟随工作台全局默认模型';
-        if (match('', defLabel)) {
-          rows.push({ type: 'item', id: '', label: defLabel, sub: 'AUTO', badge: '默认', selected: !node.model });
-        }
-
-        if (showGemini && geminiModels.length > 0) {
-          const groups = [
-            { title: 'GEMINI 4 NEON · 推荐', items: [] },
-            { title: 'GEMINI 4 SERIES', items: [] },
-            { title: 'ORCHESTRATOR & FLASH', items: [] },
-          ];
-          geminiModels.forEach((m) => {
-            if (!match(m.id, m.label || m.id)) return;
-            const lid = String(m.id || '').toLowerCase();
-            if (lid.includes('neon') && lid.startsWith('gemini-4')) groups[0].items.push(m);
-            else if (lid.startsWith('gemini-4')) groups[1].items.push(m);
-            else groups[2].items.push(m);
-          });
-          groups.forEach((g) => {
-            if (g.items.length === 0) return;
-            rows.push({ type: 'group', label: g.title });
-            g.items.forEach((m) => {
-              const effM = String(m.id).match(/-(xhigh|high|medium|low)$/i);
-              rows.push({
-                type: 'item',
-                id: m.id,
-                label: m.label || m.id,
-                sub: m.id,
-                badge: effM ? effM[1].toUpperCase() : 'GEM',
-                selected: node.model === m.id,
-              });
+        // 1. External Local CLI Agents & HTTP API Providers (available on EVERY node)
+        if (tab === 'all' || tab === 'external') {
+          const extItems = [];
+          enabledProviders.forEach((p) => {
+            const models = Array.isArray(p.models) && p.models.length > 0 ? p.models : [p.defaultModel || ''];
+            models.slice(0, 8).forEach((mId) => {
+              const ref = `provider:${p.id}:${mId}`;
+              if (match(`${p.name} ${mId} ${p.protocol}`, `${p.name} ${mId}`)) {
+                extItems.push({
+                  type: 'item',
+                  id: ref,
+                  label: p.name,
+                  sub: mId || p.command || p.baseUrl || p.protocol,
+                  badge: p.kind === 'cli' ? 'CLI' : 'API',
+                  selected: node.model === ref,
+                });
+              }
             });
           });
+          if (extItems.length > 0) {
+            rows.push({ type: 'group', label: '外部 AGENT 与 API（实时直连）' });
+            rows.push(...extItems);
+          } else if (tab === 'external') {
+            rows.push({ type: 'group', label: '暂未启用外部模型，可点击底部前往接入' });
+          }
         }
 
-        if (showCodex) {
-          const codexFiltered = codexModels.filter((m) => m.id && match(m.id, m.label || m.id));
-          if (codexFiltered.length > 0) {
-            rows.push({ type: 'group', label: 'CODEX MODELS · 施工/审查' });
-            codexFiltered.forEach((m) => {
-              rows.push({
+        // 2. Gemini Models (available on EVERY node!)
+        if (tab === 'all' || tab === 'gemini') {
+          if (geminiModels.length > 0) {
+            const groups = [
+              { title: 'GEMINI 4 NEON · 推荐', items: [] },
+              { title: 'GEMINI 4 SERIES', items: [] },
+              { title: 'ORCHESTRATOR & FLASH', items: [] },
+            ];
+            geminiModels.forEach((m) => {
+              if (!match(m.id, m.label || m.id)) return;
+              const lid = String(m.id || '').toLowerCase();
+              if (lid.includes('neon') && lid.startsWith('gemini-4')) groups[0].items.push(m);
+              else if (lid.startsWith('gemini-4')) groups[1].items.push(m);
+              else groups[2].items.push(m);
+            });
+            groups.forEach((g) => {
+              if (g.items.length === 0) return;
+              rows.push({ type: 'group', label: g.title });
+              g.items.forEach((m) => {
+                const effM = String(m.id).match(/-(xhigh|high|medium|low)$/i);
+                rows.push({
+                  type: 'item',
+                  id: m.id,
+                  label: m.label || m.id,
+                  sub: m.id,
+                  badge: effM ? effM[1].toUpperCase() : 'GEM',
+                  selected: node.model === m.id,
+                });
+              });
+            });
+          } else {
+            const fallbackG = [
+              { id: 'gemini-4-neon-high', label: 'Gemini 4 Neon High' },
+              { id: 'gemini-4-neon-medium', label: 'Gemini 4 Neon Medium' },
+              { id: 'gemini-4-pro', label: 'Gemini 4 Pro' },
+            ].filter((m) => match(m.id, m.label));
+            if (fallbackG.length > 0) {
+              rows.push({ type: 'group', label: 'GEMINI 模型（本机 agy）' });
+              fallbackG.forEach((m) => {
+                rows.push({ type: 'item', id: m.id, label: m.label, sub: m.id, badge: 'GEM', selected: node.model === m.id });
+              });
+            }
+          }
+        }
+
+        // 3. Codex Models (available on EVERY node!)
+        if (tab === 'all' || tab === 'codex') {
+          const codexItems = [];
+          if (match('codex:default', 'Codex 默认配置档')) {
+            codexItems.push({
+              type: 'item',
+              id: 'codex:default',
+              label: 'Codex · 本机默认配置',
+              sub: '读取当前 CODEX_HOME 配置档',
+              badge: 'CDX',
+              selected: node.model === 'codex:default',
+            });
+          }
+          codexModels
+            .filter((m) => m.id && match(m.id, m.label || m.id))
+            .forEach((m) => {
+              const cid = m.id.startsWith('codex:') ? m.id : `codex:${m.id}`;
+              codexItems.push({
                 type: 'item',
-                id: m.id,
+                id: cid,
                 label: m.label || m.id,
                 sub: m.id,
                 badge: 'CDX',
-                selected: node.model === m.id,
+                selected: node.model === cid || node.model === m.id,
               });
             });
+          if (codexItems.length > 0) {
+            rows.push({ type: 'group', label: 'CODEX 模型（本机 codex CLI）' });
+            rows.push(...codexItems);
           }
         }
+
         return rows;
       };
 
       const renderList = (q = '') => {
-        const rows = buildOptions(q);
+        const rows = buildOptions(q, activeTab);
         const bodyEl = contextMenuEl.querySelector('.ic-ctx-body');
         if (!bodyEl) return;
         bodyEl.innerHTML =
@@ -1886,17 +2081,19 @@
 
       contextMenuEl.innerHTML = `
         <div class="ic-ctx-search-wrap">
-          <input type="text" class="ic-ctx-search" id="icCtxSearch" placeholder="搜索本机模型或外部 Agent / API..." autocomplete="off" />
+          <input type="text" class="ic-ctx-search" id="icCtxSearch" placeholder="自由搜索任意 Gemini / Codex / 外部模型..." autocomplete="off" />
+          <div class="ic-model-tabs" role="tablist" aria-label="按模型来源筛选">
+            <button type="button" class="ic-model-tab active" data-mtab="all">全部</button>
+            <button type="button" class="ic-model-tab" data-mtab="gemini">Gemini</button>
+            <button type="button" class="ic-model-tab" data-mtab="codex">Codex</button>
+            <button type="button" class="ic-model-tab" data-mtab="external">外部 API</button>
+          </div>
         </div>
         <div class="ic-ctx-body"></div>
-        ${
-          showCodex
-            ? `<div class="ic-ctx-custom-row">
-                <input type="text" class="ic-ctx-search mono" id="icCustomNodeModel" placeholder="输入自定义模型名回车..." autocomplete="off" />
-                <button type="button" class="btn-primary-sm wf-btn" id="btnApplyNodeCustomModel">应用</button>
-              </div>`
-            : ''
-        }
+        <div class="ic-ctx-custom-row">
+          <input type="text" class="ic-ctx-search mono" id="icCustomNodeModel" placeholder="自由输入自定义模型 ID 回车..." autocomplete="off" />
+          <button type="button" class="btn-primary-sm wf-btn" id="btnApplyNodeCustomModel">应用</button>
+        </div>
         <div class="picker-manage-foot">
           <button type="button" class="picker-manage-btn" id="btnCtxManageProviders">
             <span>+ 管理外部 Agent 与 API 接入</span>
@@ -1906,7 +2103,16 @@
 
       renderList('');
       contextMenuEl.classList.remove('hidden');
-      placeMenuEdgeAware(clientX, clientY, 296);
+      placeMenuEdgeAware(clientX, clientY, 316);
+
+      contextMenuEl.querySelectorAll('[data-mtab]').forEach((tb) => {
+        tb.addEventListener('click', (e) => {
+          e.stopPropagation();
+          activeTab = tb.dataset.mtab || 'all';
+          contextMenuEl.querySelectorAll('[data-mtab]').forEach((x) => x.classList.toggle('active', x === tb));
+          renderList(contextMenuEl.querySelector('#icCtxSearch')?.value || '');
+        });
+      });
 
       contextMenuEl.querySelector('#btnCtxManageProviders')?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -2022,7 +2228,8 @@
             { id: 'add:codex-exec', label: '+ 代码实现', shortcut: '开发' },
             { id: 'add:custom-agent', label: '+ 外部模型节点', shortcut: '外部', accent: true },
             { id: 'add:cluster-merge', label: '+ 结果汇总', shortcut: '汇总' },
-            { id: 'add:codex-review', label: '+ 代码审查与总结', shortcut: '审查' },
+            { id: 'add:codex-review', label: '+ 代码审查', shortcut: '审查' },
+            { id: 'add:summary-card', label: '+ 画布卡片总结框', shortcut: '总结框', accent: true },
             { id: 'add:gemini-copy', label: '+ 界面文案润色', shortcut: '文案' },
             { id: 'add:image-gen', label: '+ 图像生成', shortcut: '图像' },
             { id: 'add:video-gen', label: '+ 视频生成', shortcut: '视频' },
@@ -2289,31 +2496,23 @@
             </label>
             <div class="ic-drawer-model-row">
               <div class="field-block" style="flex:1">
-                <span class="field-label">使用模型</span>
+                <span class="field-label">自由选择模型（支持全引擎）</span>
                 <button type="button" class="text-input ic-drawer-pick-btn mono" id="btnDrawerPickModel">
                   <span>${escapeHtml(formatNodeModelLabel(node))}</span>
                   <span>▾</span>
                 </button>
               </div>
-              ${
-                tpl.provider !== 'gemini'
-                  ? `<div class="field-block" style="width:116px">
-                      <span class="field-label">推理深度</span>
-                      <button type="button" class="text-input ic-drawer-pick-btn mono" id="btnDrawerPickEffort">
-                        <span>${escapeHtml(formatNodeEffortLabel(node))}</span>
-                        <span>▾</span>
-                      </button>
-                    </div>`
-                  : ''
-              }
+              <div class="field-block" style="width:116px">
+                <span class="field-label">推理深度</span>
+                <button type="button" class="text-input ic-drawer-pick-btn mono" id="btnDrawerPickEffort">
+                  <span>${escapeHtml(formatNodeEffortLabel(node))}</span>
+                  <span>▾</span>
+                </button>
+              </div>
             </div>
-            ${
-              tpl.provider !== 'gemini'
-                ? `<div class="field-block" style="margin-top:4px">
-                    <div id="icDrawerEffortMount"></div>
-                  </div>`
-                : ''
-            }
+            <div class="field-block" style="margin-top:4px">
+              <div id="icDrawerEffortMount"></div>
+            </div>
             <label class="field-block">
               <span class="field-label">节点指令（定义该步骤的具体任务）</span>
               <textarea class="gate-editor" id="icEditPrompt" rows="3">${escapeHtml(node.prompt || '')}</textarea>
@@ -2443,7 +2642,7 @@
         }
         resultBodyEl.querySelector('#btnDrawerRunNode')?.addEventListener('click', () => runSinglePreview(node.id));
         resultBodyEl.querySelector('#btnDrawerRealCli')?.addEventListener('click', () => {
-          if (onDispatchRealCli) onDispatchRealCli(node, state.lastTaskPrompt || node.prompt);
+          runSingleRealOrInline(node.id);
         });
       }
     }
@@ -2560,11 +2759,16 @@
       const node = hydrateNode({
         id,
         kind,
-        title: kind === 'custom-agent' && firstEnabledProv ? `${firstEnabledProv.name} #${num}` : `${tpl.title} #${num}`,
+        title: kind === 'custom-agent' && firstEnabledProv
+          ? `${firstEnabledProv.name} #${num}`
+          : kind === 'summary-card' && num === 1
+            ? '画布卡片总结框'
+            : `${tpl.title} #${num}`,
         subtitle: kind === 'custom-agent' && firstEnabledProv ? `${firstEnabledProv.protocol} · 实时直连` : tpl.subtitle,
         model: firstEnabledProv ? `provider:${firstEnabledProv.id}:${firstEnabledProv.defaultModel || ''}` : '',
         x,
         y,
+        w: tpl.defaultWidth || NODE_WIDTH,
         params:
           kind === 'gemini-plan'
             ? [{ k: '模型', dynamic: 'nodeModel' }, { k: '方案策略', v: '多方案对比' }]
@@ -2576,7 +2780,9 @@
                   ? [{ k: '模型', dynamic: 'nodeModel' }, { k: '输入路数', dynamic: 'inCount' }]
                   : kind === 'codex-review'
                     ? [{ k: '模型', dynamic: 'nodeModel' }, { k: '推理深度', dynamic: 'nodeEffort' }, { k: '复审上限', dynamic: 'maxRounds' }]
-                    : [{ k: '模型', dynamic: 'nodeModel' }, { k: '风格', v: '简明直白' }],
+                    : kind === 'summary-card'
+                      ? [{ k: '模型', dynamic: 'nodeModel' }, { k: '输入路数', dynamic: 'inCount' }]
+                      : [{ k: '模型', dynamic: 'nodeModel' }, { k: '风格', v: '简明直白' }],
         toggles:
           kind === 'codex-exec'
             ? [{ key: 'worktree', label: '独立分支隔离', desc: '在独立分支中开发' }]
@@ -2731,10 +2937,10 @@
       renderAll();
       requestAnimationFrame(() => fitView(true));
       const hintMap = {
-        linear: '已载入「标准三步模板」：需求分析 → 代码实现 → 代码审查。',
-        multi: '已载入「前后端分层模板」：拆分界面、文案、接口、测试并行推进后汇总审查。',
-        blank: '已切换为「空白画布」：双击或右键画布空白处可新建节点，点击或拖拽端口连线。',
-        cluster: '已载入「并行开发模板」：需求规划后分前端/后端并行实现，汇总后审查。',
+        linear: '已载入「标准四步模板」：需求分析 → 代码实现 → 代码审查 → 画布卡片总结框。',
+        multi: '已载入「前后端分层模板」：并行开发汇总审查后，由画布卡片总结框输出结论与复述。',
+        blank: '已切换为「空白画布」：双击或右键画布空白处可新建节点，每个节点均可自由切换模型。',
+        cluster: '已载入「并行开发模板」：末尾已接入画布卡片总结框，点击任意节点模型均可自由切换。',
       };
       setStatus(hintMap[name] || hintMap.cluster);
       if (onStatusChange) onStatusChange();
@@ -2830,6 +3036,7 @@
             .filter(Boolean);
           const failed = res === 'blocked';
           n.status = failed ? 'error' : 'completed';
+          n.summarySource = 'preview';
           n.outputMd = buildNodeDeliverable(n, formatNodeModelLabel(n), prompt, upTitles, failed);
           completedLog.push(
             `- **阶段 ${w + 1} · ${n.title}**（\`${formatNodeModelLabel(n)}\`）：${failed ? '预演拦截示意' : `完成 ${n.steps.length} 个预演步骤`}`
@@ -2903,9 +3110,134 @@
       }
     }
 
+    function collectUpstreamContext(targetNodeId) {
+      const visited = new Set();
+      const ordered = [];
+      const walk = (nid) => {
+        const incoming = state.graph.edges.filter((e) => e.target === nid);
+        incoming.forEach((e) => {
+          if (visited.has(e.source)) return;
+          visited.add(e.source);
+          walk(e.source);
+          const up = state.graph.nodes.find((x) => x.id === e.source);
+          if (up && !up.muted) ordered.push(up);
+        });
+      };
+      walk(targetNodeId);
+
+      const sections = [];
+      ordered.forEach((up) => {
+        if (up.outputMd && up.outputMd.trim()) {
+          sections.push(`### 上游节点：${up.title}（${formatNodeModelLabel(up)}）\n${up.outputMd.trim().slice(0, 2200)}`);
+        } else {
+          sections.push(`### 上游节点：${up.title}（${formatNodeModelLabel(up)}）\n任务职责：${up.prompt || up.subtitle}`);
+        }
+      });
+
+      const ctx = getContext ? getContext() : {};
+      const run = ctx.currentRun;
+      if (run) {
+        const runBits = [];
+        if (run.prompt) runBits.push(`原始任务：${String(run.prompt).slice(0, 800)}`);
+        if (run.gemini?.planText) runBits.push(`规划输出：\n${String(run.gemini.planText).slice(0, 1800)}`);
+        if (run.codex?.execText) runBits.push(`代码实现回报：\n${String(run.codex.execText).slice(0, 2200)}`);
+        if (run.reviewVerdict?.summary) {
+          runBits.push(`审查结论：${run.reviewVerdict.passed ? '通过' : '拦截'} — ${run.reviewVerdict.summary}`);
+        }
+        if (run.gemini?.summaryText) runBits.push(`已有阶段汇总：\n${String(run.gemini.summaryText).slice(0, 1500)}`);
+        if (Array.isArray(run.messages) && run.messages.length > 0) {
+          const recentMsgs = run.messages
+            .filter((m) => m.content && m.content.trim())
+            .slice(-6)
+            .map((m) => `${m.role === 'user' ? '用户' : (m.engine || '助手')}：${String(m.content).slice(0, 1200)}`)
+            .join('\n\n');
+          if (recentMsgs) runBits.push(`对话流最新记录：\n${recentMsgs}`);
+        }
+        if (runBits.length > 0) {
+          sections.push(`### 当前工作台真实执行上下文\n${runBits.join('\n\n')}`);
+        }
+      }
+
+      return sections.join('\n\n---\n\n');
+    }
+
+    async function runSummaryCardLive(nid) {
+      const node = state.graph.nodes.find((n) => n.id === nid);
+      if (!node || node.muted) return;
+      if (!onRunCanvasNode) {
+        runSinglePreview(nid);
+        return;
+      }
+
+      const token = ++state.demoToken;
+      state.demoRunning = true;
+      if (!isEditingInDrawer()) state.selectedId = nid;
+      node.status = 'running';
+      node.cotOpen = true;
+      node.steps = [
+        { id: 's-1', verb: '收集上游节点与当前会话输出', detail: `模型：${formatNodeModelLabel(node)}`, status: 'completed', ms: 50 },
+        { id: 's-2', verb: '调用选定模型提炼最终结论与复述...', detail: (node.prompt || '').slice(0, 80), status: 'active', ms: 0 },
+        { id: 's-3', verb: '写入画布卡片总结框', detail: '等待模型返回后直接渲染在卡片内', status: 'pending', ms: 0 },
+      ];
+      setStatus(`「${node.title}」正在调用 ${formatNodeModelLabel(node)} 生成最终结论与复述...`);
+      renderAll();
+      if (onStatusChange) onStatusChange();
+
+      const upstreamContext = collectUpstreamContext(nid);
+      const userInstruction = (node.prompt || NODE_TEMPLATES['summary-card'].defaultPrompt).trim();
+      const fullPrompt = [
+        `【总结与复述要求】\n${userInstruction}`,
+        upstreamContext ? `\n\n【需要汇总的上游材料】\n${upstreamContext}` : '\n\n（当前暂无上游真实输出，请基于当前工作目录和流程结构简要说明准备状态与下一步建议。）',
+        '\n\n请按以下两部分用清晰直白的中文作答（控制在 300 字以内，不要堆砌技术黑话）：',
+        '### 最终结论',
+        '（1-3 句点明结果、改动与状态）',
+        '### 给你复述一遍',
+        '（用自然口语化的 3-5 条要点直接向我复述核心内容和需要注意的地方）',
+      ].join('');
+
+      try {
+        const res = await onRunCanvasNode({
+          node,
+          model: node.model || '',
+          prompt: fullPrompt,
+          systemPrompt: '你是 TENON 节点画布末尾的「画布卡片总结框」。你的职责是只读汇总上游所有节点与会话结果，输出简明、准确、易懂的最终结论与口语化复述，绝不修改任何文件。',
+        });
+        if (token !== state.demoToken) return;
+        node.durationMs = res.durationMs || 0;
+        node.steps[1].status = 'completed';
+        node.steps[1].ms = res.durationMs || 0;
+        node.steps[1].detail = `由 ${res.engine || formatNodeModelLabel(node)} (${res.model || 'default'}) 生成，耗时 ${((res.durationMs || 0) / 1000).toFixed(1)}s`;
+        node.steps[2].status = 'completed';
+        node.steps[2].detail = '最终结论与复述已直接显示在卡片内';
+        node.status = 'completed';
+        node.summarySource = 'live';
+        node.outputMd = (res.text || '').trim() || '（模型未返回正文内容）';
+        state.demoRunning = false;
+        setStatus(`「${node.title}」已生成最终结论与复述（${((res.durationMs || 0) / 1000).toFixed(1)}s）。`);
+        renderAll();
+        if (onToast) onToast('画布卡片总结框已更新');
+        if (onStatusChange) onStatusChange();
+      } catch (err) {
+        if (token !== state.demoToken) return;
+        node.steps[1].status = 'error';
+        node.steps[1].detail = err.message || '调用失败';
+        node.status = 'error';
+        node.summarySource = 'live';
+        node.outputMd = `**生成总结失败**：${err.message || '未知错误'}\n\n可点击卡片上方模型名称自由切换其他模型后再点「重新总结」。`;
+        state.demoRunning = false;
+        setStatus(`「${node.title}」总结失败：${err.message}`);
+        renderAll();
+        if (onStatusChange) onStatusChange();
+      }
+    }
+
     function runSingleRealOrInline(nid) {
       const node = state.graph.nodes.find((n) => n.id === nid);
       if (!node || node.muted) return;
+      if (node.kind === 'summary-card') {
+        runSummaryCardLive(nid);
+        return;
+      }
       const ctx = getContext ? getContext() : {};
       let extRef = parseNodeProviderRef(node.model);
       if (!extRef && node.kind === 'custom-agent') {
@@ -2992,7 +3324,7 @@
       node.status = 'running';
       node.cotOpen = true;
       node.steps = makeStepsForNode(node.kind, prompt ? `模型 ${formatNodeModelLabel(node)} · 任务：${prompt.slice(0, 28)}` : '');
-      setStatus(`正在单步推演「${node.title}」（${formatNodeModelLabel(node)}）...`);
+      setStatus(`正在预演「${node.title}」（${formatNodeModelLabel(node)}）...`);
       renderAll();
       if (onStatusChange) onStatusChange();
 
@@ -3004,11 +3336,12 @@
         .filter(Boolean);
       const failed = res === 'blocked';
       node.status = failed ? 'error' : 'completed';
+      node.summarySource = 'preview';
       node.outputMd = buildNodeDeliverable(node, formatNodeModelLabel(node), prompt, upTitles, failed);
       state.demoRunning = false;
-      setStatus(`「${node.title}」${failed ? '触发拦截。' : '已完成，可在右侧查看思考链与交付成果。'}`);
+      setStatus(`「${node.title}」${failed ? '预演触发拦截示意。' : '预演完成。'}`);
       renderAll();
-      openResultDrawer('node');
+      if (node.kind !== 'summary-card') openResultDrawer('node');
       if (onStatusChange) onStatusChange();
     }
 
@@ -3017,10 +3350,11 @@
       state.graph.nodes.forEach((n) => {
         n.status = 'idle';
         n.outputMd = '';
+        n.summarySource = '';
         n.cotOpen = false;
         n.steps = makeStepsForNode(n.kind);
       });
-      setStatus('所有节点与思考工作流已重置为就绪态。');
+      setStatus('已清空全部节点运行状态。');
       renderAll();
       if (onStatusChange) onStatusChange();
     }

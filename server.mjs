@@ -24,7 +24,8 @@ import {
   createWorkspaceProject,
 } from './lib/workspace.mjs';
 import { RunStore } from './lib/store.mjs';
-import { Orchestrator, ValidationError } from './lib/orchestrator.mjs';
+import { Orchestrator, ValidationError, parseProviderRef } from './lib/orchestrator.mjs';
+import { runAgy, runCodex } from './lib/runners.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -580,6 +581,95 @@ export async function createWorkbenchServer(options = {}) {
           providerName: provider.name,
           protocol: provider.protocol,
           model,
+        });
+      }
+
+      if (pathname === '/api/canvas/node-run' && method === 'POST') {
+        const body = await readJsonBody(req);
+        const prompt = String(body.prompt || '').trim();
+        if (!prompt) throw new ValidationError('请输入该节点要执行的内容或总结指令');
+        const cwd = body.cwd ? path.resolve(String(body.cwd)) : defaultWorkspaceDir;
+        const nodeKind = String(body.nodeKind || 'summary-card').trim();
+        const rawModel = String(body.model || '').trim();
+        const systemPrompt = String(body.systemPrompt || '').trim();
+        const { timeoutMs, idleTimeoutMs } = orchestrator.resolveTimeoutPolicy(body.timeoutMode || 'none');
+
+        const parsedExt = parseProviderRef(rawModel);
+        const isReadOnlyKind = ['summary-card', 'gemini-plan', 'gemini-copy', 'codex-review'].includes(nodeKind);
+        const requestedSandbox = isReadOnlyKind
+          ? 'read-only'
+          : (body.sandbox === 'read-only' ? 'read-only' : 'workspace-write');
+
+        if (parsedExt) {
+          const provider = providerStore.get(parsedExt.providerId);
+          if (!provider) return sendJson(res, 404, { error: '找不到指定的外部 Agent / API 接入配置' });
+          if (!provider.enabled) return sendJson(res, 400, { error: `接入「${provider.name}」当前未启用` });
+          const model = parsedExt.model || provider.defaultModel || '';
+          const result = await runProvider(provider, {
+            prompt,
+            systemPrompt,
+            model,
+            cwd,
+            timeoutMs,
+          });
+          return sendJson(res, result.ok ? 200 : 502, {
+            ...result,
+            engine: provider.name,
+            protocol: provider.protocol,
+            model: model || provider.protocol,
+          });
+        }
+
+        const isCodexTarget =
+          rawModel === 'codex:default' ||
+          rawModel.startsWith('codex:') ||
+          /^(gpt-|o1|o3|o4|codex)/i.test(rawModel) ||
+          (!rawModel && (nodeKind === 'codex-exec' || nodeKind === 'codex-review'));
+
+        if (isCodexTarget) {
+          const codexModel = rawModel === 'codex:default'
+            ? ''
+            : rawModel.startsWith('codex:')
+              ? rawModel.slice('codex:'.length).trim()
+              : rawModel;
+          const wsInfo = await inspectWorkspace(cwd).catch(() => ({ isGitRepo: false }));
+          const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
+          const result = await runCodex({
+            prompt: fullPrompt,
+            cwd,
+            model: codexModel,
+            reasoningEffort: String(body.codexEffort || 'medium').trim() || 'medium',
+            sandbox: requestedSandbox,
+            allowCodexNetwork: Boolean(body.allowCodexNetwork) && requestedSandbox === 'workspace-write',
+            isGitRepo: Boolean(wsInfo?.isGitRepo),
+            codexHome: String(body.codexHome || '').trim(),
+            timeoutMs,
+            idleTimeoutMs,
+          });
+          return sendJson(res, result.ok ? 200 : 502, {
+            ...result,
+            engine: 'Codex',
+            protocol: 'codex-cli',
+            model: codexModel || 'codex-default',
+          });
+        }
+
+        const geminiModel = rawModel || String(body.fallbackGeminiModel || 'gemini-4-neon-high').trim();
+        const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
+        const result = await runAgy({
+          prompt: fullPrompt,
+          model: geminiModel,
+          cwd,
+          mode: isReadOnlyKind ? 'plan' : '',
+          sandbox: !isReadOnlyKind,
+          timeoutMs,
+          idleTimeoutMs,
+        });
+        return sendJson(res, result.ok ? 200 : 502, {
+          ...result,
+          engine: 'Gemini',
+          protocol: 'agy-cli',
+          model: geminiModel,
         });
       }
 

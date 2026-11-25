@@ -4462,8 +4462,32 @@
             providerId,
             model,
             prompt: promptText,
-            systemPrompt: `你正在 TENON 多 Agent 节点画布中执行节点「${node?.title || '外部 Agent'}」。请用结构化中文直接输出可执行交付结果。`,
+            systemPrompt: `你正在 TENON 多 Agent 节点画布中执行节点「${node?.title || '外部模型'}」。请用结构化中文直接输出可执行交付结果。`,
             cwd: el('inputWorkspace')?.value.trim() || '',
+          }),
+        });
+        return res;
+      },
+      onRunCanvasNode: async ({ node, model, prompt, systemPrompt }) => {
+        const rawEffort = node?.effort || el('selectCodexEffort')?.value || 'high';
+        const cliEffort = window.ConduitEffortSlider
+          ? window.ConduitEffortSlider.toCodexCliEffort(rawEffort)
+          : rawEffort;
+        const res = await api('/api/canvas/node-run', {
+          method: 'POST',
+          body: JSON.stringify({
+            nodeKind: node?.kind || 'summary-card',
+            nodeTitle: node?.title || '',
+            model: model || '',
+            fallbackGeminiModel: el('selectGeminiModel')?.value || 'gemini-4-neon-high',
+            prompt,
+            systemPrompt: systemPrompt || '',
+            cwd: el('inputWorkspace')?.value.trim() || '',
+            codexEffort: cliEffort,
+            sandbox: el('selectSandbox')?.value || 'workspace-write',
+            codexHome: el('selectCodexHome')?.value || '',
+            allowCodexNetwork: Boolean(el('chkCodexNetwork')?.checked),
+            timeoutMode: el('selectTimeoutMode')?.value || 'none',
           }),
         });
         return res;
@@ -4494,24 +4518,43 @@
           'codex-exec': 'codex-exec',
           'cluster-merge': 'full-pipeline',
           'codex-review': 'codex-review',
+          'summary-card': 'agent-chat',
           'custom-agent': 'custom-agent',
           'image-gen': 'image-gen',
           'video-gen': 'video-gen',
         };
-        if (node?.model) {
-          if (String(node.model).startsWith('provider:') || node.kind === 'gemini-plan' || node.kind === 'gemini-copy' || /^gemini-|^orchestrator-/i.test(node.model)) {
-            setGeminiModelValue(node.model);
+        let resolvedMode = modeMap[node?.kind] || 'full-pipeline';
+        const rawM = String(node?.model || '').trim();
+        if (rawM) {
+          if (rawM.startsWith('provider:')) {
+            setGeminiModelValue(rawM);
+            if (node?.kind !== 'cluster-merge' && node?.kind !== 'gemini-plan' && node?.kind !== 'gemini-copy') {
+              resolvedMode = 'custom-agent';
+            }
+          } else if (rawM === 'codex:default' || rawM.startsWith('codex:') || /^(gpt-|o1|o3|o4|codex)/i.test(rawM)) {
+            const cleanCdx = rawM === 'codex:default' ? '' : rawM.replace(/^codex:/, '');
+            setCodexModelValue(cleanCdx);
+            if (node?.kind === 'gemini-plan' || node?.kind === 'gemini-copy' || node?.kind === 'summary-card') {
+              resolvedMode = 'agent-chat';
+              setGeminiModelValue('codex:chat');
+            }
           } else {
-            setCodexModelValue(node.model);
+            setGeminiModelValue(rawM);
+            if (node?.kind === 'codex-exec' || node?.kind === 'codex-review') {
+              resolvedMode = 'agent-chat';
+            }
           }
         }
-        if (node?.codexModel) setCodexModelValue(node.codexModel);
+        if (node?.codexModel) {
+          const cleanCdx = String(node.codexModel).replace(/^codex:/, '');
+          setCodexModelValue(cleanCdx === 'default' ? '' : cleanCdx);
+        }
         if (node?.effort && el('selectCodexEffort')) {
           el('selectCodexEffort').value = node.effort;
           effortSlider?.setValue(node.effort, true);
           syncAllArchSelects();
         }
-        setModeValue(modeMap[node?.kind] || 'full-pipeline');
+        setModeValue(resolvedMode);
         const ta = el('inputPrompt');
         if (promptText && promptText.trim()) {
           ta.value = promptText.trim();

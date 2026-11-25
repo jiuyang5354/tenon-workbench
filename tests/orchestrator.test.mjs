@@ -1434,3 +1434,80 @@ test('in-place session resume continues codex-exec and interrupted pipeline runs
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('POST /api/canvas/node-run enforces validation/CSRF and executes summary-card with any selected model', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tenon-canvas-summary-'));
+  const tmpData = path.join(root, 'data');
+  const wsDir = path.join(root, 'ws');
+  await fs.mkdir(wsDir, { recursive: true });
+
+  const mockLlm = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8' });
+    res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '### 最终结论\n测试全部通过。\n\n### 给你复述一遍\n- 已完成验证。' } }] })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
+  });
+  await new Promise((resolve) => mockLlm.listen(0, '127.0.0.1', resolve));
+
+  const { server } = await createWorkbenchServer({ dataDir: tmpData, defaultWorkspace: wsDir });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // Reject empty prompt -> 400
+    const emptyRes = await fetch(`${base}/api/canvas/node-run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nodeKind: 'summary-card', prompt: '   ' }),
+    });
+    assert.equal(emptyRes.status, 400);
+
+    // Reject cross-site Origin -> 403
+    const csrfRes = await fetch(`${base}/api/canvas/node-run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example.com' },
+      body: JSON.stringify({ nodeKind: 'summary-card', prompt: 'summarize' }),
+    });
+    assert.equal(csrfRes.status, 403);
+
+    // Create mock external API provider and execute summary-card using provider:<id>:<model>
+    const pRes = await fetch(`${base}/api/providers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Summary Mock API',
+        kind: 'api',
+        protocol: 'openai-compatible',
+        baseUrl: `http://127.0.0.1:${mockLlm.address().port}/v1`,
+        apiKey: 'sk-summary-9999',
+        defaultModel: 'summary-v1',
+        enabled: true,
+      }),
+    });
+    assert.equal(pRes.status, 200);
+    const { provider } = await pRes.json();
+
+    const runRes = await fetch(`${base}/api/canvas/node-run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nodeKind: 'summary-card',
+        nodeTitle: '画布卡片总结框',
+        model: `provider:${provider.id}:summary-v1`,
+        prompt: '总结最终结论并复述',
+        cwd: wsDir,
+      }),
+    });
+    assert.equal(runRes.status, 200);
+    const body = await runRes.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.engine, 'Summary Mock API');
+    assert.equal(body.model, 'summary-v1');
+    assert.match(body.text, /最终结论/);
+    assert.match(body.text, /给你复述一遍/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await new Promise((resolve) => mockLlm.close(resolve));
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
