@@ -322,23 +322,26 @@
           <!-- Plain-Language Add Node Popover -->
           <div class="ic-add-popover hidden" id="wfAddMenuPopover" role="menu" aria-label="添加节点到画布"></div>
 
-          <!-- Floating Bottom-Center: Direct ComfyUI-Style Task Input + Run Workflow CTA + 1-Line Plain Guide -->
+          <!-- Floating Bottom-Center: Direct ComfyUI-Style Task Input + Mid-Run Interrupt & Goal Steering Bar -->
           <div class="ic-bottom-stack">
+            <!-- Live Mid-Run Interrupt / Pause Checkpoint / Modify Goal Strip -->
+            <div class="ic-live-steer-bar hidden" id="wfLiveSteerBar" role="status" aria-live="polite"></div>
             <div class="ic-cmd-bar" id="wfCommandBar">
               <input
                 type="text"
                 id="inputWfCommand"
                 class="ic-cmd-input"
-                placeholder="输入你要让这条工作流完成的任务，按回车或点右侧运行..."
+                placeholder="输入你要让这条工作流完成的任务，运行中也可随时修改目标..."
                 autocomplete="off"
               />
+              <button type="button" class="ic-chip-btn hidden is-pause-btn" id="btnWfPauseLive" title="完成当前步骤后暂停，保留上游结果供你修改目标或模型后再继续">暂停下步</button>
               <button type="button" class="ic-chip-btn ic-pro-only is-dispatch-chat" id="btnWfDispatchChat" title="切到对话流以全链路模式执行（支持人工拍板闸门与独立 Git Worktree）">转对话流</button>
               <button type="button" class="btn-weave-cta wf-btn" id="btnWfRunLive" title="在画布中按连线顺序逐步调用各节点选定的模型运行">
                 <svg class="ic-run-ico" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5Z" /></svg>
                 <span id="labelWfRunLive">运行工作流</span>
               </button>
             </div>
-            <div class="ic-status-pill mono" id="wfStatusBar">① 写下任务 → ② 点各卡片切模型/连线 → ③ 点「运行工作流」，结果自动汇总到「画布卡片总结框」</div>
+            <div class="ic-status-pill mono" id="wfStatusBar">① 写下任务 → ② 点各卡片切模型/连线 → ③ 点「运行工作流」，运行中可随时中途打断或修改目标</div>
           </div>
 
           <!-- Floating Bottom-Left: Compact Zoom, Grid, Fit & Direct JSON File Import/Export -->
@@ -679,6 +682,18 @@
             </div>
           </div>
 
+          <!-- Mid-Run Interrupt & Modify Goal Live Bar -->
+          <div class="composer-steer-bar hidden" id="liveSteerBar" role="status" aria-live="polite">
+            <div class="steer-bar-main">
+              <span class="steer-live-dot" aria-hidden="true"></span>
+              <span class="steer-bar-text" id="liveSteerText">运行中 · 直接在下方输入新目标即可中途打断，或点「下步生效」不中断当前输出</span>
+            </div>
+            <div class="steer-bar-actions hidden" id="liveSteerQueueActions">
+              <button type="button" class="link-btn is-accent-link" id="btnSteerPromoteNow" title="立刻打断当前生成，直接切到已排队的新目标">立即打断切换</button>
+              <button type="button" class="link-btn" id="btnSteerCancelQueue" title="取消刚才排队的目标修改">取消排队</button>
+            </div>
+          </div>
+
           <textarea
             id="inputPrompt"
             class="composer-textarea"
@@ -740,7 +755,12 @@
             </div>
 
             <div class="composer-bar-right" data-slot="prompt-input-actions">
-              <!-- Live Running AI Orb Stop Pill (Replaces red Stop block while active!) -->
+              <!-- Mid-Run Goal Steering Actions (Visible while active alongside Stop Orb!) -->
+              <div class="steer-cta-group hidden" id="steerCtaGroup">
+                <button type="button" class="btn-steer-queue" id="btnSteerQueue" title="不打断当前正在生成的步骤，完成后自动按新目标继续">下步生效</button>
+                <button type="button" class="btn-steer-interrupt" id="btnSteerInterrupt" title="立刻打断当前运行，保留已生成内容并转向新目标 (Enter)">打断改目标</button>
+              </div>
+              <!-- Live Running AI Orb Stop Pill -->
               <button type="button" class="btn-stop-orb hidden" id="btnCancelRun" title="协同运行中 · 点击立即停止">
                 <svg class="thinking-orb" id="cancelRunOrb" width="20" height="20" viewBox="0 0 20 20" data-orb-family="ai" data-orb-state="ai-solving" data-orb-variant="ai" data-orb-size="20" aria-hidden="true"></svg>
                 <span class="stop-orb-label" id="cancelRunLabel">运行中</span>

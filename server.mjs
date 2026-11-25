@@ -880,7 +880,7 @@ export async function createWorkbenchServer(options = {}) {
         return;
       }
 
-      const runMatch = pathname.match(/^\/api\/runs\/([^/]+)(?:\/(stream|approve|cancel|diff|message))?$/);
+      const runMatch = pathname.match(/^\/api\/runs\/([^/]+)(?:\/(stream|approve|cancel|diff|message|steer))?$/);
       if (runMatch) {
         const runId = runMatch[1];
         const sub = runMatch[2] || '';
@@ -950,6 +950,17 @@ export async function createWorkbenchServer(options = {}) {
           const body = await readJsonBody(req);
           const updated = await orchestrator.continueChat(runId, body);
           return sendJson(res, 200, { run: updated });
+        }
+
+        if (sub === 'steer' && method === 'POST') {
+          const body = await readJsonBody(req);
+          const out = await orchestrator.steerRun(runId, body);
+          return sendJson(res, 200, out);
+        }
+
+        if (sub === 'steer' && method === 'DELETE') {
+          const ok = orchestrator.clearPendingSteer(runId);
+          return sendJson(res, 200, { ok, run: store.get(runId) });
         }
 
         if (sub === 'approve' && method === 'POST') {

@@ -1517,6 +1517,7 @@
     el('btnCancelRun').classList.add('hidden');
     el('sendCtaGroup').classList.remove('hidden');
     el('composerShell').classList.remove('is-streaming');
+    syncLiveSteerUi(null);
     syncTopbarOrb(null);
     renderSidebarThreads();
     if (appState.stageView === 'workflow') renderWorkflowCanvas();
@@ -2239,11 +2240,15 @@
       const msgKey = msg.id || `${run.id}:msg:${idx}`;
       const ts = new Date(msg.createdAt || run.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
       if (msg.role === 'user') {
+        const steerTag = msg.steered
+          ? `<span class="steer-msg-tag mono-xs">${msg.steerReason === 'next-step' ? '运行中改目标 · 下步生效' : '中途打断 · 新目标'}</span>`
+          : '';
         htmlParts.push(`
           <div class="msg-user-wrap">
             <div class="msg-user-bubble">
               <div class="msg-user-text">${escapeHtml(stripPreferenceTag(msg.content))}</div>
               <div class="msg-user-meta">
+                ${steerTag}
                 <span>${ts}</span>
               </div>
             </div>
@@ -2275,7 +2280,7 @@
       } else if (msg.status === 'cancelled') {
         statusPillHtml = '<span class="agent-status-pill cancelled"><span>已中止</span></span>';
       } else if (msg.status === 'interrupted') {
-        statusPillHtml = '<span class="agent-status-pill interrupted"><span>已中断</span></span>';
+        statusPillHtml = `<span class="agent-status-pill interrupted"><span>${msg.interruptedBySteer ? '已中途打断' : '已中断'}</span></span>`;
       }
 
       const fallbackNote = !isStreamingMsg && !msg.content && !msg.error
@@ -2332,6 +2337,7 @@
     el('btnCancelRun').classList.toggle('hidden', !isActive);
     el('sendCtaGroup').classList.toggle('hidden', isActive);
     el('composerShell').classList.toggle('is-streaming', run.status === 'running');
+    syncLiveSteerUi(run);
 
     const totalTokens = (run.metrics?.geminiTokens || 0) + (run.metrics?.codexTokens || 0);
     const totalSec = (((run.gemini?.durationMs || 0) + (run.codex?.durationMs || 0)) / 1000).toFixed(1);
@@ -3670,6 +3676,133 @@
     }
   }
 
+  function isRunActiveForSteer(run = appState.currentRun) {
+    return Boolean(
+      run &&
+      !appState.localRuns.has(run.id) &&
+      (run.status === 'running' || run.status === 'awaiting_approval')
+    );
+  }
+
+  function syncLiveSteerUi(run = appState.currentRun) {
+    const active = isRunActiveForSteer(run);
+    const bar = el('liveSteerBar');
+    const txtEl = el('liveSteerText');
+    const qActs = el('liveSteerQueueActions');
+    const ctaGrp = el('steerCtaGroup');
+    const btnQueue = el('btnSteerQueue');
+    const btnInt = el('btnSteerInterrupt');
+    const ta = el('inputPrompt');
+    const hasDraft = Boolean((ta?.value || '').trim());
+
+    bar?.classList.toggle('hidden', !active);
+    ctaGrp?.classList.toggle('hidden', !active);
+    if (ta) {
+      ta.placeholder = active
+        ? '运行中可直接输入新目标或修正意见：按 Enter 立即打断并改目标，或点「下步生效」不中断当前输出...'
+        : '像日常 Agent 一样直接对话，或输入 / 切协同模式、@ 引用文件...（Enter 发送，Shift+Enter 换行）';
+    }
+    if (btnQueue) btnQueue.disabled = !active || !hasDraft;
+    if (btnInt) btnInt.disabled = !active || !hasDraft;
+
+    if (!active || !bar || !txtEl) return;
+
+    const queuedPrompt = run?.pendingSteer?.prompt ? stripPreferenceTag(run.pendingSteer.prompt) : '';
+    if (queuedPrompt) {
+      bar.classList.add('has-queued');
+      txtEl.textContent = `已排队新目标（当前步完成后自动生效）：${queuedPrompt}`;
+      qActs?.classList.remove('hidden');
+    } else {
+      bar.classList.remove('has-queued');
+      txtEl.textContent = hasDraft
+        ? '已输入新目标：按 Enter 或点「打断改目标」立刻切换，点「下步生效」则等当前步跑完自动切换'
+        : '运行中 · 可随时在下方直接输入新目标中途打断，或点「下步生效」平滑调整方向';
+      qActs?.classList.add('hidden');
+    }
+  }
+
+  async function steerCurrentRun(strategy = 'interrupt', explicitPrompt = '') {
+    const run = appState.currentRun;
+    if (!run || !isRunActiveForSteer(run)) {
+      startRun();
+      return;
+    }
+    const rawPrompt = String(explicitPrompt || el('inputPrompt')?.value || '').trim();
+    if (!rawPrompt) {
+      showToast('请先在输入框写下修改后的新目标或中途指令');
+      el('inputPrompt')?.focus();
+      return;
+    }
+
+    const selectedPrimaryModel = el('selectGeminiModel')?.value || '';
+    const parsedExtRef = parseProviderRefClient(selectedPrimaryModel);
+    const rawEffort = el('selectCodexEffort')?.value || 'high';
+    const cliEffort = window.ConduitEffortSlider
+      ? window.ConduitEffortSlider.toCodexCliEffort(rawEffort)
+      : rawEffort;
+
+    const btnQueue = el('btnSteerQueue');
+    const btnInt = el('btnSteerInterrupt');
+    if (btnQueue) btnQueue.disabled = true;
+    if (btnInt) btnInt.disabled = true;
+
+    try {
+      const data = await api(`/api/runs/${encodeURIComponent(run.id)}/steer`, {
+        method: 'POST',
+        body: JSON.stringify({
+          prompt: rawPrompt,
+          strategy,
+          geminiModel: selectedPrimaryModel,
+          providerId: parsedExtRef?.providerId || '',
+          providerModel: parsedExtRef?.model || '',
+          codexModel: el('selectCodexModel')?.value ?? '',
+          codexEffort: cliEffort,
+          sandbox: el('selectSandbox')?.value || 'workspace-write',
+          allowCodexNetwork: Boolean(el('chkCodexNetwork')?.checked),
+          timeoutMode: el('selectTimeoutMode')?.value || 'none',
+        }),
+      });
+      if (!explicitPrompt && el('inputPrompt')) {
+        el('inputPrompt').value = '';
+        autoGrowTextarea(el('inputPrompt'));
+      }
+      appState.stickyBottom = true;
+      appState.gateDirtyText = null;
+      if (data?.run) {
+        appState.currentRun = data.run;
+        if (!appState.activeStream || appState.activeStream.readyState === 2) {
+          attachToRun(data.run);
+        } else {
+          renderConversationThread(data.run);
+        }
+      }
+      if (data?.action === 'queued') {
+        showToast('已登记目标修改：当前步完成后自动按新目标继续');
+      } else {
+        showToast('已中途打断当前运行，正在按新目标推进');
+      }
+    } catch (err) {
+      showToast(`修改目标失败: ${err.message}`);
+    } finally {
+      syncLiveSteerUi(appState.currentRun);
+    }
+  }
+
+  async function cancelQueuedSteer() {
+    const run = appState.currentRun;
+    if (!run || !run.pendingSteer) return;
+    try {
+      const data = await api(`/api/runs/${encodeURIComponent(run.id)}/steer`, { method: 'DELETE' });
+      if (data?.run) {
+        appState.currentRun = data.run;
+        renderConversationThread(data.run);
+      }
+      showToast('已取消排队中的目标修改');
+    } catch (err) {
+      showToast(`取消排队失败: ${err.message}`);
+    }
+  }
+
   async function cancelCurrentRun() {
     const run = appState.currentRun;
     if (!run) return;
@@ -4442,6 +4575,8 @@
       addMenuPopoverEl: el('wfAddMenuPopover'),
       runLiveBtnEl: el('btnWfRunLive'),
       runLiveLabelEl: el('labelWfRunLive'),
+      liveSteerBarEl: el('wfLiveSteerBar'),
+      pauseLiveBtnEl: el('btnWfPauseLive'),
       importInputEl: el('inputWfImportFile'),
       dropOverlayEl: el('wfDropOverlay'),
       renderMarkdown,
@@ -5629,15 +5764,29 @@
 
     const fireCanvasLiveRun = () => {
       if (!canvasEngine) return;
+      const inp = el('inputWfCommand');
+      const txt = (inp?.value || '').trim();
+      if (canvasEngine.isDemoRunning()) {
+        if (canvasEngine.hasModifiedGoalWhileRunning && canvasEngine.hasModifiedGoalWhileRunning(txt)) {
+          canvasEngine.steerCanvasGoal('interrupt', txt);
+        } else {
+          canvasEngine.stopWorkflowRun();
+        }
+        return;
+      }
+      canvasEngine.runWorkflowLive(txt);
+    };
+    el('btnWfRunLive')?.addEventListener('click', () => {
+      if (!canvasEngine) return;
       if (canvasEngine.isDemoRunning()) {
         canvasEngine.stopWorkflowRun();
         return;
       }
-      const inp = el('inputWfCommand');
-      const txt = (inp?.value || '').trim();
-      canvasEngine.runWorkflowLive(txt);
-    };
-    el('btnWfRunLive')?.addEventListener('click', fireCanvasLiveRun);
+      canvasEngine.runWorkflowLive((el('inputWfCommand')?.value || '').trim());
+    });
+    el('btnWfPauseLive')?.addEventListener('click', () => {
+      if (canvasEngine) canvasEngine.togglePauseWorkflow();
+    });
     el('inputWfCommand')?.addEventListener('input', (e) => {
       if (canvasEngine) canvasEngine.setTaskPrompt(e.target.value);
     });
@@ -5972,6 +6121,7 @@
         clearOrbDemoTimers();
         appState.orbPreviewState = null;
       }
+      syncLiveSteerUi(appState.currentRun);
       syncTopbarOrb(appState.currentRun);
     });
 
@@ -6002,14 +6152,30 @@
       }
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
         e.preventDefault();
-        startRun();
+        if (isRunActiveForSteer(appState.currentRun)) {
+          if (promptTa.value.trim()) steerCurrentRun('interrupt');
+        } else {
+          startRun();
+        }
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
-        startRun();
+        if (isRunActiveForSteer(appState.currentRun)) {
+          if (promptTa.value.trim()) steerCurrentRun('interrupt');
+        } else {
+          startRun();
+        }
       }
     });
+
+    el('btnSteerQueue')?.addEventListener('click', () => steerCurrentRun('next-step'));
+    el('btnSteerInterrupt')?.addEventListener('click', () => steerCurrentRun('interrupt'));
+    el('btnSteerPromoteNow')?.addEventListener('click', () => {
+      const queued = appState.currentRun?.pendingSteer?.prompt || '';
+      if (queued) steerCurrentRun('interrupt', queued);
+    });
+    el('btnSteerCancelQueue')?.addEventListener('click', () => cancelQueuedSteer());
 
     promptTa.addEventListener('blur', () => {
       cancelBlur();

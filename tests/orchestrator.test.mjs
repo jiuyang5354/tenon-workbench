@@ -1653,3 +1653,190 @@ test('ComfyUI-style workflow persistence (/api/workflows) saves drafts, named wo
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('Mid-run interrupt & live goal modification (/api/runs/:id/steer) supports both immediate interrupt and next-step queue', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tenon-steer-test-'));
+  const dataDir = path.join(root, 'data');
+  const wsDir = path.join(root, 'ws');
+  await fs.mkdir(wsDir, { recursive: true });
+
+  // Controllable mock LLM server that delays responses containing "SLOW" so we can steer mid-flight!
+  const seenPrompts = [];
+  const pendingSlowTimers = [];
+  const mockLlm = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    const lastUser = [...(body.messages || [])].reverse().find((m) => m.role === 'user')?.content || '';
+    seenPrompts.push(lastUser);
+
+    const isSlow = /SLOW_TASK/i.test(lastUser);
+    const sendReply = () => {
+      if (res.destroyed || res.writableEnded) return;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      const tag = /NEW_GOAL_INTERRUPT/i.test(lastUser)
+        ? '已按打断后的新目标完成'
+        : /QUEUED_GOAL_NEXT/i.test(lastUser)
+          ? '已按排队的新目标完成'
+          : '初始慢速任务完成';
+      res.end(JSON.stringify({
+        choices: [{ message: { content: tag } }],
+        usage: { total_tokens: 42 },
+      }));
+    };
+
+    if (isSlow) {
+      const t = setTimeout(sendReply, 550);
+      pendingSlowTimers.push(t);
+      req.on('close', () => clearTimeout(t));
+    } else {
+      sendReply();
+    }
+  });
+  await new Promise((resolve) => mockLlm.listen(0, '127.0.0.1', resolve));
+
+  const { server, store, orchestrator } = await createWorkbenchServer({ dataDir, defaultWorkspace: wsDir });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  const waitUntil = async (fn, timeoutMs = 4000) => {
+    const end = Date.now() + timeoutMs;
+    while (Date.now() < end) {
+      const val = await fn();
+      if (val) return val;
+      await new Promise((r) => setTimeout(r, 35));
+    }
+    throw new Error('waitUntil timed out');
+  };
+
+  try {
+    // 1. Register mock OpenAI-compatible provider
+    const pRes = await fetch(`${base}/api/providers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Steer Mock API',
+        kind: 'api',
+        protocol: 'openai-compatible',
+        baseUrl: `http://127.0.0.1:${mockLlm.address().port}/v1`,
+        apiKey: 'sk-steer-1234',
+        defaultModel: 'steer-v1',
+        enabled: true,
+      }),
+    });
+    assert.equal(pRes.status, 200);
+    const { provider } = await pRes.json();
+    const modelRef = `provider:${provider.id}:steer-v1`;
+
+    // 2. Start slow run & test strategy: 'interrupt'
+    const start1 = await (await fetch(`${base}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'agent-chat',
+        prompt: 'SLOW_TASK 原始慢速目标',
+        workspaceDir: wsDir,
+        geminiModel: modelRef,
+      }),
+    })).json();
+    const runId1 = start1.run.id;
+
+    // Wait briefly so request is actively in-flight
+    await new Promise((r) => setTimeout(r, 90));
+
+    // Reject empty steer (400) & cross-site CSRF (403)
+    const emptySteer = await fetch(`${base}/api/runs/${runId1}/steer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: '   ' }),
+    });
+    assert.equal(emptySteer.status, 400);
+
+    const csrfSteer = await fetch(`${base}/api/runs/${runId1}/steer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example.com' },
+      body: JSON.stringify({ prompt: 'hijack' }),
+    });
+    assert.equal(csrfSteer.status, 403);
+
+    // Immediately interrupt & pivot to NEW_GOAL_INTERRUPT
+    const intRes = await fetch(`${base}/api/runs/${runId1}/steer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: 'NEW_GOAL_INTERRUPT 改成新目标',
+        strategy: 'interrupt',
+        geminiModel: modelRef,
+      }),
+    });
+    assert.equal(intRes.status, 200);
+    const intJson = await intRes.json();
+    assert.equal(intJson.action, 'interrupted');
+
+    const finalRun1 = await waitUntil(async () => {
+      const { run } = await (await fetch(`${base}/api/runs/${runId1}`)).json();
+      return run.status === 'completed' ? run : null;
+    });
+    assert.equal(finalRun1.goalHistory.length, 1);
+    assert.equal(finalRun1.goalHistory[0].strategy, 'interrupt');
+    assert.equal(finalRun1.messages.some((m) => m.role === 'assistant' && m.interruptedBySteer === true), true);
+    assert.equal(finalRun1.messages.some((m) => m.role === 'user' && m.steered === true), true);
+    const lastAsst1 = [...finalRun1.messages].reverse().find((m) => m.role === 'assistant');
+    assert.match(lastAsst1.content, /已按打断后的新目标完成/);
+
+    // 3. Start second slow run & test strategy: 'next-step' queue + DELETE cancel + re-queue auto-execution
+    const start2 = await (await fetch(`${base}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'agent-chat',
+        prompt: 'SLOW_TASK 队列测试原始目标',
+        workspaceDir: wsDir,
+        geminiModel: modelRef,
+      }),
+    })).json();
+    const runId2 = start2.run.id;
+    await new Promise((r) => setTimeout(r, 80));
+
+    // Queue a goal then cancel it via DELETE
+    const q1 = await (await fetch(`${base}/api/runs/${runId2}/steer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: '临时取消的目标', strategy: 'next-step', geminiModel: modelRef }),
+    })).json();
+    assert.equal(q1.action, 'queued');
+    assert.ok(q1.run.pendingSteer);
+
+    const delQ = await (await fetch(`${base}/api/runs/${runId2}/steer`, { method: 'DELETE' })).json();
+    assert.equal(delQ.ok, true);
+    assert.equal(delQ.run.pendingSteer, null);
+
+    // Queue final goal for next-step execution
+    const q2 = await (await fetch(`${base}/api/runs/${runId2}/steer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'QUEUED_GOAL_NEXT 排队自动接力目标', strategy: 'next-step', geminiModel: modelRef }),
+    })).json();
+    assert.equal(q2.action, 'queued');
+
+    // Wait until BOTH initial slow turn AND auto-chained queued turn finish!
+    const finalRun2 = await waitUntil(async () => {
+      const { run } = await (await fetch(`${base}/api/runs/${runId2}`)).json();
+      const doneAssts = (run.messages || []).filter((m) => m.role === 'assistant' && m.status === 'done');
+      return run.status === 'completed' && doneAssts.length >= 2 ? run : null;
+    }, 5000);
+    assert.equal(finalRun2.pendingSteer, null);
+    assert.equal(finalRun2.goalHistory.length, 1);
+    assert.equal(finalRun2.goalHistory[0].strategy, 'next-step');
+    const assts2 = finalRun2.messages.filter((m) => m.role === 'assistant');
+    assert.match(assts2[0].content, /初始慢速任务完成/);
+    assert.match(assts2[1].content, /已按排队的新目标完成/);
+  } finally {
+    pendingSlowTimers.forEach((t) => clearTimeout(t));
+    orchestrator.shutdown();
+    await store.flush();
+    await new Promise((resolve) => server.close(resolve));
+    await new Promise((resolve) => mockLlm.close(resolve));
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

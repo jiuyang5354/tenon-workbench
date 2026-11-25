@@ -745,6 +745,8 @@
       addMenuPopoverEl,
       runLiveBtnEl,
       runLiveLabelEl,
+      liveSteerBarEl,
+      pauseLiveBtnEl,
       dropOverlayEl,
       renderMarkdown,
       getContext,
@@ -783,6 +785,11 @@
       demoRunning: false,
       demoToken: 0,
       liveAbortController: null,
+      activeRunPrompt: '',
+      goalAmendmentNote: '',
+      pauseRequested: false,
+      pausedCheckpoint: null,
+      liveStepInfo: null,
       spaceDown: false,
       lastTaskPrompt: '',
       lastClusterReportMd: '',
@@ -823,21 +830,115 @@
     }
 
     function syncRunButtonUi() {
-      if (!runLiveBtnEl) return;
-      const running = Boolean(state.demoRunning);
-      runLiveBtnEl.classList.toggle('is-stop', running);
-      runLiveBtnEl.title = running
-        ? '点击立即停止当前正在运行的工作流节点'
-        : '在画布中按连线顺序逐步调用各节点选定的模型运行';
-      const ico = runLiveBtnEl.querySelector('.ic-run-ico');
-      if (ico) {
-        ico.innerHTML = running
-          ? '<rect x="5" y="5" width="14" height="14" rx="2" />'
-          : '<path d="M7 4.5v15l12-7.5Z" />';
+      if (runLiveBtnEl) {
+        const running = Boolean(state.demoRunning);
+        runLiveBtnEl.classList.toggle('is-stop', running);
+        runLiveBtnEl.title = running
+          ? '点击立即中途打断当前运行（已完成步骤的结果会自动保留，可修改目标后从断点继续）'
+          : '在画布中按连线顺序逐步调用各节点选定的模型运行';
+        const ico = runLiveBtnEl.querySelector('.ic-run-ico');
+        if (ico) {
+          ico.innerHTML = running
+            ? '<rect x="5" y="5" width="14" height="14" rx="2" />'
+            : '<path d="M7 4.5v15l12-7.5Z" />';
+        }
+        if (runLiveLabelEl) {
+          runLiveLabelEl.textContent = running
+            ? '中途打断'
+            : (state.pausedCheckpoint ? '继续运行' : '运行工作流');
+        }
       }
-      if (runLiveLabelEl) {
-        runLiveLabelEl.textContent = running ? '停止运行' : '运行工作流';
+      if (pauseLiveBtnEl) {
+        const showPause = Boolean(state.demoRunning && state.liveStepInfo && state.liveStepInfo.totalWaves > 1);
+        pauseLiveBtnEl.classList.toggle('hidden', !showPause);
+        pauseLiveBtnEl.classList.toggle('is-armed', Boolean(state.pauseRequested));
+        pauseLiveBtnEl.textContent = state.pauseRequested ? '已预约暂停' : '暂停下步';
       }
+      syncLiveSteerBar();
+    }
+
+    function hasModifiedGoalWhileRunning(candidateText = '') {
+      if (!state.demoRunning) return false;
+      const cur = String(candidateText || commandInputEl?.value || '').trim();
+      return Boolean(cur && state.activeRunPrompt && cur !== state.activeRunPrompt);
+    }
+
+    function syncLiveSteerBar() {
+      if (!liveSteerBarEl) return;
+      const draftPrompt = String(commandInputEl?.value || state.lastTaskPrompt || '').trim();
+
+      if (state.demoRunning) {
+        const info = state.liveStepInfo;
+        const stepTag = info
+          ? `第 ${info.currentWaveIndex + 1}/${info.totalWaves} 步 · ${info.activeTitles}`
+          : '节点运行中';
+        const modified = hasModifiedGoalWhileRunning(draftPrompt);
+
+        liveSteerBarEl.classList.remove('hidden', 'is-paused');
+        liveSteerBarEl.innerHTML = `
+          <div class="ic-live-steer-copy">
+            <span class="steer-live-dot" aria-hidden="true"></span>
+            <span class="ic-live-steer-text">${
+              modified
+                ? `运行中目标已修改（${escapeHtml(stepTag)}）`
+                : state.pauseRequested
+                  ? `已预约暂停：${escapeHtml(stepTag)} 完成后暂停等待你调整`
+                  : `运行中 · ${escapeHtml(stepTag)} · 可随时在下方修改目标`
+            }</span>
+          </div>
+          <div class="ic-live-steer-btns">
+            ${
+              modified
+                ? `<button type="button" class="ic-steer-pill" data-wf-steer="next" title="不打断当前正在跑的节点，当前步完成后所有下游节点自动按新目标执行">下步生效</button>
+                   <button type="button" class="ic-steer-pill is-primary" data-wf-steer="interrupt" title="立刻打断当前正在跑的节点，保留上游已完成结果，用新目标重跑当前步">打断重跑当前步</button>`
+                : ''
+            }
+          </div>`;
+
+        liveSteerBarEl.querySelectorAll('[data-wf-steer]').forEach((btn) => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            steerCanvasGoal(btn.dataset.wfSteer, draftPrompt);
+          });
+        });
+        return;
+      }
+
+      if (state.pausedCheckpoint) {
+        const cp = state.pausedCheckpoint;
+        const label = cp.reason === 'interrupted' ? '已中途打断' : '已中途暂停';
+        liveSteerBarEl.classList.remove('hidden');
+        liveSteerBarEl.classList.add('is-paused');
+        liveSteerBarEl.innerHTML = `
+          <div class="ic-live-steer-copy">
+            <span class="ic-live-steer-text">${escapeHtml(label)} · 停在第 ${cp.waveIndex + 1}/${cp.totalWaves} 步（上游结果已保留，改完目标/提示词/模型后可直接续跑）</span>
+          </div>
+          <div class="ic-live-steer-btns">
+            <button type="button" class="ic-steer-pill is-primary" data-wf-cp="resume">从断点继续</button>
+            <button type="button" class="ic-steer-pill" data-wf-cp="restart">从头重跑</button>
+            <button type="button" class="ic-steer-pill" data-wf-cp="clear">关闭</button>
+          </div>`;
+
+        liveSteerBarEl.querySelector('[data-wf-cp="resume"]')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          resumeFromCheckpoint();
+        });
+        liveSteerBarEl.querySelector('[data-wf-cp="restart"]')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          state.pausedCheckpoint = null;
+          runWorkflowLive(String(commandInputEl?.value || state.lastTaskPrompt || '').trim(), { forceRestart: true });
+        });
+        liveSteerBarEl.querySelector('[data-wf-cp="clear"]')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          state.pausedCheckpoint = null;
+          syncRunButtonUi();
+        });
+        return;
+      }
+
+      liveSteerBarEl.classList.add('hidden');
+      liveSteerBarEl.classList.remove('is-paused');
+      liveSteerBarEl.innerHTML = '';
     }
 
     function cancelActiveDemo(clearReport = false) {
@@ -847,7 +948,13 @@
         state.liveAbortController = null;
       }
       state.demoRunning = false;
-      if (clearReport) state.lastClusterReportMd = '';
+      state.pauseRequested = false;
+      state.liveStepInfo = null;
+      if (clearReport) {
+        state.lastClusterReportMd = '';
+        state.pausedCheckpoint = null;
+        state.goalAmendmentNote = '';
+      }
       syncRunButtonUi();
     }
 
@@ -2431,9 +2538,15 @@
                             </button>`
                           : ''
                       }
-                      <button type="button" class="wf-run-btn" data-ic-run="${escapeHtml(n.id)}" ${running || n.muted ? 'disabled' : ''} title="${isSummaryCard ? '调用所选模型汇总上游内容并在这里复述' : '只在画布中单独运行这一步（自动带入上游结果）'}">
-                        <span>${runBtnText}</span>
-                      </button>
+                      ${
+                        running
+                          ? `<button type="button" class="wf-run-btn is-stop-node" data-ic-stop-node="${escapeHtml(n.id)}" title="立刻中途打断此节点的执行，保留上游已完成结果">
+                              <span>打断此步</span>
+                            </button>`
+                          : `<button type="button" class="wf-run-btn" data-ic-run="${escapeHtml(n.id)}" ${n.muted ? 'disabled' : ''} title="${isSummaryCard ? '调用所选模型汇总上游内容并在这里复述' : '只在画布中单独运行这一步（自动带入上游结果）'}">
+                              <span>${runBtnText}</span>
+                            </button>`
+                      }
                     </div>
                   </footer>
                 </div>
@@ -2768,6 +2881,13 @@
             return;
           }
           runSinglePreview(nid);
+        });
+      });
+
+      nodesLayerEl.querySelectorAll('[data-ic-stop-node]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          stopWorkflowRun();
         });
       });
 
@@ -3129,6 +3249,7 @@
             { type: 'group', label: `节点操作 · ${targetNode.title.slice(0, 18)}` },
             { id: 'node:model', label: '自由切换此节点模型', shortcut: '模型', accent: true },
             { id: 'node:cli', label: '在画布中运行此节点', shortcut: '运行' },
+            { id: 'node:downstream', label: '从此节点继续跑完下游', shortcut: '续跑' },
             ...(isPro ? [{ id: 'node:run', label: '仅预演此节点步骤', shortcut: 'R' }] : []),
             { id: 'node:inspect', label: '打开高级设置与完整输出', shortcut: 'Enter' },
             { type: 'sep' },
@@ -3253,6 +3374,8 @@
           runSinglePreview(nodeId);
         } else if (act === 'node:cli') {
           runSingleNodeLive(nodeId);
+        } else if (act === 'node:downstream') {
+          runFromNodeDownstream(nodeId);
         } else if (act === 'node:dup') {
           duplicateNode(nodeId);
         } else if (act === 'node:mute') {
@@ -3500,6 +3623,7 @@
 
           <div class="ic-drawer-actions">
             <button type="button" class="btn-primary-sm" id="btnDrawerRealCli" ${node.muted ? 'disabled' : ''}>${node.kind === 'summary-card' ? '立即生成总结' : '单独运行此步'}</button>
+            <button type="button" class="btn-secondary-sm" id="btnDrawerDownstream" ${node.muted ? 'disabled' : ''} title="保留上游已完成结果，从本节点开始继续执行全部下游节点">从此步续跑下游</button>
             ${state.canvasMode === 'pro' ? `<button type="button" class="btn-secondary-sm" id="btnDrawerRunNode" ${node.muted ? 'disabled' : ''}>仅预演步骤</button>` : ''}
             ${node.outputMd ? '<button type="button" class="btn-secondary-sm" id="btnDrawerCopyNodeOut">复制输出</button>' : ''}
           </div>`;
@@ -3578,6 +3702,9 @@
         });
         resultBodyEl.querySelector('#btnDrawerRealCli')?.addEventListener('click', () => {
           runSingleNodeLive(node.id);
+        });
+        resultBodyEl.querySelector('#btnDrawerDownstream')?.addEventListener('click', () => {
+          runFromNodeDownstream(node.id);
         });
       }
     }
@@ -4113,13 +4240,16 @@
 
     function buildLiveNodePrompts(node, taskPrompt) {
       const upstreamContext = collectUpstreamContext(node.id);
-      const goal = String(taskPrompt || state.lastTaskPrompt || '').trim();
+      const goal = String(state.activeRunPrompt || taskPrompt || state.lastTaskPrompt || '').trim();
       const tpl = NODE_TEMPLATES[node.kind] || NODE_TEMPLATES['codex-exec'];
       const nodeInstr = String(node.prompt || tpl.defaultPrompt || '').trim();
+      const amendmentBanner = state.goalAmendmentNote
+        ? `\n\n【运行中目标已更新（请以此最新目标为准）】\n${state.goalAmendmentNote}`
+        : '';
 
       if (node.kind === 'summary-card') {
         const fullPrompt = [
-          goal ? `【用户原始任务】\n${goal}\n\n` : '',
+          goal ? `【用户最终目标】\n${goal}${amendmentBanner}\n\n` : '',
           `【总结与复述要求】\n${nodeInstr}`,
           upstreamContext
             ? `\n\n【需要汇总的上游材料】\n${upstreamContext}`
@@ -4135,7 +4265,7 @@
       }
 
       const fullPrompt = [
-        goal ? `【本次总任务目标】\n${goal}\n\n` : '',
+        goal ? `【本次总任务目标】\n${goal}${amendmentBanner}\n\n` : '',
         `【当前节点：${node.title}】\n职责要求：${nodeInstr}`,
         upstreamContext ? `\n\n【上游节点传递下来的结果】\n${upstreamContext}` : '',
         '\n\n请用结构清晰、简洁直接的中文给出本节点的执行结果，方便直接传递给下一个节点继续处理。',
@@ -4163,49 +4293,188 @@
       });
     }
 
+    function togglePauseWorkflow() {
+      if (!state.demoRunning) return;
+      state.pauseRequested = !state.pauseRequested;
+      syncRunButtonUi();
+      setStatus(
+        state.pauseRequested
+          ? '已预约暂停：当前步骤完成后将停在断点，你可以修改目标、节点指令或模型后再继续。'
+          : '已取消暂停预约，工作流将继续自动往下执行。'
+      );
+      if (onToast) onToast(state.pauseRequested ? '已预约：本步完成后暂停' : '已取消暂停预约');
+    }
+
     function stopWorkflowRun() {
       if (!state.demoRunning) return;
+      const stepInfo = state.liveStepInfo;
       cancelActiveDemo(false);
       state.graph.nodes.forEach((n) => {
         if (n.status === 'running') {
           n.status = 'idle';
         }
       });
-      setStatus('已停止工作流运行（已完成节点的输出均已保留）。');
+      if (stepInfo && stepInfo.totalWaves > 0) {
+        state.pausedCheckpoint = {
+          waveIndex: stepInfo.currentWaveIndex,
+          totalWaves: stepInfo.totalWaves,
+          targetNodeIds: stepInfo.targetNodeIds || null,
+          prompt: state.activeRunPrompt || state.lastTaskPrompt || '',
+          reason: 'interrupted',
+        };
+      }
+      syncRunButtonUi();
+      setStatus('已中途打断当前运行（上游已完成节点的输出均已保留，改完目标或模型后可点「从断点继续」）。');
       renderAll();
       scheduleAutoSave(250);
-      if (onToast) onToast('已停止工作流运行');
+      if (onToast) onToast('已中途打断，上游已完成结果已保留');
       if (onStatusChange) onStatusChange();
     }
 
-    async function runWorkflowLive(customPrompt = '') {
-      const allActive = state.graph.nodes.filter((n) => !n.muted);
-      if (allActive.length === 0) {
-        if (onToast) onToast('当前所有节点均已设为跳过，请先恢复至少一个节点');
-        return;
-      }
-      const prompt = String(customPrompt || commandInputEl?.value || state.lastTaskPrompt || '').trim();
-      if (!prompt) {
-        if (onToast) onToast('请先在画布底部输入框写下本次要完成的任务');
+    function steerCanvasGoal(strategy = 'interrupt', newPromptRaw = '') {
+      const nextGoal = String(newPromptRaw || commandInputEl?.value || '').trim();
+      if (!nextGoal) {
+        if (onToast) onToast('请先在底部输入框写下修改后的新目标');
         commandInputEl?.focus();
         return;
       }
-      if (!onRunCanvasNode) {
-        runClusterDemo(prompt);
+
+      if (!state.demoRunning) {
+        state.lastTaskPrompt = nextGoal;
+        state.activeRunPrompt = nextGoal;
+        if (commandInputEl && commandInputEl.value !== nextGoal) commandInputEl.value = nextGoal;
+        if (state.pausedCheckpoint) {
+          resumeFromCheckpoint();
+        } else {
+          runWorkflowLive(nextGoal);
+        }
         return;
       }
 
-      cancelActiveDemo(true);
+      if (strategy === 'next') {
+        state.activeRunPrompt = nextGoal;
+        state.lastTaskPrompt = nextGoal;
+        state.goalAmendmentNote = nextGoal;
+        syncRunButtonUi();
+        scheduleAutoSave(250);
+        setStatus(`运行中目标已更新为「${nextGoal.slice(0, 36)}」：当前步跑完后，所有下游节点将按新目标继续。`);
+        if (onToast) onToast('新目标已登记，下一步起自动生效');
+        return;
+      }
+
+      // Immediate interrupt current wave and re-run from current wave with the new goal (upstream stays intact!)
+      const currentWaveIndex = state.liveStepInfo?.currentWaveIndex ?? 0;
+      const targetNodeIds = state.liveStepInfo?.targetNodeIds || null;
+      cancelActiveDemo(false);
+      state.graph.nodes.forEach((n) => {
+        if (n.status === 'running') n.status = 'idle';
+      });
+      state.activeRunPrompt = nextGoal;
+      state.lastTaskPrompt = nextGoal;
+      state.goalAmendmentNote = nextGoal;
+      if (commandInputEl && commandInputEl.value !== nextGoal) commandInputEl.value = nextGoal;
+      if (onToast) onToast('已打断当前步，正在按新目标重跑本步及下游');
+      void runWorkflowWaves({
+        prompt: nextGoal,
+        startWaveIndex: currentWaveIndex,
+        targetNodeIds,
+        preserveExistingOutputs: true,
+      });
+    }
+
+    function resumeFromCheckpoint() {
+      const cp = state.pausedCheckpoint;
+      const nextGoal = String(commandInputEl?.value || cp?.prompt || state.lastTaskPrompt || '').trim();
+      if (!nextGoal) {
+        if (onToast) onToast('请先在底部输入框写下任务目标');
+        commandInputEl?.focus();
+        return;
+      }
+      if (cp && cp.prompt && nextGoal !== cp.prompt) {
+        state.goalAmendmentNote = nextGoal;
+      }
+      const startWaveIndex = cp ? cp.waveIndex : 0;
+      const targetNodeIds = cp?.targetNodeIds || null;
+      state.pausedCheckpoint = null;
+      void runWorkflowWaves({
+        prompt: nextGoal,
+        startWaveIndex,
+        targetNodeIds,
+        preserveExistingOutputs: true,
+      });
+    }
+
+    function runFromNodeDownstream(startNodeId) {
+      const startNode = state.graph.nodes.find((n) => n.id === startNodeId);
+      if (!startNode || startNode.muted) return;
+      const prompt = String(commandInputEl?.value || state.lastTaskPrompt || startNode.prompt || '').trim();
+      if (!prompt) {
+        if (onToast) onToast('请先在底部输入框写下任务目标');
+        commandInputEl?.focus();
+        return;
+      }
+      // BFS to collect startNodeId + all reachable downstream nodes
+      const reachable = new Set([startNodeId]);
+      const queue = [startNodeId];
+      while (queue.length > 0) {
+        const cur = queue.shift();
+        state.graph.edges.forEach((e) => {
+          if (e.source === cur && !reachable.has(e.target)) {
+            reachable.add(e.target);
+            queue.push(e.target);
+          }
+        });
+      }
+      state.pausedCheckpoint = null;
+      void runWorkflowWaves({
+        prompt,
+        startWaveIndex: 0,
+        targetNodeIds: reachable,
+        preserveExistingOutputs: true,
+      });
+    }
+
+    async function runWorkflowWaves({ prompt, startWaveIndex = 0, targetNodeIds = null, preserveExistingOutputs = false } = {}) {
+      const allWaves = topoWaves(state.graph)
+        .map((w) =>
+          w.filter((id) => {
+            const node = state.graph.nodes.find((n) => n.id === id);
+            if (!node || node.muted) return false;
+            if (targetNodeIds && !targetNodeIds.has(id)) return false;
+            return true;
+          })
+        )
+        .filter((w) => w.length > 0);
+
+      if (allWaves.length === 0) {
+        if (onToast) onToast('当前没有可运行的节点（请检查节点是否都被跳过）');
+        return;
+      }
+
+      cancelActiveDemo(false);
+      state.pausedCheckpoint = null;
       const token = ++state.demoToken;
       const controller = new AbortController();
       state.liveAbortController = controller;
+      state.activeRunPrompt = prompt;
       state.lastTaskPrompt = prompt;
       if (commandInputEl && commandInputEl.value !== prompt) commandInputEl.value = prompt;
+      if (!preserveExistingOutputs) {
+        state.goalAmendmentNote = '';
+        state.lastClusterReportMd = '';
+      }
       state.demoRunning = true;
-      syncRunButtonUi();
+      state.pauseRequested = false;
 
+      const safeStart = clampNum(startWaveIndex, 0, Math.max(0, allWaves.length - 1));
+
+      // Clear only nodes at or after safeStart (preserve all earlier upstream waves when resuming/steering!)
+      const resetIds = new Set();
+      for (let i = safeStart; i < allWaves.length; i += 1) {
+        allWaves[i].forEach((id) => resetIds.add(id));
+      }
       state.graph.nodes.forEach((n) => {
-        if (!n.muted) {
+        if (resetIds.has(n.id)) {
           n.status = 'idle';
           n.outputMd = '';
           n.summarySource = '';
@@ -4213,34 +4482,68 @@
         }
       });
 
-      const waves = topoWaves(state.graph).filter((w) =>
-        w.some((id) => !state.graph.nodes.find((n) => n.id === id)?.muted)
+      syncRunButtonUi();
+      setStatus(
+        safeStart > 0 || targetNodeIds
+          ? `从第 ${safeStart + 1}/${allWaves.length} 步继续执行工作流（已保留上游结果）...`
+          : `开始运行工作流（共 ${allWaves.length} 步），运行中可随时中途打断或修改目标...`
       );
-      setStatus(`开始运行工作流（共 ${waves.length} 步），结果将按连线自动流向后续节点...`);
       renderAll();
       if (onStatusChange) onStatusChange();
 
       const completedLog = [];
       let hadError = false;
 
-      for (let w = 0; w < waves.length; w += 1) {
+      for (let w = safeStart; w < allWaves.length; w += 1) {
         if (token !== state.demoToken || controller.signal.aborted) return;
-        const activeNodes = waves[w]
+
+        // Honor mid-run Pause Checkpoint cleanly between waves
+        if (state.pauseRequested && w > safeStart) {
+          state.demoRunning = false;
+          state.pauseRequested = false;
+          state.liveAbortController = null;
+          state.liveStepInfo = null;
+          state.pausedCheckpoint = {
+            waveIndex: w,
+            totalWaves: allWaves.length,
+            targetNodeIds,
+            prompt: state.activeRunPrompt || prompt,
+            reason: 'paused',
+          };
+          syncRunButtonUi();
+          setStatus(`已暂停在第 ${w + 1}/${allWaves.length} 步前：现在可修改下方目标、节点指令或更换模型，改好点「从断点继续」。`);
+          renderAll();
+          scheduleAutoSave(200);
+          if (onToast) onToast(`已暂停在第 ${w + 1} 步前，上游结果已保留`);
+          if (onStatusChange) onStatusChange();
+          return;
+        }
+
+        const activeNodes = allWaves[w]
           .map((id) => state.graph.nodes.find((n) => n.id === id))
           .filter((n) => n && !n.muted);
         if (activeNodes.length === 0) continue;
 
+        const shortTitles = activeNodes.map((n) => n.title).join('、');
         const names = activeNodes.map((n) => `${n.title}（${formatNodeModelLabel(n)}）`).join('、');
+        state.liveStepInfo = {
+          currentWaveIndex: w,
+          totalWaves: allWaves.length,
+          activeTitles: shortTitles,
+          targetNodeIds,
+        };
         activeNodes.forEach((n) => { n.status = 'running'; });
         if (!isEditingInDrawer()) state.selectedId = activeNodes[0].id;
-        setStatus(`正在运行第 ${w + 1}/${waves.length} 步：${names}...`);
+        syncRunButtonUi();
+        setStatus(`正在运行第 ${w + 1}/${allWaves.length} 步：${names}...`);
         renderAll();
         if (onStatusChange) onStatusChange();
 
+        const waveGoal = state.activeRunPrompt || prompt;
         const results = await Promise.all(
           activeNodes.map(async (node) => {
             try {
-              const res = await executeCanvasNode(node, prompt, controller.signal);
+              const res = await executeCanvasNode(node, waveGoal, controller.signal);
               return { node, ok: true, res };
             } catch (err) {
               return { node, ok: false, err };
@@ -4262,7 +4565,7 @@
             const errMsg = r.err?.message || '节点调用失败';
             r.node.status = 'error';
             r.node.summarySource = 'live';
-            r.node.outputMd = `**运行出错**：${errMsg}\n\n可点击上方「使用模型」自由切换其他模型后，单独点本卡片「重试」。`;
+            r.node.outputMd = `**运行出错**：${errMsg}\n\n可点击上方「使用模型」自由切换其他模型后，点「从断点继续」或本卡片「重试」。`;
             completedLog.push(`- **第 ${w + 1} 步 · ${r.node.title}**：失败（${errMsg}）`);
           }
         }
@@ -4272,20 +4575,34 @@
 
         if (hadError) {
           state.demoRunning = false;
+          state.pauseRequested = false;
           state.liveAbortController = null;
+          state.liveStepInfo = null;
+          state.pausedCheckpoint = {
+            waveIndex: w,
+            totalWaves: allWaves.length,
+            targetNodeIds,
+            prompt: state.activeRunPrompt || prompt,
+            reason: 'interrupted',
+          };
           syncRunButtonUi();
-          state.lastClusterReportMd = `## 工作流在第 ${w + 1} 步中断\n\n- **任务目标**：${prompt}\n\n### 执行记录\n${completedLog.join('\n')}\n\n> 已完成步骤的结果均已自动保存。可在出错卡片上换个模型后单独重试。`;
-          setStatus(`第 ${w + 1} 步出现错误已暂停，前面已完成的结果已自动保存。`);
+          state.lastClusterReportMd = `## 工作流在第 ${w + 1} 步暂停\n\n- **任务目标**：${state.activeRunPrompt || prompt}\n\n### 执行记录\n${completedLog.join('\n')}\n\n> 上游已完成步骤的结果均已自动保存。改完模型或目标后可直接点「从断点继续」。`;
+          setStatus(`第 ${w + 1} 步出现错误已停在断点，前面已完成的结果已自动保存。`);
           if (onStatusChange) onStatusChange();
           return;
         }
       }
 
       state.demoRunning = false;
+      state.pauseRequested = false;
       state.liveAbortController = null;
+      state.liveStepInfo = null;
+      state.pausedCheckpoint = null;
+      const finalGoal = state.activeRunPrompt || prompt;
+      state.goalAmendmentNote = '';
       syncRunButtonUi();
-      state.lastClusterReportMd = `## 工作流运行完成\n\n- **任务目标**：${prompt}\n- **完成步骤**：共 ${waves.length} 步 · ${allActive.length} 个节点\n\n### 执行记录\n${completedLog.join('\n')}\n\n> 全部节点的输出和末尾总结已自动保存到本地，刷新或下次打开仍会保留。`;
-      const hasSummary = allActive.some((n) => n.kind === 'summary-card');
+      state.lastClusterReportMd = `## 工作流运行完成\n\n- **最终目标**：${finalGoal}\n- **完成步骤**：共 ${allWaves.length} 步\n\n### 执行记录\n${completedLog.join('\n')}\n\n> 全部节点的输出和末尾总结已自动保存到本地，刷新或下次打开仍会保留。`;
+      const hasSummary = state.graph.nodes.some((n) => !n.muted && n.kind === 'summary-card');
       setStatus(hasSummary
         ? '工作流全部运行完成！最终结论与复述已写入「画布卡片总结框」并自动保存。'
         : '工作流全部运行完成！各节点结果已直接显示在卡片中并自动保存。');
@@ -4293,6 +4610,34 @@
       scheduleAutoSave(200);
       if (onToast) onToast('工作流运行完成，结果已自动保存');
       if (onStatusChange) onStatusChange();
+    }
+
+    async function runWorkflowLive(customPrompt = '', opts = {}) {
+      const allActive = state.graph.nodes.filter((n) => !n.muted);
+      if (allActive.length === 0) {
+        if (onToast) onToast('当前所有节点均已设为跳过，请先恢复至少一个节点');
+        return;
+      }
+      if (!opts.forceRestart && state.pausedCheckpoint) {
+        resumeFromCheckpoint();
+        return;
+      }
+      const prompt = String(customPrompt || commandInputEl?.value || state.lastTaskPrompt || '').trim();
+      if (!prompt) {
+        if (onToast) onToast('请先在画布底部输入框写下本次要完成的任务');
+        commandInputEl?.focus();
+        return;
+      }
+      if (!onRunCanvasNode) {
+        runClusterDemo(prompt);
+        return;
+      }
+      await runWorkflowWaves({
+        prompt,
+        startWaveIndex: 0,
+        targetNodeIds: null,
+        preserveExistingOutputs: false,
+      });
     }
 
     async function runSingleNodeLive(nid) {
@@ -4306,12 +4651,22 @@
       cancelActiveDemo(false);
       const token = ++state.demoToken;
       const controller = new AbortController();
+      const prompt = String(commandInputEl?.value || state.lastTaskPrompt || '').trim();
+      if (prompt) state.lastTaskPrompt = prompt;
+      state.activeRunPrompt = prompt;
+      state.pausedCheckpoint = null;
+      state.pauseRequested = false;
+      state.goalAmendmentNote = '';
       state.liveAbortController = controller;
+      state.liveStepInfo = {
+        currentWaveIndex: 0,
+        totalWaves: 1,
+        activeTitles: node.title,
+        targetNodeIds: new Set([nid]),
+      };
       state.demoRunning = true;
       syncRunButtonUi();
 
-      const prompt = String(commandInputEl?.value || state.lastTaskPrompt || '').trim();
-      if (prompt) state.lastTaskPrompt = prompt;
       if (!isEditingInDrawer()) state.selectedId = nid;
       node.status = 'running';
       setStatus(`正在画布内运行「${node.title}」（使用模型：${formatNodeModelLabel(node)}）...`);
@@ -4327,6 +4682,7 @@
         node.outputMd = (res.text || '').trim() || '（模型未返回正文内容）';
         state.demoRunning = false;
         state.liveAbortController = null;
+        state.liveStepInfo = null;
         syncRunButtonUi();
         setStatus(`「${node.title}」运行完成（${((node.durationMs || 0) / 1000).toFixed(1)}s），结果已自动保存。`);
         renderAll();
@@ -4340,6 +4696,7 @@
         node.outputMd = `**运行失败**：${err.message || '未知错误'}\n\n可点击卡片上方「使用模型」自由切换其他模型后再重试。`;
         state.demoRunning = false;
         state.liveAbortController = null;
+        state.liveStepInfo = null;
         syncRunButtonUi();
         setStatus(`「${node.title}」运行失败：${err.message}`);
         renderAll();
@@ -4989,6 +5346,11 @@
       loadCustomTemplate: () => openLibraryPopover(false),
       runWorkflowLive,
       stopWorkflowRun,
+      togglePauseWorkflow,
+      steerCanvasGoal,
+      resumeFromCheckpoint,
+      runFromNodeDownstream,
+      hasModifiedGoalWhileRunning,
       runSingleNodeLive,
       runClusterDemo,
       dispatchFlowReal,
@@ -4998,6 +5360,7 @@
       hasRestoredViewport: () => Boolean(state.restoredViewport),
       setTaskPrompt: (val) => {
         state.lastTaskPrompt = String(val || '');
+        syncLiveSteerBar();
         scheduleAutoSave(500);
       },
       openResultDrawer,
