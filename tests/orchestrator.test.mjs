@@ -1291,6 +1291,7 @@ test('Server hardens media suffix ranges, non-object JSON bodies, gate action va
       await new Promise((resolve) => mockLlm.close(resolve));
     }
   } finally {
+    await store.flush();
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(root, { recursive: true, force: true });
   }

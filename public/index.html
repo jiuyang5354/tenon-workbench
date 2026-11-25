@@ -38,9 +38,9 @@
           <span class="brand-name">TENON</span>
         </div>
         <button type="button" class="rail-icon-btn" id="btnCollapseSidebar" title="收起/展开侧边栏">
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <rect x="1.5" y="2" width="13" height="12" stroke="currentColor" stroke-width="1.25" />
-            <line x1="6" y1="2" x2="6" y2="14" stroke="currentColor" stroke-width="1.25" />
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="2" y="2.5" width="12" height="11" rx="1.5" stroke="currentColor" stroke-width="1.5" />
+            <line x1="6" y1="2.5" x2="6" y2="13.5" stroke="currentColor" stroke-width="1.5" />
           </svg>
         </button>
       </div>
@@ -48,8 +48,8 @@
       <!-- Primary New Thread Button (Pure Architectural Hairline) -->
       <div class="sidebar-top-actions">
         <button type="button" class="btn-new-chat" id="btnNewChat" title="新建对话">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M8 3V13M3 8H13" stroke="currentColor" stroke-width="1.5" />
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 3.25V12.75M3.25 8H12.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
           </svg>
           <span class="sidebar-label">新建对话</span>
         </button>
@@ -58,8 +58,8 @@
         <button type="button" class="ws-selector-card" id="btnWsPopover" title="点击切换或探测目标工程目录">
           <div class="ws-card-top">
             <span class="ws-folder-icon" aria-hidden="true">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-                <path d="M1.5 3.5H6L7.5 5H14.5V12.5H1.5V3.5Z" stroke="currentColor" stroke-width="1.25" />
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M2 4H6.2L7.6 5.5H14V12.25H2V4Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
               </svg>
             </span>
             <span class="ws-card-name sidebar-label" id="wsShortName">选择工作目录</span>
@@ -71,7 +71,7 @@
 
       <!-- Search Filter + Mod+K Command Palette Trigger -->
       <div class="sidebar-search-wrap sidebar-label">
-        <input type="text" id="inputSearchThreads" class="sidebar-search" placeholder="筛选历史会话..." autocomplete="off" />
+        <input type="text" id="inputSearchThreads" class="sidebar-search" placeholder="搜索会话" autocomplete="off" />
         <button type="button" class="sidebar-cmdk-btn mono" id="btnCommandPalette" title="打开全局命令面板 (Ctrl+K)">⌘K</button>
       </div>
 
@@ -82,16 +82,16 @@
 
       <!-- Sidebar Footer Utilities -->
       <div class="sidebar-foot">
-        <!-- 21st.dev Audio Visualizer (#44800) Multi-Mode Telemetry Deck -->
-        <div class="signal-deck sidebar-label" id="signalDeck" title="悬停划过触发声学波纹 · 点击右上角切换 5 种可视化引擎">
+        <!-- Quiet Architectural Telemetry Strip (Quiet when idle, live waveform only when active) -->
+        <div class="signal-deck sidebar-label" id="signalDeck" title="执行期间显示实时通道状态">
           <div class="signal-deck-head">
-            <span class="signal-state-tag mono" id="signalStateLabel">SIGNAL · IDLE</span>
+            <span class="signal-state-tag mono" id="signalStateLabel">通道待命</span>
             <div class="signal-mode-pills" id="signalModePills" role="tablist" aria-label="波形可视化模式">
-              <button type="button" class="sig-pill active" data-viz="bars" title="频谱柱">BAR</button>
-              <button type="button" class="sig-pill" data-viz="grid" title="矩阵点阵">GRD</button>
-              <button type="button" class="sig-pill" data-viz="line" title="双轨示波">WAV</button>
-              <button type="button" class="sig-pill" data-viz="dots" title="能量珠串">DOT</button>
-              <button type="button" class="sig-pill" data-viz="radial" title="环形频谱">RAD</button>
+              <button type="button" class="sig-pill active" data-viz="bars" title="频谱柱">柱</button>
+              <button type="button" class="sig-pill" data-viz="grid" title="矩阵点阵">格</button>
+              <button type="button" class="sig-pill" data-viz="line" title="双轨示波">波</button>
+              <button type="button" class="sig-pill" data-viz="dots" title="能量珠串">点</button>
+              <button type="button" class="sig-pill" data-viz="radial" title="环形频谱">环</button>
             </div>
           </div>
           <div class="mini-wave-box" id="miniWaveBox">
@@ -101,16 +101,16 @@
 
         <div class="sidebar-foot-btns">
           <button type="button" class="foot-nav-btn" id="btnOpenStudio" data-sidebar-sec="scripts" title="前往设置中心 · 脚本与规则模板">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M4.5 5.5L2 8L4.5 10.5M11.5 5.5L14 8L11.5 10.5M9.5 3.5L6.5 12.5" stroke="currentColor" stroke-width="1.25" />
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M5 5.5L2.5 8L5 10.5M11 5.5L13.5 8L11 10.5M9.25 3.5L6.75 12.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
             <span class="sidebar-label">脚本与规则</span>
           </button>
 
           <button type="button" class="foot-nav-btn" id="btnOpenPreferences" data-sidebar-sec="instructions" title="前往设置中心 · 偏好指令与持久记忆">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <circle cx="8" cy="5.5" r="2.75" stroke="currentColor" stroke-width="1.25" />
-              <path d="M3 13.5C3.5 10.9 5.5 9.5 8 9.5C10.5 9.5 12.5 10.9 13 13.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" />
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="8" cy="5.5" r="2.5" stroke="currentColor" stroke-width="1.5" />
+              <path d="M3.25 13.25C3.75 10.85 5.6 9.5 8 9.5C10.4 9.5 12.25 10.85 12.75 13.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
             </svg>
             <span class="sidebar-label">偏好与记忆</span>
           </button>
@@ -125,11 +125,11 @@
 
           <div class="sidebar-foot-pair">
             <button type="button" class="foot-nav-btn" id="btnToggleTweaks" data-sidebar-sec="appearance" title="前往设置中心 · 画布清晰度与外观 (T)">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <line x1="2" y1="4.5" x2="14" y2="4.5" stroke="currentColor" stroke-width="1.25" />
-                <circle cx="5.5" cy="4.5" r="1.5" fill="var(--bg-surface-1)" stroke="currentColor" stroke-width="1.25" />
-                <line x1="2" y1="11.5" x2="14" y2="11.5" stroke="currentColor" stroke-width="1.25" />
-                <circle cx="10.5" cy="11.5" r="1.5" fill="var(--bg-surface-1)" stroke="currentColor" stroke-width="1.25" />
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <line x1="2.5" y1="4.75" x2="13.5" y2="4.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                <circle cx="5.75" cy="4.75" r="1.5" fill="var(--bg-surface-1)" stroke="currentColor" stroke-width="1.5" />
+                <line x1="2.5" y1="11.25" x2="13.5" y2="11.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                <circle cx="10.25" cy="11.25" r="1.5" fill="var(--bg-surface-1)" stroke="currentColor" stroke-width="1.5" />
               </svg>
               <span class="sidebar-label">外观与设置</span>
             </button>
@@ -150,18 +150,18 @@
       <header class="stage-topbar">
         <div class="topbar-left">
           <button type="button" class="rail-icon-btn mobile-only" id="btnMobileSidebar" title="打开会话列表">
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <line x1="2" y1="4" x2="14" y2="4" stroke="currentColor" stroke-width="1.35" />
-              <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="1.35" />
-              <line x1="2" y1="12" x2="14" y2="12" stroke="currentColor" stroke-width="1.35" />
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <line x1="2.5" y1="4.25" x2="13.5" y2="4.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+              <line x1="2.5" y1="8" x2="13.5" y2="8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+              <line x1="2.5" y1="11.75" x2="13.5" y2="11.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
             </svg>
           </button>
           <span class="topbar-orb-wrap" id="topbarOrbWrap" title="当前协同引擎实时状态">
-            <svg class="thinking-orb topbar-orb" id="topbarOrb" width="24" height="24" viewBox="0 0 24 24" data-orb-family="ai" data-orb-state="ai-breathing" data-orb-variant="ai" data-orb-size="24" aria-hidden="true"></svg>
+            <svg class="thinking-orb topbar-orb" id="topbarOrb" width="22" height="22" viewBox="0 0 22 22" data-orb-family="ai" data-orb-state="ai-breathing" data-orb-variant="ai" data-orb-size="22" aria-hidden="true"></svg>
           </span>
           <div class="topbar-title-wrap">
             <span class="topbar-title" id="topbarTitle">新协同会话</span>
-            <span class="topbar-meta mono" id="topbarMeta">TENON · MULTI-AGENT WORKBENCH</span>
+            <span class="topbar-meta mono" id="topbarMeta">本地多模型协同工作台</span>
           </div>
         </div>
 
@@ -173,9 +173,9 @@
             <button type="button" class="stage-view-tab" role="tab" aria-selected="false" data-stage-view="workflow">节点画布</button>
             <button type="button" class="stage-view-tab" role="tab" aria-selected="false" data-stage-view="settings">设置</button>
           </div>
-          <!-- One-Click Morphing Light/Dark Theme Toggle (21st.dev #37503) -->
-          <button type="button" class="theme-toggle-btn" id="btnThemeToggle" aria-label="一键切换明暗主题" title="一键切换建筑白昼 / 建筑暗房">
-            <svg class="theme-toggle-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <!-- One-Click Morphing Light/Dark Theme Toggle -->
+          <button type="button" class="theme-toggle-btn" id="btnThemeToggle" aria-label="一键切换明暗主题" title="切换建筑白昼 / 建筑暗房">
+            <svg class="theme-toggle-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <g class="tt-sun">
                 <circle cx="12" cy="12" r="4.2" />
                 <path d="M12 2.5v2.2M12 19.3v2.2M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6" />
@@ -185,9 +185,9 @@
             <span class="theme-toggle-label" id="themeToggleLabel">白昼</span>
           </button>
           <button type="button" class="inspector-toggle-btn" id="btnToggleInspector" aria-expanded="false">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <rect x="1.5" y="2" width="13" height="12" stroke="currentColor" stroke-width="1.25" />
-              <line x1="10" y1="2" x2="10" y2="14" stroke="currentColor" stroke-width="1.25" />
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <rect x="2" y="2.5" width="12" height="11" rx="1.5" stroke="currentColor" stroke-width="1.5" />
+              <line x1="10" y1="2.5" x2="10" y2="13.5" stroke="currentColor" stroke-width="1.5" />
             </svg>
             <span>审查与 Diff</span>
             <span class="inspector-badge mono hidden" id="inspectorBadge">0</span>
@@ -195,43 +195,58 @@
         </div>
       </header>
 
-      <!-- Scrollable Conversation Feed (21st.dev Conversation #46450) -->
+      <!-- Scrollable Conversation Feed -->
       <div class="conversation-viewport" id="conversationViewport" role="log" aria-label="双模型协同对话流" tabindex="0">
         <div class="conversation-column" id="conversationColumn">
-          <!-- Centered Serene App Empty State (Zero Brochure Fluff, Immediate Actionable Starters) -->
+          <!-- Asymmetric Drafted App Empty State (Aligned Width With Composer) -->
           <section class="welcome-stage" id="welcomeStage">
             <div class="studio-empty">
               <div class="studio-empty-head">
-                <span class="studio-empty-orb" aria-hidden="true">
-                  <svg class="thinking-orb" width="32" height="32" viewBox="0 0 32 32" data-orb-state="reasoning" data-orb-variant="twins" data-orb-size="32"></svg>
-                </span>
-                <span class="ink-tag mono" id="welcomeEnvTag">GEMINI · CODEX · LOCAL AGENTS READY</span>
+                <span class="ink-tag mono" id="welcomeEnvTag">Gemini · Codex · 本地引擎就绪</span>
                 <h1 class="welcome-title">TENON 工作台</h1>
-                <p class="welcome-sub">
-                  本地优先的多模型协同与无限画布工坊：原生调度 Gemini、Codex、Claude Code 及自定义 API，从契约规划、人工拍板到 Pre-CI 审查严密咬合。
-                </p>
+                <p class="welcome-sub">选一个入口直接开始，或在下方输入任务并按 Enter 发送</p>
               </div>
 
               <div class="starter-grid">
-                <button type="button" class="starter-card" data-starter-mode="agent-chat" data-starter-prompt="你好，先简单聊聊当前工作目录里的项目大概是做什么的，我们边聊边决定要不要改代码。">
-                  <span class="starter-kicker mono">AGENT CHAT · 默认</span>
+                <button type="button" class="starter-card is-primary-starter" data-starter-mode="agent-chat" data-starter-prompt="你好，先简单聊聊当前工作目录里的项目大概是做什么的，我们边聊边决定要不要改代码。">
+                  <div class="starter-card-top">
+                    <span class="starter-ico" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2.5 3.5H13.5V10.5H6L3 13V10.5H2.5V3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" /></svg>
+                    </span>
+                    <span class="starter-kicker mono">默认 · 轻量多轮</span>
+                  </div>
                   <strong class="starter-title">直接和 Agent 自由对话</strong>
-                  <span class="starter-desc">轻量多轮聊天、随时追问换模型，不自动启动重型巡检</span>
-                </button>
-                <button type="button" class="starter-card" data-starter-mode="full-pipeline" data-starter-prompt="分析当前项目结构，为一个新功能先出接口契约与实施方案，等我拍板后再派发 Codex 实现并过 Pre-CI 审查。">
-                  <span class="starter-kicker mono">FULL PIPELINE</span>
-                  <strong class="starter-title">全链路协同开发</strong>
-                  <span class="starter-desc">需要正式开工时再启用：规划契约 → 拍板 → 施工审查</span>
-                </button>
-                <button type="button" class="starter-card" data-starter-mode="codex-review" data-starter-prompt="对当前工作区的未提交变更执行 Pre-CI 两级代码审查，严查数据丢失、越权和边界缺陷。">
-                  <span class="starter-kicker mono">PRE-CI GATE</span>
-                  <strong class="starter-title">未提交代码门禁审查</strong>
-                  <span class="starter-desc">按需触发代码审查，高危路径自动升档 xhigh</span>
+                  <span class="starter-desc">随时追问或切换模型，不自动触发重型审查流程</span>
                 </button>
                 <button type="button" class="starter-card is-canvas-entry" id="btnStarterOpenCanvas">
-                  <span class="starter-kicker mono">INFINITE CANVAS</span>
-                  <strong class="starter-title">打开多 Agent 无限画布 →</strong>
-                  <span class="starter-desc">自由拖拽节点、独立换模型、多路并行集群合并</span>
+                  <div class="starter-card-top">
+                    <span class="starter-ico" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="2" y="2.5" width="4.5" height="4.5" rx="1" stroke="currentColor" stroke-width="1.5" /><rect x="9.5" y="9" width="4.5" height="4.5" rx="1" stroke="currentColor" stroke-width="1.5" /><path d="M6.5 4.75H8.5C9.5 4.75 10 5.25 10 6.25V9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+                    </span>
+                    <span class="starter-kicker mono">可视化编排</span>
+                  </div>
+                  <strong class="starter-title">打开多 Agent 节点画布 →</strong>
+                  <span class="starter-desc">自由连线、单卡换模型、中键平移与左键框选成组</span>
+                </button>
+                <button type="button" class="starter-card is-secondary-starter" data-starter-mode="full-pipeline" data-starter-prompt="分析当前项目结构，为一个新功能先出接口契约与实施方案，等我拍板后再派发 Codex 实现并过 Pre-CI 审查。">
+                  <div class="starter-card-top">
+                    <span class="starter-ico" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2.5 8H13.5M10 4.5L13.5 8L10 11.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                    </span>
+                    <span class="starter-kicker mono">契约 → 拍板 → 审查</span>
+                  </div>
+                  <strong class="starter-title">全链路协同开发</strong>
+                  <span class="starter-desc">先出方案待你拍板，再交由沙箱施工并自动过门禁审查</span>
+                </button>
+                <button type="button" class="starter-card is-secondary-starter" data-starter-mode="codex-review" data-starter-prompt="对当前工作区的未提交变更执行 Pre-CI 两级代码审查，严查数据丢失、越权和边界缺陷。">
+                  <div class="starter-card-top">
+                    <span class="starter-ico" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2L13 4V8.2C13 11.2 10.9 13.4 8 14.2C5.1 13.4 3 11.2 3 8.2V4L8 2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" /><path d="M5.75 8.1L7.35 9.7L10.4 6.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                    </span>
+                    <span class="starter-kicker mono">只读门禁</span>
+                  </div>
+                  <strong class="starter-title">审查当前未提交改动</strong>
+                  <span class="starter-desc">排查缺陷与越权风险，高危路径自动升档 xhigh</span>
                 </button>
               </div>
             </div>
@@ -277,13 +292,13 @@
           <!-- Floating Top-Left: ComfyUI Workflow Manager, Quick Save & Mode-Aware Node Creation -->
           <div class="ic-floating-bar ic-top-left">
             <button type="button" class="ic-wf-switcher" id="btnWfLibrary" aria-haspopup="dialog" aria-expanded="false" title="管理已保存工作流、切换模板或导入/导出 .json 文件">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M2 3.5H6.2L7.6 5H14V12.5H2V3.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M2 4H6.2L7.6 5.5H14V12.25H2V4Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
               </svg>
               <span class="ic-wf-name" id="wfActiveNameLabel">标准四步流程</span>
               <span class="ic-wf-save-pill mono-xs" id="wfSaveStateLabel">自动保存</span>
-              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M4.5 6.25L8 9.75L11.5 6.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
             </button>
             <button type="button" class="ic-chip-btn is-save-btn" id="btnWfQuickSave" title="保存当前工作流到本地磁盘 (Ctrl+S)">保存</button>
@@ -337,7 +352,7 @@
                 type="text"
                 id="inputWfCommand"
                 class="ic-cmd-input"
-                placeholder="输入你要让这条工作流完成的任务，运行中也可随时修改目标..."
+                placeholder="输入工作流任务目标，运行中可直接修改"
                 autocomplete="off"
               />
               <button type="button" class="ic-chip-btn hidden is-pause-btn" id="btnWfPauseLive" title="完成当前步骤后暂停，保留上游结果供你修改目标或模型后再继续">暂停下步</button>
@@ -379,14 +394,14 @@
                 <button type="button" class="ic-dtab" role="tab" aria-selected="false" data-drawer-tab="node">节点设置</button>
               </div>
               <button type="button" class="rail-icon-btn" id="btnWfDrawerClose" title="收起详情面板">
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                  <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.35" />
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M4.25 4.25L11.75 11.75M11.75 4.25L4.25 11.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
                 </svg>
               </button>
             </header>
             <div class="ic-drawer-body" id="wfResultBody"></div>
             <footer class="ic-drawer-foot">
-              <input type="text" class="text-input ic-drawer-followup" id="inputWfFollowup" placeholder="输入任务目标，回车直接在画布运行整条流程..." autocomplete="off" />
+              <input type="text" class="text-input ic-drawer-followup" id="inputWfFollowup" placeholder="输入任务目标，回车运行工作流" autocomplete="off" />
               <button type="button" class="btn-primary-sm" id="btnWfFollowupSend">运行</button>
             </footer>
           </aside>
@@ -401,12 +416,12 @@
           <nav class="settings-nav" aria-label="设置分类导航">
             <div class="settings-nav-head">
               <button type="button" class="settings-back-btn" id="btnSettingsBack">
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                  <path d="M10 3.5L5.5 8L10 12.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M10 3.75L5.75 8L10 12.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
                 <span>返回工作区</span>
               </button>
-              <span class="settings-nav-kicker mono-xs">SETTINGS STUDIO</span>
+              <span class="settings-nav-kicker mono-xs">设置中心</span>
             </div>
             <div class="settings-nav-list" id="settingsNavList" role="tablist" aria-orientation="vertical">
               <button type="button" class="settings-nav-item active" role="tab" aria-selected="true" data-settings-sec="appearance">外观与画布清晰度</button>
@@ -435,7 +450,7 @@
             <div class="settings-pane" data-settings-pane="appearance">
               <header class="settings-pane-head">
                 <div>
-                  <span class="mono-xs settings-kicker">DISPLAY &amp; CANVAS</span>
+                  <span class="mono-xs settings-kicker">外观与画布</span>
                   <h2>外观与画布清晰度</h2>
                 </div>
                 <button type="button" class="btn-secondary-sm" id="btnResetTweaks">恢复默认值</button>
@@ -480,9 +495,9 @@
                     <strong>主强调色</strong>
                   </div>
                   <div class="tweak-pills settings-pills" data-tweak="accent">
-                    <button type="button" data-val="lime" class="active">柠黄高亮</button>
-                    <button type="button" data-val="ink">极简纯墨</button>
-                    <button type="button" data-val="sage">雾森绿</button>
+                    <button type="button" data-val="lime" class="active"><span class="accent-swatch-dot is-lime" aria-hidden="true"></span>柠黄高亮</button>
+                    <button type="button" data-val="ink"><span class="accent-swatch-dot is-ink" aria-hidden="true"></span>极简纯墨</button>
+                    <button type="button" data-val="sage"><span class="accent-swatch-dot is-sage" aria-hidden="true"></span>雾森绿</button>
                   </div>
                 </div>
 
@@ -541,7 +556,7 @@
             <div class="settings-pane hidden" data-settings-pane="providers">
               <header class="settings-pane-head">
                 <div>
-                  <span class="mono-xs settings-kicker">MULTI-AGENT &amp; API HUB</span>
+                  <span class="mono-xs settings-kicker">引擎接入</span>
                   <h2>Agent 与 API 接入</h2>
                 </div>
                 <div class="settings-head-actions">
@@ -556,7 +571,7 @@
             <div class="settings-pane hidden" data-settings-pane="telemetry">
               <header class="settings-pane-head">
                 <div>
-                  <span class="mono-xs settings-kicker">ORCHESTRATION TELEMETRY</span>
+                  <span class="mono-xs settings-kicker">运行遥测</span>
                   <h2>协同遥测与指标</h2>
                 </div>
                 <button type="button" class="btn-secondary-sm" id="btnRefreshTelemetry">刷新指标</button>
@@ -568,7 +583,7 @@
             <div class="settings-pane hidden" data-settings-pane="instructions">
               <header class="settings-pane-head">
                 <div>
-                  <span class="mono-xs settings-kicker">CUSTOM INSTRUCTIONS</span>
+                  <span class="mono-xs settings-kicker">偏好指令</span>
                   <h2>偏好指令</h2>
                 </div>
               </header>
@@ -579,7 +594,7 @@
             <div class="settings-pane hidden" data-settings-pane="memory">
               <header class="settings-pane-head">
                 <div>
-                  <span class="mono-xs settings-kicker">PERSISTENT MEMORY</span>
+                  <span class="mono-xs settings-kicker">持久记忆</span>
                   <h2>持久记忆库</h2>
                 </div>
               </header>
@@ -590,7 +605,7 @@
             <div class="settings-pane hidden" data-settings-pane="env">
               <header class="settings-pane-head">
                 <div>
-                  <span class="mono-xs settings-kicker">LOCAL CLI TELEMETRY</span>
+                  <span class="mono-xs settings-kicker">本机环境</span>
                   <h2>本机 CLI 环境</h2>
                 </div>
                 <div class="settings-head-actions">
@@ -609,7 +624,7 @@
             <div class="settings-pane hidden" data-settings-pane="scripts">
               <header class="settings-pane-head">
                 <div>
-                  <span class="mono-xs settings-kicker">CLI SCRIPTS &amp; RULES</span>
+                  <span class="mono-xs settings-kicker">脚本模板</span>
                   <h2>脚本与规则模板</h2>
                 </div>
               </header>
@@ -639,7 +654,7 @@
             <div class="settings-pane hidden" data-settings-pane="shortcuts">
               <header class="settings-pane-head">
                 <div>
-                  <span class="mono-xs settings-kicker">KEYBOARD SHORTCUTS</span>
+                  <span class="mono-xs settings-kicker">快捷键</span>
                   <h2>键盘快捷键</h2>
                 </div>
               </header>
@@ -650,7 +665,7 @@
             <div class="settings-pane hidden" data-settings-pane="updates">
               <header class="settings-pane-head">
                 <div>
-                  <span class="mono-xs settings-kicker">SOFTWARE UPDATE &amp; RELEASE</span>
+                  <span class="mono-xs settings-kicker">版本更新</span>
                   <h2>软件更新与版本</h2>
                 </div>
                 <div class="settings-head-actions">
@@ -704,10 +719,10 @@
             id="inputPrompt"
             class="composer-textarea"
             rows="2"
-            placeholder="像日常 Agent 一样直接对话，或输入 / 切协同模式、@ 引用文件...（Enter 发送，Shift+Enter 换行）"
+            placeholder="输入任务或问题，/ 切模式，@ 引用文件（Enter 发送）"
           ></textarea>
 
-          <!-- Single-Row 21st.dev chatcn (#45495) Prompt Composer Toolbar -->
+          <!-- Single-Row Prompt Composer Toolbar -->
           <div class="composer-bar" data-slot="prompt-input-toolbar">
             <div class="composer-bar-left" data-slot="prompt-input-tools">
               <!-- Hidden synced inputs/selects kept only for clean state API compatibility -->
@@ -715,9 +730,9 @@
               <input type="hidden" id="selectGeminiModel" value="gemini-4-neon-high" />
               <input type="hidden" id="selectCodexModel" value="" />
 
-              <!-- Attach File / Reference Trigger (21st.dev PromptInputAttachButton #45495) -->
+              <!-- Attach File / Reference Trigger -->
               <button type="button" class="composer-icon-btn" id="btnAttachContext" title="附加工作区文件引用 (@)">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="m14.81 7.92-6.36 6.36a1.75 1.75 0 0 0 0 2.47 1.75 1.75 0 0 0 2.47 0l7.07-7.07a3.5 3.5 0 0 0-4.95-4.95L5.97 11.8a5.25 5.25 0 0 0 7.43 7.43l4.95-4.95" />
                 </svg>
               </button>
@@ -726,8 +741,8 @@
               <button type="button" class="picker-pill" id="btnModePicker" aria-haspopup="listbox" aria-expanded="false">
                 <span class="picker-dot"></span>
                 <span class="picker-text" id="labelModePicker">自由对话</span>
-                <svg class="picker-chev" width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                  <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                <svg class="picker-chev" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M4.5 6.25L8 9.75L11.5 6.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
               </button>
 
@@ -735,8 +750,8 @@
               <button type="button" class="picker-pill" id="btnGeminiPicker" aria-haspopup="listbox" aria-expanded="false">
                 <span class="picker-glyph mono">G</span>
                 <span class="picker-text mono" id="labelGeminiPicker">Neon · High</span>
-                <svg class="picker-chev" width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                  <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                <svg class="picker-chev" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M4.5 6.25L8 9.75L11.5 6.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
               </button>
 
@@ -744,8 +759,8 @@
               <button type="button" class="picker-pill" id="btnCodexPicker" aria-haspopup="listbox" aria-expanded="false">
                 <span class="picker-glyph mono">C</span>
                 <span class="picker-text mono" id="labelCodexPicker">Codex · 默认</span>
-                <svg class="picker-chev" width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                  <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                <svg class="picker-chev" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M4.5 6.25L8 9.75L11.5 6.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
               </button>
 
@@ -774,8 +789,8 @@
               </button>
               <div class="metal-cta-pair" id="sendCtaGroup">
                 <button type="button" class="btn-send-metal" id="btnStartRun" title="发送消息 (Enter / Ctrl+Enter)">
-                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M8 13V3M3.5 7.5L8 3L12.5 7.5" stroke="currentColor" stroke-width="1.6" />
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M8 12.75V3.25M3.75 7.5L8 3.25L12.25 7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
                   </svg>
                   <span id="labelStartRun">发送</span>
                 </button>
@@ -829,13 +844,13 @@
         </div>
         <div class="inspector-head-actions">
           <button type="button" class="rail-icon-btn" id="btnRefreshDiff" title="刷新当前目录 Git Diff">
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M13.5 8A5.5 5.5 0 1 1 11.9 4.1M13.5 2.5V5.5H10.5" stroke="currentColor" stroke-width="1.3" />
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M13 8A5 5 0 1 1 11.5 4.4M13 3V5.75H10.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </button>
           <button type="button" class="rail-icon-btn" id="btnCloseInspector" title="收起右侧面板">
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.35" />
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M4.25 4.25L11.75 11.75M11.75 4.25L4.25 11.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
             </svg>
           </button>
         </div>
@@ -844,27 +859,27 @@
       <div class="inspector-body" id="inspectorBody">
         <div class="diff-viewer" id="inspectorDiffBox">
           <div class="empty-inline">
-            <span class="mono-xs">DIFF / STANDBY</span>
-            <p>点击右上角刷新或派发 Codex 施工后，这里会以 Unified / Split 双模式呈现真实 Git Diff。</p>
+            <span class="mono-xs">代码差异 · 待命</span>
+            <p>点击右上角刷新或派发 Codex 施工后，这里会以 Unified / Split 双模式呈现真实 Git Diff</p>
           </div>
         </div>
         <div class="review-panel hidden" id="inspectorReviewBox">
           <div class="empty-inline">
-            <span class="mono-xs">PRE-CI GATE / STANDBY</span>
-            <p>运行全链路或审查门禁模式后，这里会展示 BLOCKING 与 SUGGESTION 两级裁决明细。</p>
+            <span class="mono-xs">审查门禁 · 待命</span>
+            <p>运行全链路或审查门禁模式后，这里会展示 BLOCKING 与 SUGGESTION 两级裁决明细</p>
           </div>
         </div>
         <div class="preview-panel hidden" id="inspectorPreviewBox"></div>
         <div class="runs-panel hidden" id="inspectorRunsBox">
           <div class="empty-inline">
-            <span class="mono-xs">AGENT RUNS / IDLE</span>
-            <p>暂无运行中的多模型协同任务。</p>
+            <span class="mono-xs">运行队列 · 空闲</span>
+            <p>暂无运行中的多模型协同任务</p>
           </div>
         </div>
         <div class="terminal-panel hidden" id="inspectorEventsBox">
           <div class="empty-inline">
-            <span class="mono-xs">TERMINAL / IDLE</span>
-            <p>暂无实时事件流。</p>
+            <span class="mono-xs">事件终端 · 空闲</span>
+            <p>暂无实时事件流</p>
           </div>
         </div>
       </div>
@@ -878,7 +893,7 @@
   <!-- Workspace Path & Agent Auto-Discovery Popover -->
   <aside class="floating-popover ws-popover hidden" id="wsPopover" aria-label="目标工程目录与 Agent 自动探测">
     <div class="popover-head">
-      <span class="mono-label" id="wsPopoverTitle">WORKSPACE · AGENT 自动探测</span>
+      <span class="mono-label" id="wsPopoverTitle">工作目录与仓库探测</span>
       <div class="popover-head-actions">
         <button type="button" class="link-btn ws-new-trigger" id="btnToggleNewWs">+ 新建工程</button>
         <button type="button" class="link-btn" id="btnRescanWs">重新扫描</button>
@@ -951,7 +966,7 @@
   <!-- Guardrails Popover (Advanced Orchestration Parameters) -->
   <aside class="floating-popover guardrails-popover hidden" id="guardrailsPopover" aria-label="多模型护栏参数">
     <div class="popover-head">
-      <span class="mono-label">ORCHESTRATION GUARDRAILS</span>
+      <span class="mono-label">协同护栏参数</span>
       <button type="button" class="link-btn" id="btnRefreshModels">刷新模型</button>
     </div>
     <div class="guardrails-grid">

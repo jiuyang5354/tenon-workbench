@@ -2872,15 +2872,15 @@
                   ${running ? '<span class="agent-node-sweep-track" aria-hidden="true"><span class="agent-node-sweep"></span></span>' : ''}
                   <header class="agent-node-head ic-drag-handle" title="拖拽移动节点 · 点击标题可直接修改 · 双击打开高级设置">
                     <span class="agent-node-icon">
-                      <svg class="thinking-orb" width="26" height="26" viewBox="0 0 26 26" data-orb-state="${orbState}" data-orb-variant="${orbVariant}" data-orb-size="26" aria-hidden="true"></svg>
+                      <svg class="thinking-orb" width="24" height="24" viewBox="0 0 24 24" data-orb-state="${orbState}" data-orb-variant="${orbVariant}" data-orb-size="24" data-orb-paused="${running ? '0' : '1'}" aria-hidden="true"></svg>
                     </span>
                     <div class="agent-node-titles">
                       <input type="text" class="ic-inline-title" data-ic-title="${escapeHtml(n.id)}" value="${escapeHtml(n.title)}" aria-label="节点标题" />
                       <input type="text" class="ic-inline-sub" data-ic-sub="${escapeHtml(n.id)}" value="${escapeHtml(n.subtitle)}" aria-label="节点一句话说明" />
                     </div>
                     <button type="button" class="ic-node-fold-btn" data-ic-fold="${escapeHtml(n.id)}" title="${n.collapsed ? '展开卡片 (H)' : '折叠卡片 (H)'}" aria-expanded="${!n.collapsed}">
-                      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                        <path d="${n.collapsed ? 'M6 4L10 8L6 12' : 'M4 6L8 10L12 6'}" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="${n.collapsed ? 'M6.25 4.25L10 8L6.25 11.75' : 'M4.25 6.25L8 10L11.75 6.25'}" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
                       </svg>
                     </button>
                   </header>
@@ -5188,8 +5188,8 @@
       state.lastClusterReportMd = `## 工作流运行完成\n\n- **最终目标**：${finalGoal}\n- **完成步骤**：共 ${allWaves.length} 步\n\n### 执行记录\n${completedLog.join('\n')}\n\n> 全部节点的输出和末尾总结已自动保存到本地，刷新或下次打开仍会保留。`;
       const hasSummary = state.graph.nodes.some((n) => !n.muted && n.kind === 'summary-card');
       setStatus(hasSummary
-        ? '工作流全部运行完成！最终结论与复述已写入「画布卡片总结框」并自动保存。'
-        : '工作流全部运行完成！各节点结果已直接显示在卡片中并自动保存。');
+        ? '工作流运行完成，最终结论与复述已写入「画布卡片总结框」并自动保存'
+        : '工作流运行完成，各节点结果已显示在卡片中并自动保存');
       renderAll();
       scheduleAutoSave(200);
       if (onToast) onToast('工作流运行完成，结果已自动保存');

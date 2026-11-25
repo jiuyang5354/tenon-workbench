@@ -437,6 +437,10 @@
       });
     });
     trackEl.addEventListener('pointerleave', () => place(hoverPill, null, false));
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => requestAnimationFrame(syncActive));
+      ro.observe(trackEl);
+    }
     fluidTracks.push(syncActive);
     requestAnimationFrame(syncActive);
   }
@@ -995,12 +999,12 @@
       }
       if (stateLabelEl) {
         stateLabelEl.textContent = isGate
-          ? 'GATE · WAIT'
+          ? '等待拍板'
           : clusterLive
-            ? 'CLUSTER · LIVE'
+            ? '画布运行中'
             : isLive
-              ? (run.activeStage === 'exec' ? 'CODEX · LIVE' : run.activeStage === 'review' ? 'REVIEW · LIVE' : 'GEMINI · LIVE')
-              : 'SIGNAL · IDLE';
+              ? (run.activeStage === 'exec' ? 'Codex 执行中' : run.activeStage === 'review' ? '代码审查中' : 'Gemini 思考中')
+              : '通道待命';
       }
 
       if (advance && appState.tweaks.motion && !reducedMotion) {
@@ -1513,7 +1517,7 @@
     el('threadMessages').classList.add('hidden');
     el('threadMessages').innerHTML = '';
     el('topbarTitle').textContent = '新协同会话';
-    el('topbarMeta').textContent = 'TENON · MULTI-AGENT WORKBENCH';
+    el('topbarMeta').textContent = '本地多模型协同工作台';
     el('btnCancelRun').classList.add('hidden');
     el('sendCtaGroup').classList.remove('hidden');
     el('composerShell').classList.remove('is-streaming');
@@ -3699,8 +3703,8 @@
     ctaGrp?.classList.toggle('hidden', !active);
     if (ta) {
       ta.placeholder = active
-        ? '运行中可直接输入新目标或修正意见：按 Enter 立即打断并改目标，或点「下步生效」不中断当前输出...'
-        : '像日常 Agent 一样直接对话，或输入 / 切协同模式、@ 引用文件...（Enter 发送，Shift+Enter 换行）';
+        ? '运行中可直接输入新目标，按 Enter 立即打断切换，或点「下步生效」排队'
+        : '输入任务或问题，/ 切模式，@ 引用文件（Enter 发送）';
     }
     if (btnQueue) btnQueue.disabled = !active || !hasDraft;
     if (btnInt) btnInt.disabled = !active || !hasDraft;
@@ -4047,7 +4051,7 @@
       appState.health = data;
       el('dotAgy').className = `status-dot ${data.agy.installed ? 'ok' : 'err'}`;
       el('dotCodex').className = `status-dot ${data.codex.installed ? 'ok' : 'err'}`;
-      el('welcomeEnvTag').textContent = `GEMINI CLI ${data.agy.installed ? 'READY' : 'MISSING'} · CODEX CLI ${data.codex.installed ? 'READY' : 'MISSING'}`;
+      el('welcomeEnvTag').textContent = `Gemini ${data.agy.installed ? '已就绪' : '未检测到'} · Codex ${data.codex.installed ? '已就绪' : '未检测到'}`;
 
       const pickBtn = el('btnPickWsFolder');
       if (pickBtn) {

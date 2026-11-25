@@ -519,21 +519,21 @@
   };
 
   const AI_ORB_HINTS = {
-    idle: '通道安静待命，可直接派发需求或点击切换状态。',
-    listening: '已捕获输入框草稿，按 Ctrl+Enter 或点击发送即可启动。',
-    thinking: '正在拆解任务边界并规划双模型协同路径。',
-    reasoning: '正在执行多方案深度推演与接口契约校验。',
-    'tool-call': '正在调用本机 CLI、Git 探测或文件检索工具。',
-    'tool-result': '正在汇聚各路工具返回结果并建立上下文关联。',
-    streaming: '正在实时流式输出代码、结论或交付文档。',
-    'waiting-approval': '高危或架构拍板节点已挂起，请确认后继续放行。',
-    error: '运行被中断或出现异常，可查看右侧审查/终端定位原因。',
-    done: '本轮双模型协同已顺利完成，随时可继续追问。',
+    idle: '通道待命，可直接派发需求或点击切换状态',
+    listening: '已捕获输入框草稿，按 Enter 或点击发送启动',
+    thinking: '正在拆解任务边界并规划双模型协同路径',
+    reasoning: '正在执行多方案推演与接口契约校验',
+    'tool-call': '正在调用本机 CLI、Git 探测或文件检索工具',
+    'tool-result': '正在汇聚各路工具返回结果并建立上下文关联',
+    streaming: '正在流式输出代码、结论或交付文档',
+    'waiting-approval': '高危或架构拍板节点已挂起，确认后继续放行',
+    error: '运行被中断或出现异常，可查看右侧审查或终端定位原因',
+    done: '本轮双模型协同已完成，可随时继续追问',
   };
 
   const AI_ORB_VISUALS = {
-    idle: { geom: 'ai-breathing', speed: 0.6, paused: false, settles: true, tone: 'muted' },
-    listening: { geom: 'ai-listening', speed: 1, paused: false, settles: true, tone: 'primary' },
+    idle: { geom: 'ai-breathing', speed: 0.6, paused: true, settles: true, tone: 'muted' },
+    listening: { geom: 'ai-listening', speed: 1, paused: true, settles: true, tone: 'primary' },
     thinking: { geom: 'ai-working', speed: 1, paused: false, settles: false, tone: 'primary' },
     reasoning: { geom: 'ai-solving', speed: 1, paused: false, settles: false, tone: 'primary' },
     'tool-call': { geom: 'ai-searching', speed: 1, paused: false, settles: false, tone: 'primary' },
@@ -541,7 +541,7 @@
     streaming: { geom: 'ai-composing', speed: 1, paused: false, settles: false, tone: 'primary' },
     'waiting-approval': { geom: 'ai-shaping', speed: 0.8, paused: false, settles: true, tone: 'attention' },
     error: { geom: 'ai-breathing', speed: 1, paused: true, settles: false, tone: 'critical' },
-    done: { geom: 'ai-breathing', speed: 0.6, paused: false, settles: true, tone: 'primary' },
+    done: { geom: 'ai-breathing', speed: 0.6, paused: true, settles: true, tone: 'primary' },
   };
 
   function makeSvgEl(tag) {
