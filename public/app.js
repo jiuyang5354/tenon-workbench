@@ -4561,6 +4561,8 @@
       nodesLayerEl: el('wfNodesLayer'),
       minimapCanvasEl: el('wfMinimapCanvas'),
       contextMenuEl: el('wfContextMenu'),
+      marqueeBoxEl: el('wfMarqueeBox'),
+      selectionBarEl: el('wfSelectionBar'),
       resultDrawerEl: el('wfResultDrawer'),
       resultBodyEl: el('wfResultBody'),
       resultTabsEl: el('wfResultTabs'),

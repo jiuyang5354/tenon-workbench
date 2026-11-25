@@ -257,6 +257,12 @@
             <div class="ic-nodes-layer" id="wfNodesLayer"></div>
           </div>
 
+          <!-- Left-Drag Marquee Box Selection Overlay (Desktop / ComfyUI Style) -->
+          <div class="ic-marquee-box hidden" id="wfMarqueeBox" aria-hidden="true"></div>
+
+          <!-- Floating Multi-Selection Batch Action Bar (Group / Align / Duplicate / Delete) -->
+          <div class="ic-selection-bar hidden" id="wfSelectionBar" role="toolbar" aria-label="多选节点快捷操作"></div>
+
           <!-- Drag-and-Drop JSON Import Overlay (ComfyUI-Style) -->
           <div class="ic-drop-overlay hidden" id="wfDropOverlay" aria-hidden="true">
             <div class="ic-drop-card">
@@ -341,7 +347,7 @@
                 <span id="labelWfRunLive">运行工作流</span>
               </button>
             </div>
-            <div class="ic-status-pill mono" id="wfStatusBar">① 写下任务 → ② 点各卡片切模型/连线 → ③ 点「运行工作流」，运行中可随时中途打断或修改目标</div>
+            <div class="ic-status-pill mono" id="wfStatusBar">左键框选节点 · 中键/空格拖动画布 · 右键快捷面板与合并成组 · 滚轮缩放</div>
           </div>
 
           <!-- Floating Bottom-Left: Compact Zoom, Grid, Fit & Direct JSON File Import/Export -->

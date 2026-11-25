@@ -22,8 +22,10 @@
   const CUSTOM_STORAGE_KEY = 'conduit_custom_cluster_graph_v1';
   const DRAFT_STORAGE_KEY = 'tenon_canvas_draft_v2';
   const CANVAS_MODE_STORAGE_KEY = 'tenon_canvas_mode_v1';
-  const DEFAULT_GUIDE_TEXT = '① 写下任务 → ② 点各卡片切模型/连线 → ③ 点「运行工作流」，结果自动汇总到「画布卡片总结框」';
-  const PRO_GUIDE_TEXT = '专业模式：拖拽画布平移 · 滚轮缩放 · 端口连线 · 卡片内含完整参数 / 步骤树 / 分支开关与流程预演 · Ctrl+S 保存';
+  const GROUP_ACCENTS = ['sage', 'slate', 'amber', 'violet', 'rose'];
+  const GROUP_ACCENT_LABELS = { sage: '鼠尾草绿', slate: '晴空蓝', amber: '琥珀金', violet: '暮紫', rose: '珊瑚红' };
+  const DEFAULT_GUIDE_TEXT = '左键框选节点 · 中键/空格拖动画布 · 右键快捷面板与合并成组 · 滚轮缩放';
+  const PRO_GUIDE_TEXT = '专业模式：左键框选多选 · 中键/空格平移 · 右键快捷菜单与合并成组 (Ctrl+G) · 滚轮缩放 · Ctrl+S 保存';
 
   const ADD_NODE_MENU_ITEMS = [
     { kind: 'gemini-plan', tag: '规划', title: '需求分析与规划', desc: '先看懂任务和项目目录，理出要改动的文件与步骤' },
@@ -731,6 +733,8 @@
       nodesLayerEl,
       minimapCanvasEl,
       contextMenuEl,
+      marqueeBoxEl,
+      selectionBarEl,
       resultDrawerEl,
       resultBodyEl,
       resultTabsEl,
@@ -775,6 +779,7 @@
       graph: makeLinearPreset(),
       history: [],
       selectedId: 'n-plan',
+      selectedIds: new Set(['n-plan']),
       selectedEdgeId: null,
       pendingWire: null,
       panX: 48,
@@ -806,18 +811,121 @@
       stepDetailOpen: new Set(),
       statusMsg: DEFAULT_GUIDE_TEXT,
       panning: null,
+      marquee: null,
       dragging: null,
       draggingGroup: null,
       resizing: null,
       wiring: null,
       extraToggles: { autoNewDiff: true, humanReport: true },
-      ctxMenu: { open: false, kind: 'menu', worldX: 200, worldY: 200, nodeId: null },
+      ctxMenu: { open: false, kind: 'menu', worldX: 200, worldY: 200, nodeId: null, groupId: null },
     };
 
     const nodeEls = new Map();
-    const OVERLAY_SEL = '.ic-hud-panel, .ic-floating-bar, .ic-minimap-card, .ic-ctx-menu, .ic-wf-popover, .ic-add-popover, .ic-result-drawer, .ic-cmd-bar, .ic-bottom-stack';
+    const OVERLAY_SEL = '.ic-hud-panel, .ic-floating-bar, .ic-minimap-card, .ic-ctx-menu, .ic-wf-popover, .ic-add-popover, .ic-result-drawer, .ic-cmd-bar, .ic-bottom-stack, .ic-selection-bar';
     let autoSaveTimer = null;
     let suppressAutoSave = false;
+
+    function syncSelectionClasses() {
+      const multi = state.selectedIds.size > 1;
+      nodesLayerEl.querySelectorAll('.ic-node-wrap').forEach((w) => {
+        const nid = w.dataset.nodeId;
+        const isSel = state.selectedIds.has(nid);
+        w.classList.toggle('is-selected', isSel);
+        w.classList.toggle('is-multi-selected', isSel && multi);
+        w.querySelector('.agent-node')?.classList.toggle('is-selected', isSel);
+      });
+    }
+
+    function getSelectedNodes() {
+      const validIds = new Set(state.graph.nodes.map((n) => n.id));
+      Array.from(state.selectedIds).forEach((id) => {
+        if (!validIds.has(id)) state.selectedIds.delete(id);
+      });
+      return state.graph.nodes.filter((n) => state.selectedIds.has(n.id));
+    }
+
+    function syncSelectionBar() {
+      if (!selectionBarEl) return;
+      const selNodes = getSelectedNodes();
+      if (selNodes.length < 2) {
+        selectionBarEl.classList.add('hidden');
+        selectionBarEl.innerHTML = '';
+        return;
+      }
+      const allMuted = selNodes.every((n) => n.muted);
+      selectionBarEl.classList.remove('hidden');
+      selectionBarEl.innerHTML = `
+        <span class="ic-sel-count mono-xs">已选 ${selNodes.length} 个节点</span>
+        <button type="button" class="ic-sel-btn is-primary" data-sel-act="group" title="将所选节点合并为一个分组框 (Ctrl+G)">合并成组</button>
+        <button type="button" class="ic-sel-btn" data-sel-act="run" title="按拓扑顺序运行当前选中的节点">运行所选</button>
+        <span class="ic-sel-sep" aria-hidden="true"></span>
+        <button type="button" class="ic-sel-btn" data-sel-act="align-top" title="顶部水平对齐所选节点">顶对齐</button>
+        <button type="button" class="ic-sel-btn" data-sel-act="align-left" title="左侧垂直对齐所选节点">左对齐</button>
+        <button type="button" class="ic-sel-btn" data-sel-act="dup" title="批量复制所选节点与内部连线 (Ctrl+D)">复制</button>
+        <button type="button" class="ic-sel-btn" data-sel-act="mute" title="批量跳过或恢复所选节点 (M)">${allMuted ? '恢复' : '跳过'}</button>
+        <button type="button" class="ic-sel-btn is-danger" data-sel-act="del" title="批量删除所选节点 (Del)">删除</button>
+        <button type="button" class="ic-sel-btn" data-sel-act="clear" title="取消多选 (Esc)">✕</button>`;
+
+      selectionBarEl.querySelectorAll('[data-sel-act]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const act = btn.dataset.selAct;
+          if (act === 'group') createNodeGroup();
+          else if (act === 'run') runSelectedNodes();
+          else if (act === 'align-top') alignSelectedNodes('top');
+          else if (act === 'align-left') alignSelectedNodes('left');
+          else if (act === 'dup') duplicateSelectedNodes();
+          else if (act === 'mute') toggleMuteSelectedNodes();
+          else if (act === 'del') removeSelectedNodes();
+          else if (act === 'clear') clearSelection();
+        });
+      });
+    }
+
+    function setSelection(ids, primaryId = null, { updateDrawer = true } = {}) {
+      const validIds = new Set(state.graph.nodes.map((n) => n.id));
+      const clean = Array.from(ids || []).filter((id) => validIds.has(id));
+      state.selectedIds = new Set(clean);
+      if (primaryId && state.selectedIds.has(primaryId)) {
+        state.selectedId = primaryId;
+      } else {
+        state.selectedId = clean[clean.length - 1] || '';
+      }
+      syncSelectionClasses();
+      syncSelectionBar();
+      if (updateDrawer && state.drawerOpen && state.drawerTab === 'node') renderResultDrawer();
+    }
+
+    function toggleNodeSelection(nid) {
+      if (!state.graph.nodes.some((n) => n.id === nid)) return;
+      const next = new Set(state.selectedIds);
+      let primary = state.selectedId;
+      if (next.has(nid)) {
+        next.delete(nid);
+        if (primary === nid) primary = Array.from(next)[next.length - 1] || '';
+      } else {
+        next.add(nid);
+        primary = nid;
+      }
+      setSelection(next, primary);
+    }
+
+    function clearSelection() {
+      if (state.selectedIds.size === 0 && !state.selectedId) return;
+      state.selectedIds = new Set();
+      state.selectedId = '';
+      syncSelectionClasses();
+      syncSelectionBar();
+    }
+
+    function selectAllNodes() {
+      const visibleIds = state.graph.nodes
+        .filter((n) => !getCollapsedGroupForNode(n.id))
+        .map((n) => n.id);
+      if (visibleIds.length === 0) return;
+      setSelection(visibleIds, visibleIds[0]);
+      setStatus(`已全选 ${visibleIds.length} 个节点（可整体拖动、按 Ctrl+G 合并成组，或右键打开快捷面板）。`);
+    }
 
     function setStatus(msg) {
       state.statusMsg = msg;
@@ -1111,7 +1219,7 @@
             .filter((e) => e && typeof e === 'object' && idSet.has(e.source) && idSet.has(e.target) && e.source !== e.target)
             .map((e, idx) => ({ id: typeof e.id === 'string' && e.id ? e.id : `e-load-${idx + 1}`, source: e.source, target: e.target }))
         : [];
-      const validAccents = new Set(['sage', 'slate', 'amber']);
+      const validAccents = new Set(GROUP_ACCENTS);
       const safeGroups = Array.isArray(rawGraph.groups)
         ? rawGraph.groups
             .filter((g) => g && typeof g === 'object' && Array.isArray(g.nodeIds))
@@ -1136,7 +1244,9 @@
       suppressAutoSave = !triggerSave;
       state.graph = cleanGraph;
       state.seq = Math.max(state.seq, maxNumericSuffix(state.graph) + 1);
-      state.selectedId = state.graph.nodes[0]?.id || '';
+      const firstId = state.graph.nodes[0]?.id || '';
+      state.selectedId = firstId;
+      state.selectedIds = firstId ? new Set([firstId]) : new Set();
       state.selectedEdgeId = null;
       state.pendingWire = null;
       if (typeof snap?.name === 'string' && snap.name.trim()) {
@@ -1908,16 +2018,24 @@
           if (!b) return '';
           const liveCount = b.members.filter((n) => statusMap.get(n.id) === 'running').length;
           const doneCount = b.members.filter((n) => statusMap.get(n.id) === 'completed').length;
-          const badgeText = liveCount > 0 ? `${liveCount} 运行中` : doneCount === b.members.length ? '全部就绪 ✓' : `${b.members.length} 节点`;
+          const mutedCount = b.members.filter((n) => n.muted).length;
+          const badgeText = liveCount > 0
+            ? `${liveCount} 运行中`
+            : mutedCount === b.members.length
+              ? '整组跳过'
+              : doneCount === b.members.length
+                ? '全部就绪 ✓'
+                : `${b.members.length} 节点`;
           return `
             <div class="ic-node-group is-accent-${escapeHtml(g.accent || 'sage')} ${g.collapsed ? 'is-collapsed' : ''}" data-group-id="${escapeHtml(g.id)}" style="transform:translate(${b.x}px,${b.y}px);width:${b.w}px;height:${b.h}px">
-              <div class="ic-group-head" data-group-drag="${escapeHtml(g.id)}" title="拖动标题栏可整体平移组内节点 · 点击名称可直接改名">
+              <div class="ic-group-head" data-group-drag="${escapeHtml(g.id)}" title="拖动标题栏可整体平移组内节点 · 右键可配色/运行/解散 · 双击折叠">
                 <div class="ic-group-title-wrap">
-                  <span class="ic-group-pip" aria-hidden="true"></span>
+                  <button type="button" class="ic-group-pip-btn" data-group-cycle-accent="${escapeHtml(g.id)}" title="点击切换分组配色"><span class="ic-group-pip" aria-hidden="true"></span></button>
                   <input type="text" class="ic-group-title-input mono" data-group-rename="${escapeHtml(g.id)}" value="${escapeHtml(g.title)}" aria-label="节点组名称" />
                   <span class="ic-group-count mono-xs">${escapeHtml(badgeText)}</span>
                 </div>
                 <div class="ic-group-actions">
+                  <button type="button" class="ic-group-btn is-run" data-group-run="${escapeHtml(g.id)}" title="按连线顺序运行本组内全部节点">运行组</button>
                   <button type="button" class="ic-group-btn" data-group-toggle="${escapeHtml(g.id)}" title="${g.collapsed ? '展开分组 (Tab)' : '折叠为紧凑卡片 (Tab)'}">${g.collapsed ? '展开' : '折叠'}</button>
                   <button type="button" class="ic-group-btn" data-group-ungroup="${escapeHtml(g.id)}" title="解散此分组（保留组内节点）">解散</button>
                 </div>
@@ -1937,6 +2055,26 @@
         })
         .join('');
 
+      framesLayerEl.querySelectorAll('[data-group-cycle-accent]').forEach((btn) => {
+        btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const g = (state.graph.groups || []).find((x) => x.id === btn.dataset.groupCycleAccent);
+          if (!g) return;
+          const curIdx = Math.max(0, GROUP_ACCENTS.indexOf(g.accent || 'sage'));
+          const nextAccent = GROUP_ACCENTS[(curIdx + 1) % GROUP_ACCENTS.length];
+          setGroupAccent(g.id, nextAccent);
+        });
+      });
+
+      framesLayerEl.querySelectorAll('[data-group-run]').forEach((btn) => {
+        btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          runGroupNodes(btn.dataset.groupRun);
+        });
+      });
+
       framesLayerEl.querySelectorAll('[data-group-toggle]').forEach((btn) => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -1953,13 +2091,7 @@
       framesLayerEl.querySelectorAll('[data-group-ungroup]').forEach((btn) => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
-          const gid = btn.dataset.groupUngroup;
-          pushHistory();
-          state.graph.groups = (state.graph.groups || []).filter((x) => x.id !== gid);
-          renderAll();
-          scheduleAutoSave(300);
-          setStatus('已解散分组（组内节点与连线已保留）。');
-          if (onToast) onToast('已解散分组');
+          ungroupById(btn.dataset.groupUngroup);
         });
       });
 
@@ -2013,38 +2145,311 @@
       });
     }
 
-    function createNodeGroup() {
+    function createNodeGroup(explicitNodeIds = null, customTitle = '') {
       if (!state.graph.groups) state.graph.groups = [];
-      const existingGrouped = new Set(state.graph.groups.flatMap((g) => g.nodeIds));
-      const sel = state.graph.nodes.find((n) => n.id === state.selectedId);
-      let picks = [];
-      if (sel) {
-        // Pack selected node + parallel siblings of same kind (or nearby ungrouped nodes)
-        picks = state.graph.nodes
-          .filter((n) => !existingGrouped.has(n.id) && (n.id === sel.id || (n.kind === sel.kind && Math.abs(n.x - sel.x) < 160)))
-          .map((n) => n.id);
+      const validIds = new Set(state.graph.nodes.map((n) => n.id));
+      let picks = Array.isArray(explicitNodeIds)
+        ? Array.from(new Set(explicitNodeIds.filter((id) => validIds.has(id))))
+        : [];
+
+      if (picks.length === 0 && state.selectedIds.size >= 1) {
+        picks = Array.from(state.selectedIds).filter((id) => validIds.has(id));
       }
       if (picks.length === 0) {
+        const existingGrouped = new Set(state.graph.groups.flatMap((g) => g.nodeIds));
         picks = state.graph.nodes.filter((n) => !existingGrouped.has(n.id)).slice(0, 2).map((n) => n.id);
       }
       if (picks.length === 0) {
-        if (onToast) onToast('当前所有节点均已归组，请先新增节点或解散已有分组');
+        if (onToast) onToast('请先左键框选或点击至少一个节点，再合并成组');
+        return null;
+      }
+
+      pushHistory();
+      const pickSet = new Set(picks);
+      // Remove picked nodes from any old group so a node belongs cleanly to the new group
+      state.graph.groups = state.graph.groups
+        .map((g) => ({ ...g, nodeIds: g.nodeIds.filter((nid) => !pickSet.has(nid)) }))
+        .filter((g) => g.nodeIds.length > 0);
+
+      const idx = state.graph.groups.length + 1;
+      const newGroup = {
+        id: `grp-${++state.seq}`,
+        title: (customTitle || '').trim() || `任务分组 #${idx}`,
+        accent: GROUP_ACCENTS[(idx - 1) % GROUP_ACCENTS.length],
+        nodeIds: picks,
+        collapsed: false,
+      };
+      state.graph.groups.push(newGroup);
+      renderAll();
+      scheduleAutoSave(300);
+      setStatus(`已将 ${picks.length} 个节点合并成组「${newGroup.title}」：拖动标题栏可整体平移，右键分组标题可配色或运行整组。`);
+      if (onToast) onToast(`已合并成组：${newGroup.title}（${picks.length} 节点）`);
+      return newGroup;
+    }
+
+    function ungroupById(gid) {
+      const target = (state.graph.groups || []).find((g) => g.id === gid);
+      if (!target) return;
+      pushHistory();
+      state.graph.groups = (state.graph.groups || []).filter((g) => g.id !== gid);
+      renderAll();
+      scheduleAutoSave(300);
+      setStatus(`已解散分组「${target.title}」（组内节点与连线已完整保留）。`);
+      if (onToast) onToast(`已解散分组：${target.title}`);
+    }
+
+    function ungroupSelected() {
+      const selIds = state.selectedIds.size > 0 ? state.selectedIds : (state.selectedId ? new Set([state.selectedId]) : new Set());
+      if (selIds.size === 0) return;
+      const hitGroups = (state.graph.groups || []).filter((g) => g.nodeIds.some((nid) => selIds.has(nid)));
+      if (hitGroups.length === 0) {
+        if (onToast) onToast('当前选中节点未在任何分组内');
         return;
       }
       pushHistory();
-      const idx = state.graph.groups.length + 1;
-      const accents = ['sage', 'slate', 'amber'];
+      const hitIds = new Set(hitGroups.map((g) => g.id));
+      state.graph.groups = (state.graph.groups || []).filter((g) => !hitIds.has(g.id));
+      renderAll();
+      scheduleAutoSave(300);
+      setStatus(`已解散 ${hitGroups.length} 个分组（组内节点与连线已完整保留）。`);
+      if (onToast) onToast(`已解散 ${hitGroups.length} 个分组`);
+    }
+
+    function addNodesToGroup(gid, nodeIds) {
+      const target = (state.graph.groups || []).find((g) => g.id === gid);
+      if (!target) return;
+      const addList = Array.from(new Set(nodeIds || [])).filter((id) => state.graph.nodes.some((n) => n.id === id));
+      if (addList.length === 0) return;
+      pushHistory();
+      const addSet = new Set(addList);
+      state.graph.groups = (state.graph.groups || [])
+        .map((g) => (g.id === gid ? g : { ...g, nodeIds: g.nodeIds.filter((id) => !addSet.has(id)) }))
+        .filter((g) => g.nodeIds.length > 0);
+      target.nodeIds = Array.from(new Set([...target.nodeIds, ...addList]));
+      target.collapsed = false;
+      renderAll();
+      scheduleAutoSave(300);
+      if (onToast) onToast(`已加入分组：${target.title}`);
+    }
+
+    function removeNodesFromGroup(nodeIds) {
+      const remSet = new Set(nodeIds || []);
+      if (remSet.size === 0) return;
+      pushHistory();
+      state.graph.groups = (state.graph.groups || [])
+        .map((g) => ({ ...g, nodeIds: g.nodeIds.filter((id) => !remSet.has(id)) }))
+        .filter((g) => g.nodeIds.length > 0);
+      renderAll();
+      scheduleAutoSave(300);
+      if (onToast) onToast('已移出所属分组');
+    }
+
+    function setGroupAccent(gid, accent) {
+      const g = (state.graph.groups || []).find((x) => x.id === gid);
+      if (!g || !GROUP_ACCENTS.includes(accent)) return;
+      pushHistory();
+      g.accent = accent;
+      renderAll();
+      scheduleAutoSave(300);
+      if (onToast) onToast(`分组「${g.title}」配色已切换为${GROUP_ACCENT_LABELS[accent] || accent}`);
+    }
+
+    function toggleMuteGroup(gid) {
+      const g = (state.graph.groups || []).find((x) => x.id === gid);
+      if (!g) return;
+      const members = g.nodeIds.map((id) => state.graph.nodes.find((n) => n.id === id)).filter(Boolean);
+      if (members.length === 0) return;
+      const nextMuted = !members.every((n) => n.muted);
+      pushHistory();
+      members.forEach((n) => { n.muted = nextMuted; });
+      renderAll();
+      scheduleAutoSave(300);
+      setStatus(`分组「${g.title}」内 ${members.length} 个节点已${nextMuted ? '全部设为跳过' : '全部恢复启用'}。`);
+      if (onToast) onToast(nextMuted ? `已跳过整组：${g.title}` : `已恢复整组：${g.title}`);
+    }
+
+    function duplicateGroup(gid) {
+      const g = (state.graph.groups || []).find((x) => x.id === gid);
+      if (!g) return;
+      const newIds = duplicateSelectedNodes(g.nodeIds, { silent: true });
+      if (!newIds || newIds.length === 0) return;
       state.graph.groups.push({
         id: `grp-${++state.seq}`,
-        title: `任务分组 #${idx}`,
-        accent: accents[(idx - 1) % accents.length],
-        nodeIds: picks,
+        title: `${g.title} 副本`,
+        accent: g.accent || 'sage',
+        nodeIds: newIds,
         collapsed: false,
       });
       renderAll();
       scheduleAutoSave(300);
-      setStatus(`已创建分组（含 ${picks.length} 个节点），拖动分组标题可整体移动，点击折叠可收纳。`);
-      if (onToast) onToast(`已将 ${picks.length} 个节点归为一组`);
+      setStatus(`已复制分组「${g.title}」（含 ${newIds.length} 个节点与内部连线）。`);
+      if (onToast) onToast(`已复制分组：${g.title} 副本`);
+    }
+
+    function removeGroupWithNodes(gid) {
+      const g = (state.graph.groups || []).find((x) => x.id === gid);
+      if (!g) return;
+      removeSelectedNodes(g.nodeIds);
+    }
+
+    function runGroupNodes(gid) {
+      const g = (state.graph.groups || []).find((x) => x.id === gid);
+      if (!g || g.nodeIds.length === 0) return;
+      runSelectedNodes(g.nodeIds, `分组「${g.title}」`);
+    }
+
+    function runSelectedNodes(explicitIds = null, label = '所选节点') {
+      const ids = Array.isArray(explicitIds) && explicitIds.length > 0
+        ? explicitIds
+        : Array.from(state.selectedIds);
+      const targetSet = new Set(
+        ids.filter((id) => {
+          const n = state.graph.nodes.find((x) => x.id === id);
+          return n && !n.muted;
+        })
+      );
+      if (targetSet.size === 0) {
+        if (onToast) onToast('没有可运行的选中节点（请检查是否被设为跳过）');
+        return;
+      }
+      const prompt = String(commandInputEl?.value || state.lastTaskPrompt || '').trim();
+      if (!prompt) {
+        if (onToast) onToast('请先在画布底部输入框写下任务目标');
+        commandInputEl?.focus();
+        return;
+      }
+      if (!onRunCanvasNode) {
+        runClusterDemo(prompt);
+        return;
+      }
+      if (onToast) onToast(`开始按依赖顺序运行${label}（${targetSet.size} 节点）`);
+      void runWorkflowWaves({
+        prompt,
+        startWaveIndex: 0,
+        targetNodeIds: targetSet,
+        preserveExistingOutputs: true,
+      });
+    }
+
+    function alignSelectedNodes(mode = 'top') {
+      const nodes = getSelectedNodes();
+      if (nodes.length < 2) return;
+      pushHistory();
+      if (mode === 'top') {
+        const minY = Math.min(...nodes.map((n) => n.y));
+        nodes.forEach((n) => { n.y = Math.round(minY); });
+      } else if (mode === 'left') {
+        const minX = Math.min(...nodes.map((n) => n.x));
+        nodes.forEach((n) => { n.x = Math.round(minX); });
+      } else if (mode === 'distribute-h') {
+        const sorted = [...nodes].sort((a, b) => a.x - b.x);
+        const minY = Math.min(...sorted.map((n) => n.y));
+        let cursorX = sorted[0].x;
+        sorted.forEach((n) => {
+          n.x = Math.round(cursorX);
+          n.y = Math.round(minY);
+          cursorX += nodeWidth(n) + 72;
+        });
+      }
+      renderAll();
+      scheduleAutoSave(300);
+      const labelMap = { top: '顶部对齐', left: '左侧对齐', 'distribute-h': '水平均匀排列' };
+      setStatus(`已对 ${nodes.length} 个选中节点执行「${labelMap[mode] || '对齐'}」。`);
+      if (onToast) onToast(`已${labelMap[mode] || '对齐'} ${nodes.length} 个节点`);
+    }
+
+    function duplicateSelectedNodes(explicitIds = null, { silent = false } = {}) {
+      const ids = Array.isArray(explicitIds) && explicitIds.length > 0
+        ? explicitIds
+        : (state.selectedIds.size > 0 ? Array.from(state.selectedIds) : (state.selectedId ? [state.selectedId] : []));
+      const origs = ids.map((id) => state.graph.nodes.find((n) => n.id === id)).filter(Boolean);
+      if (origs.length === 0) return [];
+      if (origs.length === 1 && !silent) {
+        duplicateNode(origs[0].id);
+        return [state.selectedId];
+      }
+      pushHistory();
+      const idMap = new Map();
+      const created = [];
+      origs.forEach((orig) => {
+        const copy = hydrateNode({
+          ...orig,
+          id: `n-dup-${++state.seq}`,
+          title: `${orig.title} 副本`,
+          x: orig.x + 56,
+          y: orig.y + 56,
+          status: 'idle',
+          outputMd: '',
+          steps: makeStepsForNode(orig.kind),
+        });
+        idMap.set(orig.id, copy.id);
+        state.graph.nodes.push(copy);
+        created.push(copy.id);
+      });
+      // Clone internal edges connecting any two copied nodes
+      const origSet = new Set(origs.map((n) => n.id));
+      const internalEdges = state.graph.edges.filter((e) => origSet.has(e.source) && origSet.has(e.target));
+      internalEdges.forEach((e) => {
+        state.graph.edges.push({
+          id: `e-${++state.seq}`,
+          source: idMap.get(e.source),
+          target: idMap.get(e.target),
+        });
+      });
+      setSelection(created, created[created.length - 1]);
+      renderAll();
+      scheduleAutoSave(300);
+      if (!silent) {
+        setStatus(`已批量复制 ${created.length} 个节点（含 ${internalEdges.length} 条内部连线）。`);
+        if (onToast) onToast(`已复制 ${created.length} 个节点`);
+      }
+      return created;
+    }
+
+    function toggleMuteSelectedNodes(explicitIds = null) {
+      const ids = Array.isArray(explicitIds) && explicitIds.length > 0
+        ? explicitIds
+        : (state.selectedIds.size > 0 ? Array.from(state.selectedIds) : (state.selectedId ? [state.selectedId] : []));
+      const targets = ids.map((id) => state.graph.nodes.find((n) => n.id === id)).filter(Boolean);
+      if (targets.length === 0) return;
+      const nextMuted = !targets.every((n) => n.muted);
+      pushHistory();
+      targets.forEach((n) => { n.muted = nextMuted; });
+      renderAll();
+      scheduleAutoSave(300);
+      setStatus(`已将 ${targets.length} 个节点${nextMuted ? '设为跳过' : '恢复启用'}。`);
+      if (onToast) onToast(`${nextMuted ? '已跳过' : '已恢复'} ${targets.length} 个节点`);
+    }
+
+    function removeSelectedNodes(explicitIds = null) {
+      const ids = Array.isArray(explicitIds) && explicitIds.length > 0
+        ? explicitIds
+        : (state.selectedIds.size > 0 ? Array.from(state.selectedIds) : (state.selectedId ? [state.selectedId] : []));
+      const uniq = Array.from(new Set(ids)).filter((id) => state.graph.nodes.some((n) => n.id === id));
+      if (uniq.length === 0) return;
+      if (uniq.length === 1) {
+        removeNode(uniq[0]);
+        return;
+      }
+      if (state.graph.nodes.length - uniq.length < 1) {
+        if (onToast) onToast('画布至少需保留一个节点，无法全部删除');
+        return;
+      }
+      pushHistory();
+      const delSet = new Set(uniq);
+      state.graph.nodes = state.graph.nodes.filter((n) => !delSet.has(n.id));
+      state.graph.edges = state.graph.edges.filter((e) => !delSet.has(e.source) && !delSet.has(e.target));
+      if (Array.isArray(state.graph.groups)) {
+        state.graph.groups = state.graph.groups
+          .map((g) => ({ ...g, nodeIds: g.nodeIds.filter((nid) => !delSet.has(nid)) }))
+          .filter((g) => g.nodeIds.length > 0);
+      }
+      const nextFirst = state.graph.nodes[0]?.id || '';
+      setSelection(nextFirst ? [nextFirst] : [], nextFirst);
+      renderAll();
+      scheduleAutoSave(300);
+      setStatus(`已批量移除 ${uniq.length} 个节点（按 Ctrl+Z 可撤销）。`);
+      if (onToast) onToast(`已移除 ${uniq.length} 个节点`);
     }
 
     function renderEdges() {
@@ -2378,7 +2783,8 @@
           const st = n.muted ? 'idle' : sanitizeStatus(statusMap.get(n.id), VALID_NODE_STATUS, 'idle');
           const safeSt = escapeHtml(st);
           const running = st === 'running';
-          const sel = state.selectedId === n.id;
+          const sel = state.selectedIds.has(n.id) || state.selectedId === n.id;
+          const multiSel = sel && state.selectedIds.size > 1;
           const meta = statusMeta[st] || statusMeta.idle;
           const [orbState, orbVariant] = running ? tpl.orbRun : st === 'error' ? ['retrying', 'default'] : tpl.orbIdle;
           const isMerge = n.kind === 'cluster-merge';
@@ -2450,7 +2856,7 @@
             : '';
 
           return `
-            <div class="ic-node-wrap ${sel ? 'is-selected' : ''} ${isMerge ? 'is-merge-hub' : ''} ${isSummaryCard ? 'is-summary-card' : ''} ${n.muted ? 'is-muted' : ''} ${n.collapsed ? 'is-collapsed' : ''} ${hiddenInGroup ? 'is-group-hidden' : ''}" data-node-id="${escapeHtml(n.id)}" data-status="${safeSt}" style="width:${nw}px;transform:translate(${Math.round(n.x)}px,${Math.round(n.y)}px)">
+            <div class="ic-node-wrap ${sel ? 'is-selected' : ''} ${multiSel ? 'is-multi-selected' : ''} ${isMerge ? 'is-merge-hub' : ''} ${isSummaryCard ? 'is-summary-card' : ''} ${n.muted ? 'is-muted' : ''} ${n.collapsed ? 'is-collapsed' : ''} ${hiddenInGroup ? 'is-group-hidden' : ''}" data-node-id="${escapeHtml(n.id)}" data-status="${safeSt}" style="width:${nw}px;transform:translate(${Math.round(n.x)}px,${Math.round(n.y)}px)">
               <div class="ic-node-ext-meta mono">
                 <div class="ic-ext-left">
                   <span class="ic-ext-role">${escapeHtml(extRole)}</span>
@@ -2578,7 +2984,7 @@
         const nid = wrap.dataset.nodeId;
         nodeEls.set(nid, wrap);
 
-        // Delayed pointer capture (4px threshold preserves native dblclick & avoids wasted undo entries!)
+        // Delayed pointer capture (4px threshold preserves native dblclick & supports multi-node batch dragging!)
         wrap.addEventListener('pointerdown', (e) => {
           if (e.button !== 0 || state.spaceDown || state.panning || state.wiring || state.resizing) return;
           if (e.target.closest('button, input, textarea, select, [role="switch"], .wf-port, .ic-resize-handle')) return;
@@ -2589,22 +2995,34 @@
           }
           const node = state.graph.nodes.find((x) => x.id === nid);
           if (!node) return;
-          if (state.selectedId !== nid) {
+          if (e.shiftKey || e.ctrlKey || e.metaKey) {
+            toggleNodeSelection(nid);
+            return;
+          }
+          let narrowOnClick = false;
+          if (state.selectedIds.has(nid) && state.selectedIds.size > 1) {
             state.selectedId = nid;
-            nodesLayerEl.querySelectorAll('.ic-node-wrap').forEach((w) => {
-              const s = w.dataset.nodeId === nid;
-              w.classList.toggle('is-selected', s);
-              w.querySelector('.agent-node')?.classList.toggle('is-selected', s);
-            });
-            if (state.drawerOpen && state.drawerTab === 'node') renderResultDrawer();
+            narrowOnClick = true;
+          } else if (!state.selectedIds.has(nid) || state.selectedIds.size !== 1 || state.selectedId !== nid) {
+            setSelection([nid], nid);
           }
           const startWorld = screenToWorld(e.clientX, e.clientY);
+          const dragIds = state.selectedIds.has(nid) ? Array.from(state.selectedIds) : [nid];
+          const origins = new Map();
+          dragIds.forEach((id) => {
+            const dn = state.graph.nodes.find((x) => x.id === id);
+            if (dn) origins.set(id, { x: dn.x, y: dn.y });
+          });
           state.dragging = {
             id: nid,
             startClientX: e.clientX,
             startClientY: e.clientY,
+            startWorldX: startWorld.x,
+            startWorldY: startWorld.y,
             offsetX: startWorld.x - node.x,
             offsetY: startWorld.y - node.y,
+            origins,
+            narrowOnClick,
             moved: false,
             captured: false,
             pointerId: e.pointerId,
@@ -2614,20 +3032,15 @@
         wrap.addEventListener('dblclick', (e) => {
           if (e.target.closest('button, input, textarea, select, [role="switch"], .wf-port, .ic-resize-handle')) return;
           e.stopPropagation();
-          state.selectedId = nid;
+          setSelection([nid], nid, { updateDrawer: false });
           openResultDrawer('node');
         });
       });
 
       // Inline In-Card Selection Helper (hoisted before resize handles & editors)
       const selectNodeQuietly = (nid) => {
-        if (state.selectedId === nid) return;
-        state.selectedId = nid;
-        nodesLayerEl.querySelectorAll('.ic-node-wrap').forEach((w) => {
-          const s = w.dataset.nodeId === nid;
-          w.classList.toggle('is-selected', s);
-          w.querySelector('.agent-node')?.classList.toggle('is-selected', s);
-        });
+        if (state.selectedId === nid && state.selectedIds.size === 1 && state.selectedIds.has(nid)) return;
+        setSelection([nid], nid, { updateDrawer: false });
       };
 
       // Blender/Figma Free Per-Node Resize Handles (W / E / S / SE + delayed capture so dblclick reset works 100%!)
@@ -2912,6 +3325,7 @@
       renderNodes();
       renderGroups();
       renderEdges();
+      syncSelectionBar();
       applyTransform();
       if (state.drawerOpen) renderResultDrawer();
     }
@@ -3226,7 +3640,7 @@
       });
     }
 
-    function openContextMenu(clientX, clientY, nodeId = null) {
+    function openContextMenu(clientX, clientY, nodeId = null, groupId = null) {
       if (!contextMenuEl) return;
       closeLibraryPopover();
       closeAddMenuPopover();
@@ -3237,52 +3651,125 @@
         worldX: Math.round(worldPt.x),
         worldY: Math.round(worldPt.y),
         nodeId,
+        groupId,
       };
 
-      let hasSaved = false;
-      try { hasSaved = Boolean(localStorage.getItem(CUSTOM_STORAGE_KEY)); } catch {}
-      const targetNode = nodeId ? state.graph.nodes.find((n) => n.id === nodeId) : null;
-
+      const targetGroup = groupId ? (state.graph.groups || []).find((g) => g.id === groupId) : null;
+      const targetNode = !targetGroup && nodeId ? state.graph.nodes.find((n) => n.id === nodeId) : null;
+      const selNodes = getSelectedNodes();
+      const isMultiNodeCtx = Boolean(targetNode && state.selectedIds.has(targetNode.id) && selNodes.length >= 2);
       const isPro = state.canvasMode === 'pro';
-      const items = targetNode
-        ? [
-            { type: 'group', label: `节点操作 · ${targetNode.title.slice(0, 18)}` },
-            { id: 'node:model', label: '自由切换此节点模型', shortcut: '模型', accent: true },
-            { id: 'node:cli', label: '在画布中运行此节点', shortcut: '运行' },
-            { id: 'node:downstream', label: '从此节点继续跑完下游', shortcut: '续跑' },
-            ...(isPro ? [{ id: 'node:run', label: '仅预演此节点步骤', shortcut: 'R' }] : []),
-            { id: 'node:inspect', label: '打开高级设置与完整输出', shortcut: 'Enter' },
-            { type: 'sep' },
-            { id: 'node:dup', label: '复制节点', shortcut: 'Shift+D' },
-            { id: 'node:mute', label: targetNode.muted ? '恢复执行此节点' : '临时跳过此节点', shortcut: 'M' },
-            { id: 'node:disconnect', label: '断开该节点全部连线', shortcut: '' },
-            { type: 'sep' },
-            { id: 'node:delete', label: '删除节点', shortcut: 'Del', danger: true },
-          ]
-        : [
-            { type: 'group', label: '在当前位置新建节点' },
-            { id: 'add:gemini-plan', label: '+ 需求分析与规划', shortcut: '规划' },
-            { id: 'add:codex-exec', label: '+ 代码实现', shortcut: '开发' },
-            { id: 'add:custom-agent', label: '+ 外部模型节点', shortcut: '外部', accent: true },
-            { id: 'add:cluster-merge', label: '+ 多路结果汇总', shortcut: '汇总' },
-            { id: 'add:codex-review', label: '+ 代码审查', shortcut: '审查' },
-            { id: 'add:summary-card', label: '+ 画布卡片总结框', shortcut: '总结框', accent: true },
-            { id: 'add:gemini-copy', label: '+ 界面文案润色', shortcut: '文案' },
-            ...(isPro
-              ? [
-                  { id: 'add:image-gen', label: '+ 图像生成', shortcut: '图像' },
-                  { id: 'add:video-gen', label: '+ 视频生成', shortcut: '视频' },
-                ]
-              : []),
-            { type: 'sep' },
-            { type: 'group', label: '工作流保存与画布管理' },
-            { id: 'act:save', label: '保存当前工作流', shortcut: 'Ctrl+S' },
-            { id: 'act:export', label: '导出工作流 (.json)', shortcut: '导出' },
-            { id: 'act:layout', label: '按执行顺序自动排列', shortcut: 'L' },
-            { id: 'act:fit', label: '适配全览全部节点', shortcut: 'F' },
-            { id: 'act:blank', label: '新建空白画布', shortcut: '新建' },
-            { id: 'act:undo', label: '撤销上一步操作', shortcut: 'Ctrl+Z' },
-          ];
+
+      let items = [];
+      let searchPlaceholder = '搜索并新建节点或快捷操作...';
+
+      if (targetGroup) {
+        searchPlaceholder = `搜索分组「${targetGroup.title.slice(0, 12)}」操作...`;
+        const members = targetGroup.nodeIds.map((id) => state.graph.nodes.find((n) => n.id === id)).filter(Boolean);
+        const allMuted = members.length > 0 && members.every((n) => n.muted);
+        items = [
+          { type: 'group', label: `分组操作 · ${targetGroup.title.slice(0, 16)} (${members.length} 节点)` },
+          { id: 'grp:run', label: '运行组内全部节点', shortcut: '运行', accent: true },
+          { id: 'grp:select', label: '选中组内全部节点', shortcut: '全选组' },
+          { id: 'grp:toggle', label: targetGroup.collapsed ? '展开此分组' : '折叠为紧凑卡片', shortcut: 'Tab' },
+          { type: 'swatches', groupId: targetGroup.id, activeAccent: targetGroup.accent || 'sage' },
+          { type: 'sep' },
+          { id: 'grp:dup', label: '复制整组（含节点与连线）', shortcut: '复制组' },
+          { id: 'grp:mute', label: allMuted ? '恢复组内全部节点' : '临时跳过整组节点', shortcut: '跳过' },
+          { id: 'grp:ungroup', label: '解散分组（保留节点）', shortcut: 'Ctrl+Shift+G' },
+          { type: 'sep' },
+          { id: 'grp:delete', label: '删除分组及组内节点', shortcut: 'Del', danger: true },
+        ];
+      } else if (isMultiNodeCtx) {
+        searchPlaceholder = `搜索已选 ${selNodes.length} 个节点的批量操作...`;
+        const allMuted = selNodes.every((n) => n.muted);
+        items = [
+          { type: 'group', label: `已框选 ${selNodes.length} 个节点 · 批量操作` },
+          { id: 'sel:group', label: '合并成组', shortcut: 'Ctrl+G', accent: true },
+          { id: 'sel:run', label: '按依赖运行所选节点', shortcut: '运行' },
+          { type: 'sep' },
+          { id: 'sel:align-top', label: '顶部水平对齐', shortcut: '顶对齐' },
+          { id: 'sel:align-left', label: '左侧垂直对齐', shortcut: '左对齐' },
+          { id: 'sel:distribute-h', label: '水平均匀排列', shortcut: '横排' },
+          { type: 'sep' },
+          { id: 'sel:dup', label: '批量复制所选节点', shortcut: 'Ctrl+D' },
+          { id: 'sel:mute', label: allMuted ? '批量恢复启用' : '批量设为跳过', shortcut: 'M' },
+          { id: 'sel:ungroup', label: '解散所选节点所属分组', shortcut: 'Ctrl+Shift+G' },
+          { id: 'sel:disconnect', label: '断开所选节点外部连线', shortcut: '' },
+          { type: 'sep' },
+          { id: 'sel:delete', label: `删除所选 ${selNodes.length} 个节点`, shortcut: 'Del', danger: true },
+        ];
+      } else if (targetNode) {
+        searchPlaceholder = '搜索节点操作...';
+        const ownerGroup = (state.graph.groups || []).find((g) => g.nodeIds.includes(targetNode.id)) || null;
+        const otherGroups = (state.graph.groups || []).filter((g) => !g.nodeIds.includes(targetNode.id)).slice(0, 3);
+        items = [
+          { type: 'group', label: `节点操作 · ${targetNode.title.slice(0, 18)}` },
+          { id: 'node:model', label: '自由切换此节点模型', shortcut: '模型', accent: true },
+          { id: 'node:cli', label: '在画布中运行此节点', shortcut: '运行' },
+          { id: 'node:downstream', label: '从此节点继续跑完下游', shortcut: '续跑' },
+          ...(isPro ? [{ id: 'node:run', label: '仅预演此节点步骤', shortcut: 'R' }] : []),
+          { id: 'node:inspect', label: '打开高级设置与完整输出', shortcut: 'Enter' },
+          { type: 'sep' },
+          { type: 'group', label: '分组管理' },
+          ...(ownerGroup
+            ? [
+                { id: 'node:leave-group', label: `移出分组「${ownerGroup.title.slice(0, 12)}」`, shortcut: '移出' },
+                { id: `grp-direct-ungroup:${ownerGroup.id}`, label: `解散分组「${ownerGroup.title.slice(0, 12)}」`, shortcut: '解散' },
+              ]
+            : [{ id: 'node:group', label: '将此节点合并成组', shortcut: 'Ctrl+G' }]),
+          ...otherGroups.map((og) => ({
+            id: `node:join-group:${og.id}`,
+            label: `加入已有分组「${og.title.slice(0, 12)}」`,
+            shortcut: '加入',
+          })),
+          { type: 'sep' },
+          { id: 'node:dup', label: '复制节点', shortcut: 'Shift+D' },
+          { id: 'node:mute', label: targetNode.muted ? '恢复执行此节点' : '临时跳过此节点', shortcut: 'M' },
+          { id: 'node:disconnect', label: '断开该节点全部连线', shortcut: '' },
+          { type: 'sep' },
+          { id: 'node:delete', label: '删除节点', shortcut: 'Del', danger: true },
+        ];
+      } else {
+        searchPlaceholder = '搜索新建节点、分组或画布操作...';
+        items = [
+          ...(selNodes.length >= 2
+            ? [
+                { type: 'group', label: `当前已框选 ${selNodes.length} 个节点` },
+                { id: 'sel:group', label: '将所选节点合并成组', shortcut: 'Ctrl+G', accent: true },
+                { id: 'sel:align-top', label: '顶部对齐所选节点', shortcut: '对齐' },
+                { id: 'sel:delete', label: `删除所选 ${selNodes.length} 个节点`, shortcut: 'Del', danger: true },
+                { type: 'sep' },
+              ]
+            : []),
+          { type: 'group', label: '在鼠标位置新建节点' },
+          { id: 'add:gemini-plan', label: '+ 需求分析与规划', shortcut: '规划' },
+          { id: 'add:codex-exec', label: '+ 代码实现', shortcut: '开发' },
+          { id: 'add:custom-agent', label: '+ 外部模型节点', shortcut: '外部', accent: true },
+          { id: 'add:cluster-merge', label: '+ 多路结果汇总', shortcut: '汇总' },
+          { id: 'add:codex-review', label: '+ 代码审查', shortcut: '审查' },
+          { id: 'add:summary-card', label: '+ 画布卡片总结框', shortcut: '总结框', accent: true },
+          { id: 'add:gemini-copy', label: '+ 界面文案润色', shortcut: '文案' },
+          ...(isPro
+            ? [
+                { id: 'add:image-gen', label: '+ 图像生成', shortcut: '图像' },
+                { id: 'add:video-gen', label: '+ 视频生成', shortcut: '视频' },
+              ]
+            : []),
+          { type: 'sep' },
+          { type: 'group', label: '分组与画布整理' },
+          { id: 'act:group', label: '合并成组 / 新建分组', shortcut: 'Ctrl+G' },
+          { id: 'act:select-all', label: '全选画布节点', shortcut: 'Ctrl+A' },
+          { id: 'act:layout', label: '按执行顺序自动排列', shortcut: 'L' },
+          { id: 'act:fit', label: '适配全览全部节点', shortcut: 'F' },
+          { type: 'sep' },
+          { type: 'group', label: '工作流保存与文件' },
+          { id: 'act:save', label: '保存当前工作流', shortcut: 'Ctrl+S' },
+          { id: 'act:export', label: '导出工作流 (.json)', shortcut: '导出' },
+          { id: 'act:blank', label: '新建空白画布', shortcut: '新建' },
+          { id: 'act:undo', label: '撤销上一步操作', shortcut: 'Ctrl+Z' },
+        ];
+      }
 
       const renderMenuItems = (q = '') => {
         const needle = q.trim().toLowerCase();
@@ -3297,6 +3784,17 @@
             .map((it) => {
               if (it.type === 'group') return `<div class="ic-ctx-group">${escapeHtml(it.label)}</div>`;
               if (it.type === 'sep') return '<div class="ic-ctx-sep"></div>';
+              if (it.type === 'swatches') {
+                return `
+                  <div class="ic-ctx-swatch-row">
+                    <span class="ic-ctx-swatch-label">分组配色</span>
+                    <div class="ic-ctx-swatches">
+                      ${GROUP_ACCENTS.map(
+                        (ac) => `<button type="button" class="ic-ctx-swatch is-${ac} ${it.activeAccent === ac ? 'active' : ''}" data-ctx-swatch-group="${escapeHtml(it.groupId)}" data-ctx-swatch="${ac}" title="${escapeHtml(GROUP_ACCENT_LABELS[ac] || ac)}" aria-label="${escapeHtml(GROUP_ACCENT_LABELS[ac] || ac)}"></button>`
+                      ).join('')}
+                    </div>
+                  </div>`;
+              }
               return `
                 <button type="button" class="ic-ctx-item ${it.danger ? 'is-danger' : ''} ${it.accent ? 'is-accent' : ''}" data-ctx-act="${escapeHtml(it.id)}">
                   <span>${escapeHtml(it.label)}</span>
@@ -3311,17 +3809,27 @@
             executeContextAction(btn.dataset.ctxAct, ev.clientX, ev.clientY);
           });
         });
+
+        bodyEl.querySelectorAll('[data-ctx-swatch]').forEach((btn) => {
+          btn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const gid = btn.dataset.ctxSwatchGroup;
+            const accent = btn.dataset.ctxSwatch;
+            closeContextMenu();
+            setGroupAccent(gid, accent);
+          });
+        });
       };
 
       contextMenuEl.innerHTML = `
         <div class="ic-ctx-search-wrap">
-          <input type="text" class="ic-ctx-search" id="icCtxSearch" placeholder="${targetNode ? '搜索节点操作...' : '搜索并新建节点 (Shift+A)...'}" autocomplete="off" />
+          <input type="text" class="ic-ctx-search" id="icCtxSearch" placeholder="${escapeHtml(searchPlaceholder)}" autocomplete="off" />
         </div>
         <div class="ic-ctx-body"></div>`;
 
       renderMenuItems('');
       contextMenuEl.classList.remove('hidden');
-      placeMenuEdgeAware(clientX, clientY, 264);
+      placeMenuEdgeAware(clientX, clientY, 272);
 
       const inp = contextMenuEl.querySelector('#icCtxSearch');
       if (inp) {
@@ -3342,12 +3850,16 @@
     }
 
     function executeContextAction(act, clickX = 320, clickY = 220) {
-      const { worldX, worldY, nodeId } = state.ctxMenu;
+      const { worldX, worldY, nodeId, groupId } = state.ctxMenu;
       closeContextMenu();
       if (!act) return;
 
       if (act.startsWith('add:')) {
         addNode(act.slice(4), { x: worldX - NODE_WIDTH / 2, y: worldY - 40, autoWire: false });
+      } else if (act === 'act:group' || act === 'sel:group') {
+        createNodeGroup();
+      } else if (act === 'act:select-all') {
+        selectAllNodes();
       } else if (act === 'act:layout') {
         autoLayout();
       } else if (act === 'act:fit') {
@@ -3362,13 +3874,65 @@
         loadPreset('blank');
       } else if (act === 'act:undo') {
         undo();
+      } else if (act === 'sel:run') {
+        runSelectedNodes();
+      } else if (act === 'sel:align-top') {
+        alignSelectedNodes('top');
+      } else if (act === 'sel:align-left') {
+        alignSelectedNodes('left');
+      } else if (act === 'sel:distribute-h') {
+        alignSelectedNodes('distribute-h');
+      } else if (act === 'sel:dup') {
+        duplicateSelectedNodes();
+      } else if (act === 'sel:mute') {
+        toggleMuteSelectedNodes();
+      } else if (act === 'sel:ungroup') {
+        ungroupSelected();
+      } else if (act === 'sel:disconnect') {
+        const selSet = new Set(state.selectedIds);
+        if (selSet.size > 0) {
+          pushHistory();
+          state.graph.edges = state.graph.edges.filter((e) => {
+            const srcIn = selSet.has(e.source);
+            const dstIn = selSet.has(e.target);
+            return !(srcIn !== dstIn);
+          });
+          renderAll();
+          scheduleAutoSave(300);
+          setStatus('已断开所选节点与外部节点之间的连线。');
+        }
+      } else if (act === 'sel:delete') {
+        removeSelectedNodes();
+      } else if (act.startsWith('grp-direct-ungroup:')) {
+        ungroupById(act.slice('grp-direct-ungroup:'.length));
+      } else if (groupId && act.startsWith('grp:')) {
+        const g = (state.graph.groups || []).find((x) => x.id === groupId);
+        if (!g) return;
+        if (act === 'grp:run') runGroupNodes(groupId);
+        else if (act === 'grp:select') {
+          if (g.collapsed) {
+            pushHistory();
+            g.collapsed = false;
+            renderAll();
+          }
+          setSelection(g.nodeIds, g.nodeIds[0]);
+          setStatus(`已选中分组「${g.title}」内的全部 ${g.nodeIds.length} 个节点。`);
+        } else if (act === 'grp:toggle') {
+          pushHistory();
+          g.collapsed = !g.collapsed;
+          renderAll();
+          scheduleAutoSave(300);
+        } else if (act === 'grp:dup') duplicateGroup(groupId);
+        else if (act === 'grp:mute') toggleMuteGroup(groupId);
+        else if (act === 'grp:ungroup') ungroupById(groupId);
+        else if (act === 'grp:delete') removeGroupWithNodes(groupId);
       } else if (nodeId) {
         const node = state.graph.nodes.find((n) => n.id === nodeId);
         if (!node) return;
         if (act === 'node:model') {
           openModelPicker(nodeId, clickX, clickY);
         } else if (act === 'node:inspect') {
-          state.selectedId = nodeId;
+          setSelection([nodeId], nodeId, { updateDrawer: false });
           openResultDrawer('node');
         } else if (act === 'node:run') {
           runSinglePreview(nodeId);
@@ -3376,6 +3940,12 @@
           runSingleNodeLive(nodeId);
         } else if (act === 'node:downstream') {
           runFromNodeDownstream(nodeId);
+        } else if (act === 'node:group') {
+          createNodeGroup([nodeId]);
+        } else if (act === 'node:leave-group') {
+          removeNodesFromGroup([nodeId]);
+        } else if (act.startsWith('node:join-group:')) {
+          addNodesToGroup(act.slice('node:join-group:'.length), [nodeId]);
         } else if (act === 'node:dup') {
           duplicateNode(nodeId);
         } else if (act === 'node:mute') {
@@ -3861,6 +4431,7 @@
         }
       }
       state.selectedId = id;
+      state.selectedIds = new Set([id]);
       renderAll();
       scheduleAutoSave(300);
       setStatus(`已添加「${node.title}」—— 点击卡片内「使用模型」可自由切换模型。`);
@@ -3883,6 +4454,7 @@
       });
       state.graph.nodes.push(copy);
       state.selectedId = copy.id;
+      state.selectedIds = new Set([copy.id]);
       renderAll();
       scheduleAutoSave(300);
       setStatus(`已复制节点「${copy.title}」(Shift+D)。`);
@@ -3909,7 +4481,12 @@
       if (inc.length === 1 && out.length === 1 && canConnect(state.graph, inc[0].source, out[0].target)) {
         state.graph.edges.push({ id: `e-${++state.seq}`, source: inc[0].source, target: out[0].target });
       }
-      if (state.selectedId === id) state.selectedId = state.graph.nodes[0]?.id || '';
+      state.selectedIds.delete(id);
+      if (state.selectedId === id) {
+        const fallback = Array.from(state.selectedIds)[0] || state.graph.nodes[0]?.id || '';
+        state.selectedId = fallback;
+        if (fallback && state.selectedIds.size === 0) state.selectedIds.add(fallback);
+      }
       renderAll();
       scheduleAutoSave(300);
       setStatus(`已移除「${target.title}」（按 Ctrl+Z 可撤销）。`);
@@ -3944,7 +4521,7 @@
               .filter((e) => e && typeof e === 'object' && idSet.has(e.source) && idSet.has(e.target) && e.source !== e.target)
               .map((e, idx) => ({ id: typeof e.id === 'string' && e.id ? e.id : `e-load-${idx + 1}`, source: e.source, target: e.target }))
           : [];
-        const validAccents = new Set(['sage', 'slate', 'amber']);
+        const validAccents = new Set(GROUP_ACCENTS);
         const safeGroups = Array.isArray(raw.groups)
           ? raw.groups
               .filter((g) => g && typeof g === 'object' && Array.isArray(g.nodeIds))
@@ -3962,7 +4539,9 @@
         pushHistory();
         state.graph = { nodes: hydratedNodes, edges: safeEdges, groups: safeGroups };
         state.seq = Math.max(state.seq, maxNumericSuffix(state.graph) + 1);
-        state.selectedId = state.graph.nodes[0]?.id || '';
+        const firstId = state.graph.nodes[0]?.id || '';
+        state.selectedId = firstId;
+        state.selectedIds = firstId ? new Set([firstId]) : new Set();
         if (onPresetChange) onPresetChange('');
         renderAll();
         requestAnimationFrame(() => fitView(true));
@@ -3981,8 +4560,11 @@
       cancelActiveDemo(true);
       state.graph = state.history.pop();
       state.seq = Math.max(state.seq, maxNumericSuffix(state.graph) + 1);
-      if (!state.graph.nodes.some((n) => n.id === state.selectedId)) {
-        state.selectedId = state.graph.nodes[0]?.id || '';
+      const validIds = new Set(state.graph.nodes.map((n) => n.id));
+      state.selectedIds = new Set(Array.from(state.selectedIds).filter((id) => validIds.has(id)));
+      if (!validIds.has(state.selectedId)) {
+        state.selectedId = Array.from(state.selectedIds)[0] || state.graph.nodes[0]?.id || '';
+        if (state.selectedId && state.selectedIds.size === 0) state.selectedIds.add(state.selectedId);
       }
       renderAll();
       scheduleAutoSave(300);
@@ -4007,7 +4589,9 @@
       state.activeWorkflowName = tplNames[name] || '标准四步流程';
       state.restoredViewport = false;
       state.seq = Math.max(state.seq, maxNumericSuffix(state.graph) + 1);
-      state.selectedId = state.graph.nodes[0]?.id || '';
+      const firstId = state.graph.nodes[0]?.id || '';
+      state.selectedId = firstId;
+      state.selectedIds = firstId ? new Set([firstId]) : new Set();
       if (onPresetChange) onPresetChange(name);
       renderAll();
       updateWorkflowHeaderHud();
@@ -4874,17 +5458,37 @@
       }
     });
 
+    // Suppress native Windows middle-click autoscroll icon & auxclick behavior on canvas
+    viewportEl.addEventListener('mousedown', (e) => {
+      if (e.button === 1 && !e.target.closest(OVERLAY_SEL)) {
+        e.preventDefault();
+      }
+    });
+    viewportEl.addEventListener('auxclick', (e) => {
+      if (e.button === 1 && !e.target.closest(OVERLAY_SEL)) {
+        e.preventDefault();
+      }
+    });
+
     viewportEl.addEventListener('contextmenu', (e) => {
       if (e.target.closest(OVERLAY_SEL)) return;
       e.preventDefault();
+      const groupHead = e.target.closest('.ic-group-head, .ic-node-group.is-collapsed');
+      const gid = groupHead ? (groupHead.dataset.groupDrag || groupHead.closest('.ic-node-group')?.dataset.groupId || null) : null;
+      if (gid) {
+        openContextMenu(e.clientX, e.clientY, null, gid);
+        return;
+      }
       const nodeWrap = e.target.closest('.ic-node-wrap');
       const nid = nodeWrap ? nodeWrap.dataset.nodeId : null;
-      if (nid && state.selectedId !== nid) {
-        state.selectedId = nid;
-        renderNodes();
-        if (state.drawerOpen && state.drawerTab === 'node') renderResultDrawer();
+      if (nid) {
+        if (!state.selectedIds.has(nid)) {
+          setSelection([nid], nid);
+        } else {
+          state.selectedId = nid;
+        }
       }
-      openContextMenu(e.clientX, e.clientY, nid);
+      openContextMenu(e.clientX, e.clientY, nid, null);
     });
 
     viewportEl.addEventListener('scroll', () => {
@@ -4896,26 +5500,57 @@
       if (e.target.closest(OVERLAY_SEL)) return;
       if (e.target.closest('.ic-node-wrap, .ic-group-head, .ic-node-group.is-collapsed, .ic-edge-group')) return;
       e.preventDefault();
-      openContextMenu(e.clientX, e.clientY, null);
+      openContextMenu(e.clientX, e.clientY, null, null);
     });
 
+    function updateMarqueeVisual(m) {
+      if (!marqueeBoxEl) return;
+      const vpRect = viewportEl.getBoundingClientRect();
+      const x1 = clampNum(Math.min(m.startClientX, m.currentClientX) - vpRect.left, 0, vpRect.width);
+      const y1 = clampNum(Math.min(m.startClientY, m.currentClientY) - vpRect.top, 0, vpRect.height);
+      const x2 = clampNum(Math.max(m.startClientX, m.currentClientX) - vpRect.left, 0, vpRect.width);
+      const y2 = clampNum(Math.max(m.startClientY, m.currentClientY) - vpRect.top, 0, vpRect.height);
+      marqueeBoxEl.style.left = `${x1}px`;
+      marqueeBoxEl.style.top = `${y1}px`;
+      marqueeBoxEl.style.width = `${Math.max(1, x2 - x1)}px`;
+      marqueeBoxEl.style.height = `${Math.max(1, y2 - y1)}px`;
+      marqueeBoxEl.classList.remove('hidden');
+    }
+
+    function applyMarqueeHitTest(m) {
+      const wA = screenToWorld(Math.min(m.startClientX, m.currentClientX), Math.min(m.startClientY, m.currentClientY));
+      const wB = screenToWorld(Math.max(m.startClientX, m.currentClientX), Math.max(m.startClientY, m.currentClientY));
+      const hits = new Set(m.additive ? m.baseSelection : []);
+      state.graph.nodes.forEach((n) => {
+        if (getCollapsedGroupForNode(n.id)) return;
+        const wrap = nodeEls.get(n.id);
+        const nw = nodeWidth(n);
+        const nh = wrap ? wrap.offsetHeight : (n.collapsed ? 84 : 260);
+        const overlaps = n.x < wB.x && n.x + nw > wA.x && n.y < wB.y && n.y + nh > wA.y;
+        if (overlaps) hits.add(n.id);
+      });
+      state.selectedIds = hits;
+      if (!hits.has(state.selectedId)) {
+        const arr = Array.from(hits);
+        state.selectedId = arr[arr.length - 1] || '';
+      }
+      syncSelectionClasses();
+    }
+
     // --- Pointer & Wheel Events on Infinite Viewport ---
+    // Middle-mouse drag OR Space+Left-drag => Pan canvas
+    // Left-mouse drag on empty canvas => Desktop-style Marquee Box Selection
     viewportEl.addEventListener('pointerdown', (e) => {
       const isUi = Boolean(e.target.closest(OVERLAY_SEL));
       if (isUi || state.dragging || state.wiring || state.resizing) return;
-      if (e.target.closest('input, textarea, select, .ic-resize-handle')) return;
-      const isBg = !e.target.closest('.ic-node-wrap, .ic-group-head, .ic-node-group.is-collapsed, .ic-edge-group');
-      if (isBg && e.button === 0) {
-        let changed = false;
-        if (state.selectedEdgeId) { state.selectedEdgeId = null; changed = true; }
-        if (state.pendingWire) { state.pendingWire = null; changed = true; setStatus('已取消连线。'); }
-        if (changed) renderAll();
-      }
-      if (e.button === 1 || (e.button === 0 && (isBg || state.spaceDown))) {
+
+      // Middle-click pans from ANYWHERE inside the canvas viewport (even over nodes/groups!)
+      if (e.button === 1 || (e.button === 0 && state.spaceDown)) {
         if (document.activeElement instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
           document.activeElement.blur();
         }
         e.preventDefault();
+        closeContextMenu();
         state.panning = {
           startX: e.clientX,
           startY: e.clientY,
@@ -4925,6 +5560,33 @@
         };
         viewportEl.classList.add('is-panning');
         try { viewportEl.setPointerCapture(e.pointerId); } catch {}
+        return;
+      }
+
+      if (e.target.closest('input, textarea, select, .ic-resize-handle')) return;
+      const isBg = !e.target.closest('.ic-node-wrap, .ic-group-head, .ic-node-group.is-collapsed, .ic-edge-group');
+      if (isBg && e.button === 0) {
+        if (document.activeElement instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
+          document.activeElement.blur();
+        }
+        closeContextMenu();
+        let changed = false;
+        if (state.selectedEdgeId) { state.selectedEdgeId = null; changed = true; }
+        if (state.pendingWire) { state.pendingWire = null; changed = true; setStatus('已取消连线。'); }
+        if (changed) renderAll();
+
+        // Start left-drag marquee box selection
+        state.marquee = {
+          startClientX: e.clientX,
+          startClientY: e.clientY,
+          currentClientX: e.clientX,
+          currentClientY: e.clientY,
+          additive: e.shiftKey || e.ctrlKey || e.metaKey,
+          baseSelection: new Set(state.selectedIds),
+          moved: false,
+          captured: false,
+          pointerId: e.pointerId,
+        };
       }
     });
 
@@ -4933,6 +5595,24 @@
         state.panX = state.panning.originPanX + (e.clientX - state.panning.startX);
         state.panY = state.panning.originPanY + (e.clientY - state.panning.startY);
         applyTransform();
+        return;
+      }
+
+      if (state.marquee && e.pointerId === state.marquee.pointerId) {
+        const m = state.marquee;
+        m.currentClientX = e.clientX;
+        m.currentClientY = e.clientY;
+        if (!m.moved) {
+          if (Math.hypot(e.clientX - m.startClientX, e.clientY - m.startClientY) < DRAG_THRESHOLD) return;
+          m.moved = true;
+          viewportEl.classList.add('is-marquee');
+          try {
+            viewportEl.setPointerCapture(e.pointerId);
+            m.captured = true;
+          } catch {}
+        }
+        updateMarqueeVisual(m);
+        applyMarqueeHitTest(m);
         return;
       }
 
@@ -4985,31 +5665,41 @@
       }
 
       if (state.dragging && e.pointerId === state.dragging.pointerId) {
-        const node = state.graph.nodes.find((n) => n.id === state.dragging.id);
+        const drag = state.dragging;
+        const node = state.graph.nodes.find((n) => n.id === drag.id);
         if (!node) return;
-        if (!state.dragging.moved) {
-          const dist = Math.hypot(e.clientX - state.dragging.startClientX, e.clientY - state.dragging.startClientY);
+        if (!drag.moved) {
+          const dist = Math.hypot(e.clientX - drag.startClientX, e.clientY - drag.startClientY);
           if (dist < DRAG_THRESHOLD) return;
-          state.dragging.moved = true;
+          drag.moved = true;
           pushHistory();
-          const wrap = nodeEls.get(node.id);
-          if (wrap) wrap.classList.add('is-dragging');
+          drag.origins.forEach((_orig, id) => {
+            const w = nodeEls.get(id);
+            if (w) w.classList.add('is-dragging');
+          });
           try {
             viewportEl.setPointerCapture(e.pointerId);
-            state.dragging.captured = true;
+            drag.captured = true;
           } catch {}
         }
         const pt = screenToWorld(e.clientX, e.clientY);
-        let nx = pt.x - state.dragging.offsetX;
-        let ny = pt.y - state.dragging.offsetY;
+        let dx = pt.x - drag.startWorldX;
+        let dy = pt.y - drag.startWorldY;
         if (e.shiftKey) {
-          nx = Math.round(nx / GRID_SNAP) * GRID_SNAP;
-          ny = Math.round(ny / GRID_SNAP) * GRID_SNAP;
+          const anchorOrig = drag.origins.get(drag.id) || { x: node.x, y: node.y };
+          const snappedX = Math.round((anchorOrig.x + dx) / GRID_SNAP) * GRID_SNAP;
+          const snappedY = Math.round((anchorOrig.y + dy) / GRID_SNAP) * GRID_SNAP;
+          dx = snappedX - anchorOrig.x;
+          dy = snappedY - anchorOrig.y;
         }
-        node.x = Math.round(nx);
-        node.y = Math.round(ny);
-        const nodeEl = nodeEls.get(node.id);
-        if (nodeEl) nodeEl.style.transform = `translate(${Math.round(node.x)}px,${Math.round(node.y)}px)`;
+        drag.origins.forEach((orig, id) => {
+          const n = state.graph.nodes.find((x) => x.id === id);
+          if (!n) return;
+          n.x = Math.round(orig.x + dx);
+          n.y = Math.round(orig.y + dy);
+          const wrap = nodeEls.get(id);
+          if (wrap) wrap.style.transform = `translate(${n.x}px,${n.y}px)`;
+        });
         renderGroups();
         renderEdges();
         return;
@@ -5089,6 +5779,28 @@
         viewportEl.classList.remove('is-panning');
         if (!cancel) scheduleAutoSave(600);
       }
+      if (state.marquee && (cancel || e.pointerId === state.marquee.pointerId)) {
+        const m = state.marquee;
+        if (m.captured) {
+          try { viewportEl.releasePointerCapture(m.pointerId); } catch {}
+        }
+        state.marquee = null;
+        viewportEl.classList.remove('is-marquee');
+        if (marqueeBoxEl) marqueeBoxEl.classList.add('hidden');
+        if (!cancel) {
+          if (!m.moved) {
+            if (!m.additive) clearSelection();
+          } else {
+            syncSelectionBar();
+            const cnt = state.selectedIds.size;
+            if (cnt >= 2) {
+              setStatus(`已框选 ${cnt} 个节点：可整体拖动、点上方或右键「合并成组 (Ctrl+G)」或批量对齐。`);
+            } else if (cnt === 1) {
+              if (state.drawerOpen && state.drawerTab === 'node') renderResultDrawer();
+            }
+          }
+        }
+      }
       if (state.resizing && (cancel || e.pointerId === state.resizing.pointerId)) {
         const wasMoved = state.resizing.moved;
         const wrap = nodeEls.get(state.resizing.id);
@@ -5101,13 +5813,19 @@
         if (wasMoved && !cancel) scheduleAutoSave(350);
       }
       if (state.dragging && (cancel || e.pointerId === state.dragging.pointerId)) {
-        const wasMoved = state.dragging.moved;
-        const wrap = nodeEls.get(state.dragging.id);
-        if (wrap) wrap.classList.remove('is-dragging');
-        if (state.dragging.captured) {
-          try { viewportEl.releasePointerCapture(state.dragging.pointerId); } catch {}
+        const drag = state.dragging;
+        const wasMoved = drag.moved;
+        drag.origins.forEach((_orig, id) => {
+          const w = nodeEls.get(id);
+          if (w) w.classList.remove('is-dragging');
+        });
+        if (drag.captured) {
+          try { viewportEl.releasePointerCapture(drag.pointerId); } catch {}
         }
         state.dragging = null;
+        if (!wasMoved && !cancel && drag.narrowOnClick) {
+          setSelection([drag.id], drag.id);
+        }
         drawMinimap();
         if (wasMoved && !cancel) scheduleAutoSave(350);
       }
@@ -5194,7 +5912,7 @@
       { passive: false }
     );
 
-    // Canvas Keyboard Shortcuts (including ComfyUI-style Ctrl+S quick save!)
+    // Canvas Keyboard Shortcuts (ComfyUI + Desktop Multi-Select & Group Shortcuts)
     window.addEventListener('keydown', (e) => {
       if (viewportEl.closest('.hidden') || e.isComposing) return;
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
@@ -5204,11 +5922,15 @@
       }
       if (e.key === 'Escape') {
         closeAllCanvasPopovers();
+        if (state.marquee) finishPointer({ pointerId: state.marquee.pointerId }, true);
         if (state.pendingWire || state.selectedEdgeId) {
           state.pendingWire = null;
           state.selectedEdgeId = null;
           setStatus(DEFAULT_GUIDE_TEXT);
           renderAll();
+        } else if (state.selectedIds.size > 1) {
+          clearSelection();
+          setStatus(DEFAULT_GUIDE_TEXT);
         }
         return;
       }
@@ -5227,9 +5949,24 @@
         undo();
         return;
       }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && keyLower === 'a') {
+        e.preventDefault();
+        selectAllNodes();
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && keyLower === 'g') {
         e.preventDefault();
         createNodeGroup();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.shiftKey && keyLower === 'g') {
+        e.preventDefault();
+        ungroupSelected();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && keyLower === 'd') {
+        e.preventDefault();
+        duplicateSelectedNodes();
         return;
       }
       if (hasMod) return;
@@ -5241,10 +5978,10 @@
       } else if (e.shiftKey && keyLower === 'a') {
         e.preventDefault();
         const r = viewportEl.getBoundingClientRect();
-        openContextMenu(r.left + r.width / 2, r.top + r.height / 2, null);
-      } else if (e.shiftKey && keyLower === 'd' && state.selectedId) {
+        openContextMenu(r.left + r.width / 2, r.top + r.height / 2, null, null);
+      } else if (e.shiftKey && keyLower === 'd' && (state.selectedIds.size > 0 || state.selectedId)) {
         e.preventDefault();
-        duplicateNode(state.selectedId);
+        duplicateSelectedNodes();
       } else if (!e.shiftKey && keyLower === 'h' && state.selectedId) {
         e.preventDefault();
         const n = state.graph.nodes.find((x) => x.id === state.selectedId);
@@ -5257,10 +5994,9 @@
           grp.collapsed = !grp.collapsed;
           renderAll();
         }
-      } else if (!e.shiftKey && keyLower === 'm' && state.selectedId) {
+      } else if (!e.shiftKey && keyLower === 'm' && (state.selectedIds.size > 0 || state.selectedId)) {
         e.preventDefault();
-        const n = state.graph.nodes.find((x) => x.id === state.selectedId);
-        if (n) { pushHistory(); n.muted = !n.muted; renderAll(); }
+        toggleMuteSelectedNodes();
       } else if (!e.shiftKey && keyLower === 'l') {
         e.preventDefault();
         autoLayout();
@@ -5284,9 +6020,9 @@
           state.selectedEdgeId = null;
           renderAll();
           setStatus('已断开所选连线（按 Ctrl+Z 可撤销）。');
-        } else if (state.selectedId) {
+        } else if (state.selectedIds.size > 0 || state.selectedId) {
           e.preventDefault();
-          removeNode(state.selectedId);
+          removeSelectedNodes();
         }
       }
     });
