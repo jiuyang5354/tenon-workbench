@@ -1511,3 +1511,145 @@ test('POST /api/canvas/node-run enforces validation/CSRF and executes summary-ca
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('ComfyUI-style workflow persistence (/api/workflows) saves drafts, named workflows, renames, deletes, and survives restart', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tenon-workflows-api-'));
+  const dataDir = path.join(root, 'data');
+  const wsDir = path.join(root, 'ws');
+  await fs.mkdir(wsDir, { recursive: true });
+
+  const sampleGraph = {
+    nodes: [
+      {
+        id: 'n-plan',
+        kind: 'gemini-plan',
+        title: '需求分析',
+        subtitle: '理清范围',
+        prompt: '先分析现有登录逻辑',
+        model: 'gemini-4-neon-high',
+        x: 60,
+        y: 120,
+        w: 296,
+        status: 'completed',
+        outputMd: '已定位 auth.mjs 边界',
+      },
+      {
+        id: 'n-summary',
+        kind: 'summary-card',
+        title: '画布卡片总结框',
+        subtitle: '输出结论与复述',
+        prompt: '用大白话复述核心结论',
+        model: 'codex:default',
+        x: 460,
+        y: 120,
+        w: 368,
+        status: 'completed',
+        outputMd: '### 最终结论\n已完成分析。',
+      },
+    ],
+    edges: [{ id: 'e-1', source: 'n-plan', target: 'n-summary' }],
+    groups: [],
+  };
+
+  let srv1 = null;
+  let srv2 = null;
+  try {
+    const inst1 = await createWorkbenchServer({ dataDir, defaultWorkspace: wsDir });
+    srv1 = inst1.server;
+    await new Promise((resolve) => srv1.listen(0, '127.0.0.1', resolve));
+    const base1 = `http://127.0.0.1:${srv1.address().port}`;
+
+    // 1. Initial empty state
+    const initRes = await fetch(`${base1}/api/workflows`);
+    assert.equal(initRes.status, 200);
+    const initData = await initRes.json();
+    assert.equal(initData.draft, null);
+    assert.deepEqual(initData.workflows, []);
+
+    // 2. Reject invalid empty graph (400) & cross-site origin (403)
+    const badRes = await fetch(`${base1}/api/workflows/draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ graph: { nodes: [] } }),
+    });
+    assert.equal(badRes.status, 400);
+
+    const csrfRes = await fetch(`${base1}/api/workflows/draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example.com' },
+      body: JSON.stringify({ graph: sampleGraph }),
+    });
+    assert.equal(csrfRes.status, 403);
+
+    // 3. Auto-save draft including node outputs & viewport
+    const draftRes = await fetch(`${base1}/api/workflows/draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: '登录排查草稿',
+        graph: sampleGraph,
+        viewport: { panX: 120, panY: 88, zoom: 0.92 },
+        lastTaskPrompt: '检查登录超时问题',
+      }),
+    });
+    assert.equal(draftRes.status, 200);
+    const draftJson = await draftRes.json();
+    assert.equal(draftJson.ok, true);
+
+    // 4. Save named workflow, then rename it
+    const saveRes = await fetch(`${base1}/api/workflows`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: '我的 ComfyUI 流程',
+        graph: sampleGraph,
+        viewport: { panX: 120, panY: 88, zoom: 0.92 },
+        lastTaskPrompt: '检查登录超时问题',
+      }),
+    });
+    assert.equal(saveRes.status, 200);
+    const saved = await saveRes.json();
+    assert.equal(saved.workflows.length, 1);
+    const wfId = saved.workflow.id;
+    assert.equal(saved.workflow.name, '我的 ComfyUI 流程');
+
+    const renameRes = await fetch(`${base1}/api/workflows/${encodeURIComponent(wfId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '登录修复标准流' }),
+    });
+    assert.equal(renameRes.status, 200);
+    const renamed = await renameRes.json();
+    assert.equal(renamed.workflow.name, '登录修复标准流');
+
+    await inst1.workflowStore.flush();
+    await new Promise((resolve) => srv1.close(resolve));
+    srv1 = null;
+
+    // 5. Cold restart with a brand new server instance -> verify 100% persistence on disk!
+    const inst2 = await createWorkbenchServer({ dataDir, defaultWorkspace: wsDir });
+    srv2 = inst2.server;
+    await new Promise((resolve) => srv2.listen(0, '127.0.0.1', resolve));
+    const base2 = `http://127.0.0.1:${srv2.address().port}`;
+
+    const afterRestart = await (await fetch(`${base2}/api/workflows`)).json();
+    assert.equal(afterRestart.activeWorkflowId, wfId);
+    assert.equal(afterRestart.workflows.length, 1);
+    assert.equal(afterRestart.workflows[0].name, '登录修复标准流');
+    assert.equal(afterRestart.workflows[0].graph.nodes[0].outputMd, '已定位 auth.mjs 边界');
+    assert.equal(afterRestart.workflows[0].graph.nodes[1].model, 'codex:default');
+    assert.equal(afterRestart.draft.viewport.zoom, 0.92);
+    assert.equal(afterRestart.draft.lastTaskPrompt, '检查登录超时问题');
+
+    // 6. Delete workflow cleanly
+    const delRes = await fetch(`${base2}/api/workflows/${encodeURIComponent(wfId)}`, { method: 'DELETE' });
+    assert.equal(delRes.status, 200);
+    const afterDel = await delRes.json();
+    assert.equal(afterDel.workflows.length, 0);
+    assert.equal(afterDel.activeWorkflowId, null);
+  } finally {
+    if (srv1) await new Promise((resolve) => srv1.close(resolve));
+    if (srv2) await new Promise((resolve) => srv2.close(resolve));
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

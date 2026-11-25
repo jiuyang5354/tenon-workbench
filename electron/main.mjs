@@ -333,6 +333,7 @@ function shutdownWorkbench() {
   if (workbench) {
     try { workbench.updater?.cancelDownload?.(); } catch { /* ignore */ }
     try { workbench.orchestrator?.shutdown?.(); } catch { /* ignore */ }
+    try { workbench.workflowStore?.flush?.(); } catch { /* ignore */ }
   }
 
   // Synchronously reap every spawned agy/codex/claude/custom CLI tree before process exit

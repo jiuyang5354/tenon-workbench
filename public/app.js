@@ -4432,6 +4432,16 @@
       zoomLabelEl: el('btnWfZoomReset'),
       statusBarEl: el('wfStatusBar'),
       commandInputEl: el('inputWfCommand'),
+      libraryBtnEl: el('btnWfLibrary'),
+      libraryPopoverEl: el('wfLibraryPopover'),
+      activeNameEl: el('wfActiveNameLabel'),
+      saveStateEl: el('wfSaveStateLabel'),
+      addMenuBtnEl: el('btnWfAddMenu'),
+      addMenuPopoverEl: el('wfAddMenuPopover'),
+      runLiveBtnEl: el('btnWfRunLive'),
+      runLiveLabelEl: el('labelWfRunLive'),
+      importInputEl: el('inputWfImportFile'),
+      dropOverlayEl: el('wfDropOverlay'),
       renderMarkdown,
       getContext: () => ({
         currentRun: appState.currentRun,
@@ -4455,9 +4465,37 @@
       onOpenProviderHub: () => {
         switchStageView('settings', 'providers');
       },
-      onRunProviderNode: async (providerId, model, promptText, node) => {
-        const res = await api('/api/providers/run', {
+      onLoadWorkflows: () => api('/api/workflows'),
+      onSaveDraft: async (payload, saveOpts = {}) => {
+        const res = await fetch('/api/workflows/draft', {
           method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          keepalive: Boolean(saveOpts.keepalive),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `保存草稿失败 (${res.status})`);
+        return data;
+      },
+      onSaveNamedWorkflow: (payload) =>
+        api('/api/workflows', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        }),
+      onRenameWorkflow: (id, name) =>
+        api(`/api/workflows/${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ name }),
+        }),
+      onDeleteWorkflow: (id) =>
+        api(`/api/workflows/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+        }),
+      onRunProviderNode: async (providerId, model, promptText, node, signal) => {
+        const res = await fetch('/api/providers/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal,
           body: JSON.stringify({
             providerId,
             model,
@@ -4466,15 +4504,19 @@
             cwd: el('inputWorkspace')?.value.trim() || '',
           }),
         });
-        return res;
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `外部模型调用失败 (${res.status})`);
+        return data;
       },
-      onRunCanvasNode: async ({ node, model, prompt, systemPrompt }) => {
+      onRunCanvasNode: async ({ node, model, prompt, systemPrompt, signal }) => {
         const rawEffort = node?.effort || el('selectCodexEffort')?.value || 'high';
         const cliEffort = window.ConduitEffortSlider
           ? window.ConduitEffortSlider.toCodexCliEffort(rawEffort)
           : rawEffort;
-        const res = await api('/api/canvas/node-run', {
+        const res = await fetch('/api/canvas/node-run', {
           method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal,
           body: JSON.stringify({
             nodeKind: node?.kind || 'summary-card',
             nodeTitle: node?.title || '',
@@ -4490,7 +4532,9 @@
             timeoutMode: el('selectTimeoutMode')?.value || 'none',
           }),
         });
-        return res;
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `节点运行失败 (${res.status})`);
+        return data;
       },
       onPresetChange: (presetName) => {
         const sel = el('selectWfPreset');
@@ -4901,7 +4945,9 @@
         canvasEngine.render();
         if (!canvasFittedOnce) {
           canvasFittedOnce = true;
-          canvasEngine.fitView(false);
+          if (!canvasEngine.hasRestoredViewport || !canvasEngine.hasRestoredViewport()) {
+            canvasEngine.fitView(false);
+          }
         }
       }
     });
@@ -5546,43 +5592,50 @@
       btn.addEventListener('click', () => switchStageView(btn.dataset.stageView));
     });
 
-    // Blender-Style Infinite Canvas Floating HUD Controls
+    // ComfyUI-Style Infinite Canvas Floating HUD Controls
     document.querySelectorAll('[data-ic-add]').forEach((btn) => {
       btn.addEventListener('click', () => { if (canvasEngine) canvasEngine.addNode(btn.dataset.icAdd); });
     });
-    el('selectWfPreset')?.addEventListener('change', (e) => {
-      if (canvasEngine && e.target.value) canvasEngine.loadPreset(e.target.value);
-    });
-    document.querySelectorAll('[data-ic-preset]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('[data-ic-preset]').forEach((b) => b.classList.toggle('is-active', b === btn));
-        if (canvasEngine) canvasEngine.loadPreset(btn.dataset.icPreset);
-      });
-    });
-    el('btnWfRunAll')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.dispatchFlowReal(); });
-    el('btnWfPreviewAll')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.runClusterDemo(); });
+    el('btnWfQuickSave')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.quickSaveWorkflow(); });
     el('btnWfDrawerToggle')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.toggleResultDrawer(); });
     el('btnWfDrawerClose')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.closeResultDrawer(); });
     el('btnWfLayout')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.autoLayout(); });
     el('btnWfUndo')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.undo(); });
     el('btnWfReset')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.resetDemo(); });
-    el('btnWfExport')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.exportJson(); });
+    el('btnWfExport')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.exportWorkflowFile(); });
+    el('btnWfImport')?.addEventListener('click', () => { el('inputWfImportFile')?.click(); });
+    el('inputWfImportFile')?.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (!file || !canvasEngine) return;
+      try {
+        const txt = await file.text();
+        canvasEngine.importWorkflowJsonText(txt, file.name);
+      } catch (err) {
+        showToast(`读取工作流文件失败: ${err.message}`);
+      }
+    });
     el('btnWfZoomIn')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.zoomIn(); });
     el('btnWfZoomOut')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.zoomOut(); });
     el('btnWfZoomReset')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.resetZoom(); });
     el('btnWfFit')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.fitView(true); });
-    el('chkWfFailLast')?.addEventListener('change', (e) => {
-      if (canvasEngine) canvasEngine.setFailLast(e.target.checked);
-    });
 
-    const fireCanvasCmd = () => {
+    const fireCanvasLiveRun = () => {
+      if (!canvasEngine) return;
+      if (canvasEngine.isDemoRunning()) {
+        canvasEngine.stopWorkflowRun();
+        return;
+      }
       const inp = el('inputWfCommand');
       const txt = (inp?.value || '').trim();
-      if (canvasEngine) canvasEngine.dispatchFlowReal(txt);
+      canvasEngine.runWorkflowLive(txt);
     };
-    el('btnWfCommandRun')?.addEventListener('click', fireCanvasCmd);
+    el('btnWfRunLive')?.addEventListener('click', fireCanvasLiveRun);
+    el('inputWfCommand')?.addEventListener('input', (e) => {
+      if (canvasEngine) canvasEngine.setTaskPrompt(e.target.value);
+    });
     el('inputWfCommand')?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); fireCanvasCmd(); }
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); fireCanvasLiveRun(); }
     });
 
     const fireDrawerFollowup = () => {
@@ -5591,11 +5644,11 @@
       if (!txt) return;
       if (el('inputWfCommand')) el('inputWfCommand').value = txt;
       inp.value = '';
-      if (canvasEngine) canvasEngine.dispatchFlowReal(txt);
+      if (canvasEngine) canvasEngine.runWorkflowLive(txt);
     };
     el('btnWfFollowupSend')?.addEventListener('click', fireDrawerFollowup);
     el('inputWfFollowup')?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); fireDrawerFollowup(); }
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); fireDrawerFollowup(); }
     });
     ['chkApproval', 'chkWorktree', 'chkCodexNetwork', 'selectSandbox', 'selectCodexEffort', 'selectCodexReviewModel', 'selectMaxRounds'].forEach((id) => {
       el(id)?.addEventListener('change', () => {
@@ -6446,6 +6499,9 @@
   setModeValue('agent-chat');
   initGlobalEvents();
   window.addEventListener('beforeunload', () => {
+    if (canvasEngine && typeof canvasEngine.flushDraft === 'function') {
+      canvasEngine.flushDraft(true);
+    }
     closeActiveStream();
     if (appState.globalStream) {
       try { appState.globalStream.close(); } catch {}

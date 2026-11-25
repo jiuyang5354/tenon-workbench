@@ -24,6 +24,7 @@ import {
   createWorkspaceProject,
 } from './lib/workspace.mjs';
 import { RunStore } from './lib/store.mjs';
+import { WorkflowStore } from './lib/workflows.mjs';
 import { Orchestrator, ValidationError, parseProviderRef } from './lib/orchestrator.mjs';
 import { runAgy, runCodex } from './lib/runners.mjs';
 
@@ -361,6 +362,8 @@ export async function createWorkbenchServer(options = {}) {
   await store.init();
   const providerStore = new ProviderStore(dataDir);
   await providerStore.init();
+  const workflowStore = new WorkflowStore(dataDir);
+  await workflowStore.init();
   const appVersion = options.appVersion || (await readCurrentAppVersion(__dirname));
   const updater = new UpdateManager({
     currentVersion: appVersion,
@@ -584,6 +587,53 @@ export async function createWorkbenchServer(options = {}) {
         });
       }
 
+      if (pathname === '/api/workflows' && method === 'GET') {
+        return sendJson(res, 200, workflowStore.getState());
+      }
+
+      if (pathname === '/api/workflows/draft' && method === 'POST') {
+        const body = await readJsonBody(req, 3 * 1024 * 1024);
+        try {
+          const out = await workflowStore.saveDraft(body);
+          return sendJson(res, 200, out);
+        } catch (err) {
+          throw new ValidationError(err.message);
+        }
+      }
+
+      if (pathname === '/api/workflows' && method === 'POST') {
+        const body = await readJsonBody(req, 3 * 1024 * 1024);
+        try {
+          const workflow = await workflowStore.upsertWorkflow(body);
+          return sendJson(res, 200, {
+            workflow,
+            ...workflowStore.getState(),
+          });
+        } catch (err) {
+          throw new ValidationError(err.message);
+        }
+      }
+
+      const wfMatch = pathname.match(/^\/api\/workflows\/([^/]+)$/);
+      if (wfMatch && wfMatch[1] !== 'draft') {
+        const wfId = wfMatch[1];
+        if (method === 'PATCH') {
+          const body = await readJsonBody(req);
+          try {
+            const updated = await workflowStore.renameWorkflow(wfId, body.name);
+            if (!updated) return sendJson(res, 404, { error: '找不到该已保存的工作流' });
+            return sendJson(res, 200, { workflow: updated, ...workflowStore.getState() });
+          } catch (err) {
+            throw new ValidationError(err.message);
+          }
+        }
+        if (method === 'DELETE') {
+          const ok = await workflowStore.deleteWorkflow(wfId);
+          if (!ok) return sendJson(res, 404, { error: '找不到该已保存的工作流' });
+          return sendJson(res, 200, { ok: true, id: wfId, ...workflowStore.getState() });
+        }
+      }
+
       if (pathname === '/api/canvas/node-run' && method === 'POST') {
         const body = await readJsonBody(req);
         const prompt = String(body.prompt || '').trim();
@@ -594,83 +644,106 @@ export async function createWorkbenchServer(options = {}) {
         const systemPrompt = String(body.systemPrompt || '').trim();
         const { timeoutMs, idleTimeoutMs } = orchestrator.resolveTimeoutPolicy(body.timeoutMode || 'none');
 
+        let activeHandle = null;
+        let clientAborted = false;
+        const onClientClose = () => {
+          if (!res.writableEnded) {
+            clientAborted = true;
+            try { activeHandle?.abort?.(); } catch {}
+          }
+        };
+        req.on('close', onClientClose);
+        const onProcess = (handle) => {
+          activeHandle = handle;
+          if (clientAborted) {
+            try { handle?.abort?.(); } catch {}
+          }
+        };
+
         const parsedExt = parseProviderRef(rawModel);
-        const isReadOnlyKind = ['summary-card', 'gemini-plan', 'gemini-copy', 'codex-review'].includes(nodeKind);
+        const isReadOnlyKind = ['summary-card', 'gemini-plan', 'gemini-copy', 'codex-review', 'cluster-merge'].includes(nodeKind);
         const requestedSandbox = isReadOnlyKind
           ? 'read-only'
           : (body.sandbox === 'read-only' ? 'read-only' : 'workspace-write');
 
-        if (parsedExt) {
-          const provider = providerStore.get(parsedExt.providerId);
-          if (!provider) return sendJson(res, 404, { error: '找不到指定的外部 Agent / API 接入配置' });
-          if (!provider.enabled) return sendJson(res, 400, { error: `接入「${provider.name}」当前未启用` });
-          const model = parsedExt.model || provider.defaultModel || '';
-          const result = await runProvider(provider, {
-            prompt,
-            systemPrompt,
-            model,
-            cwd,
-            timeoutMs,
-          });
-          return sendJson(res, result.ok ? 200 : 502, {
-            ...result,
-            engine: provider.name,
-            protocol: provider.protocol,
-            model: model || provider.protocol,
-          });
-        }
+        try {
+          if (parsedExt) {
+            const provider = providerStore.get(parsedExt.providerId);
+            if (!provider) return sendJson(res, 404, { error: '找不到指定的外部 Agent / API 接入配置' });
+            if (!provider.enabled) return sendJson(res, 400, { error: `接入「${provider.name}」当前未启用` });
+            const model = parsedExt.model || provider.defaultModel || '';
+            const result = await runProvider(provider, {
+              prompt,
+              systemPrompt,
+              model,
+              cwd,
+              timeoutMs,
+              onProcess,
+            });
+            return sendJson(res, result.ok ? 200 : 502, {
+              ...result,
+              engine: provider.name,
+              protocol: provider.protocol,
+              model: model || provider.protocol,
+            });
+          }
 
-        const isCodexTarget =
-          rawModel === 'codex:default' ||
-          rawModel.startsWith('codex:') ||
-          /^(gpt-|o1|o3|o4|codex)/i.test(rawModel) ||
-          (!rawModel && (nodeKind === 'codex-exec' || nodeKind === 'codex-review'));
+          const isCodexTarget =
+            rawModel === 'codex:default' ||
+            rawModel.startsWith('codex:') ||
+            /^(gpt-|o1|o3|o4|codex)/i.test(rawModel) ||
+            (!rawModel && (nodeKind === 'codex-exec' || nodeKind === 'codex-review'));
 
-        if (isCodexTarget) {
-          const codexModel = rawModel === 'codex:default'
-            ? ''
-            : rawModel.startsWith('codex:')
-              ? rawModel.slice('codex:'.length).trim()
-              : rawModel;
-          const wsInfo = await inspectWorkspace(cwd).catch(() => ({ isGitRepo: false }));
+          if (isCodexTarget) {
+            const codexModel = rawModel === 'codex:default'
+              ? ''
+              : rawModel.startsWith('codex:')
+                ? rawModel.slice('codex:'.length).trim()
+                : rawModel;
+            const wsInfo = await inspectWorkspace(cwd).catch(() => ({ isGitRepo: false }));
+            const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
+            const result = await runCodex({
+              prompt: fullPrompt,
+              cwd,
+              model: codexModel,
+              reasoningEffort: String(body.codexEffort || 'medium').trim() || 'medium',
+              sandbox: requestedSandbox,
+              allowCodexNetwork: Boolean(body.allowCodexNetwork) && requestedSandbox === 'workspace-write',
+              isGitRepo: Boolean(wsInfo?.isGitRepo),
+              codexHome: String(body.codexHome || '').trim(),
+              timeoutMs,
+              idleTimeoutMs,
+              onProcess,
+            });
+            return sendJson(res, result.ok ? 200 : 502, {
+              ...result,
+              engine: 'Codex',
+              protocol: 'codex-cli',
+              model: codexModel || 'codex-default',
+            });
+          }
+
+          const geminiModel = rawModel || String(body.fallbackGeminiModel || 'gemini-4-neon-high').trim();
           const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
-          const result = await runCodex({
+          const result = await runAgy({
             prompt: fullPrompt,
+            model: geminiModel,
             cwd,
-            model: codexModel,
-            reasoningEffort: String(body.codexEffort || 'medium').trim() || 'medium',
-            sandbox: requestedSandbox,
-            allowCodexNetwork: Boolean(body.allowCodexNetwork) && requestedSandbox === 'workspace-write',
-            isGitRepo: Boolean(wsInfo?.isGitRepo),
-            codexHome: String(body.codexHome || '').trim(),
+            mode: isReadOnlyKind ? 'plan' : '',
+            sandbox: !isReadOnlyKind,
             timeoutMs,
             idleTimeoutMs,
+            onProcess,
           });
           return sendJson(res, result.ok ? 200 : 502, {
             ...result,
-            engine: 'Codex',
-            protocol: 'codex-cli',
-            model: codexModel || 'codex-default',
+            engine: 'Gemini',
+            protocol: 'agy-cli',
+            model: geminiModel,
           });
+        } finally {
+          req.off('close', onClientClose);
         }
-
-        const geminiModel = rawModel || String(body.fallbackGeminiModel || 'gemini-4-neon-high').trim();
-        const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
-        const result = await runAgy({
-          prompt: fullPrompt,
-          model: geminiModel,
-          cwd,
-          mode: isReadOnlyKind ? 'plan' : '',
-          sandbox: !isReadOnlyKind,
-          timeoutMs,
-          idleTimeoutMs,
-        });
-        return sendJson(res, result.ok ? 200 : 502, {
-          ...result,
-          engine: 'Gemini',
-          protocol: 'agy-cli',
-          model: geminiModel,
-        });
       }
 
       const provMatch = pathname.match(/^\/api\/providers\/([^/]+)(?:\/(test))?$/);
@@ -962,7 +1035,7 @@ export async function createWorkbenchServer(options = {}) {
     }
   });
 
-  return { server, store, orchestrator, providerStore, updater };
+  return { server, store, orchestrator, providerStore, workflowStore, updater };
 }
 
 // Start standalone when run directly
@@ -972,12 +1045,12 @@ const isDirectRun = Boolean(
 if (isDirectRun) {
   const PORT = Number(process.env.PORT) || 4177;
   const HOST = process.env.HOST || '127.0.0.1';
-  const { server, store, orchestrator } = await createWorkbenchServer();
+  const { server, store, orchestrator, workflowStore } = await createWorkbenchServer();
 
   const gracefulExit = () => {
     orchestrator.shutdown();
     store.closeAllStreams();
-    void store.flush().finally(() => {
+    void Promise.allSettled([store.flush(), workflowStore.flush()]).finally(() => {
       server.close(() => process.exit(0));
     });
     setTimeout(() => process.exit(0), 2000).unref();

@@ -247,7 +247,7 @@
         </button>
       </div>
 
-      <!-- Full-Viewport Multi-Agent Node Canvas -->
+      <!-- Full-Viewport Multi-Agent Node Canvas (ComfyUI-Style Save/Load & Direct In-Canvas Run) -->
       <section class="workflow-stage hidden" id="workflowStage" aria-label="多 Agent 节点编排画布">
         <div class="ic-viewport" id="wfViewport" tabindex="0">
           <!-- Transformed Infinite World Layer -->
@@ -257,52 +257,69 @@
             <div class="ic-nodes-layer" id="wfNodesLayer"></div>
           </div>
 
-          <!-- Floating Top-Left: Node Creation, Grouping & Flow Template -->
-          <div class="ic-floating-bar ic-top-left">
-            <div class="ic-add-group" role="group" aria-label="添加节点与分组">
-              <button type="button" class="ic-chip-btn" data-ic-add="gemini-plan" title="添加需求分析与规划节点">+ 规划</button>
-              <button type="button" class="ic-chip-btn" data-ic-add="codex-exec" title="添加代码实现节点">+ 开发</button>
-              <button type="button" class="ic-chip-btn" data-ic-add="custom-agent" title="添加外部 Agent 或 API 节点（Claude Code / Ollama / DeepSeek 等）">+ 外部模型</button>
-              <button type="button" class="ic-chip-btn" data-ic-add="cluster-merge" title="添加结果汇总节点，将多路输出合并">+ 汇总</button>
-              <button type="button" class="ic-chip-btn" data-ic-add="codex-review" title="添加代码审查节点">+ 审查</button>
-              <button type="button" class="ic-chip-btn is-summary-add" data-ic-add="summary-card" title="添加独立的画布卡片总结框，在末尾输出最终结论与复述内容">+ 总结框</button>
-              <button type="button" class="ic-chip-btn is-group-add" id="btnWfAddGroup" title="将相关节点归为一组方便整体移动 (Ctrl+G)">+ 分组</button>
+          <!-- Drag-and-Drop JSON Import Overlay (ComfyUI-Style) -->
+          <div class="ic-drop-overlay hidden" id="wfDropOverlay" aria-hidden="true">
+            <div class="ic-drop-card">
+              <strong class="ic-drop-title">松开即可导入工作流 (.json)</strong>
+              <span class="ic-drop-sub mono-xs">支持 TENON 导出的工作流文件，节点位置、模型与提示词将完整恢复</span>
             </div>
-            <span class="ic-divider" aria-hidden="true"></span>
-            <label class="ic-preset-wrap" title="切换流程模板">
-              <select id="selectWfPreset" class="ic-preset-select" aria-label="流程模板">
-                <option value="cluster" selected>并行开发模板 (6节点)</option>
-                <option value="multi">前后端分层模板 (10节点)</option>
-                <option value="linear">标准四步模板 (4节点)</option>
-                <option value="blank">空白画布</option>
-              </select>
-            </label>
           </div>
 
-          <!-- Floating Top-Right: Canvas Actions + Clear Preview vs Real Execution -->
-          <div class="ic-floating-bar ic-top-right">
-            <button type="button" class="ic-chip-btn" id="btnWfDrawerToggle" title="展开或收起流程概览与节点配置面板">详情面板</button>
-            <button type="button" class="ic-chip-btn" id="btnWfLayout" title="按执行顺序自动排列节点 (L)">自动排列</button>
-            <button type="button" class="ic-chip-btn" id="btnWfUndo" title="撤销上一步操作 (Ctrl+Z)">撤销</button>
-            <button type="button" class="ic-chip-btn" id="btnWfReset" title="清空节点运行状态">重置</button>
-            <span class="ic-divider" aria-hidden="true"></span>
-            <label class="ic-chip-check" title="勾选后在流程预演时演示审查拦截效果">
-              <input type="checkbox" id="chkWfFailLast" />
-              <span>预演拦截</span>
-            </label>
-            <button type="button" class="ic-chip-btn" id="btnWfPreviewAll" title="仅在画布内演示各阶段执行顺序，不会修改本地文件">流程预演</button>
-            <button type="button" class="btn-weave-cta wf-btn" id="btnWfRunAll" title="按当前画布的模型与节点提示词发起真实执行">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5Z" /></svg>
-              <span>按此流程执行</span>
+          <!-- Hidden File Picker for JSON Workflow Import -->
+          <input type="file" id="inputWfImportFile" accept=".json,application/json" hidden />
+
+          <!-- Floating Top-Left: ComfyUI Workflow Manager, Quick Save & Plain-Chinese Add Menu -->
+          <div class="ic-floating-bar ic-top-left">
+            <button type="button" class="ic-wf-switcher" id="btnWfLibrary" aria-haspopup="dialog" aria-expanded="false" title="管理已保存工作流、切换模板或导入/导出 .json 文件">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M2 3.5H6.2L7.6 5H14V12.5H2V3.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+              </svg>
+              <span class="ic-wf-name" id="wfActiveNameLabel">标准四步流程</span>
+              <span class="ic-wf-save-pill mono-xs" id="wfSaveStateLabel">自动保存</span>
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
             </button>
+            <button type="button" class="ic-chip-btn is-save-btn" id="btnWfQuickSave" title="保存当前工作流到本地磁盘 (Ctrl+S)">保存</button>
+            <span class="ic-divider" aria-hidden="true"></span>
+            <button type="button" class="ic-chip-btn is-add-trigger" id="btnWfAddMenu" aria-haspopup="menu" aria-expanded="false" title="选择要添加到画布的节点类型">+ 添加节点 ▾</button>
+            <button type="button" class="ic-chip-btn is-summary-add" data-ic-add="summary-card" title="添加一个独立的画布卡片总结框，在末尾提炼最终结论并复述给你">+ 总结框</button>
           </div>
 
-          <!-- Floating Bottom-Center: Subtle Interaction Hint & Live Status Pill -->
+          <!-- Floating Top-Right: Clean Canvas Utilities (No confusing mock/preview jargon!) -->
+          <div class="ic-floating-bar ic-top-right">
+            <button type="button" class="ic-chip-btn" id="btnWfLayout" title="按执行顺序自动整理对齐全部节点 (L)">自动排列</button>
+            <button type="button" class="ic-chip-btn" id="btnWfUndo" title="撤销上一步画布操作 (Ctrl+Z)">撤销</button>
+            <button type="button" class="ic-chip-btn" id="btnWfReset" title="清空所有节点的运行输出，保留节点配置">清空输出</button>
+            <span class="ic-divider" aria-hidden="true"></span>
+            <button type="button" class="ic-chip-btn" id="btnWfDrawerToggle" title="展开或收起流程概览与节点高级设置">详情与设置</button>
+          </div>
+
+          <!-- ComfyUI-Style Workflow Manager Popover (Saved Library + Save As + Import/Export + Templates) -->
+          <div class="ic-wf-popover hidden" id="wfLibraryPopover" role="dialog" aria-label="工作流保存与文件管理"></div>
+
+          <!-- Plain-Language Add Node Popover -->
+          <div class="ic-add-popover hidden" id="wfAddMenuPopover" role="menu" aria-label="添加节点到画布"></div>
+
+          <!-- Floating Bottom-Center: Direct ComfyUI-Style Task Input + Run Workflow CTA + 1-Line Plain Guide -->
           <div class="ic-bottom-stack">
-            <div class="ic-status-pill mono" id="wfStatusBar">拖动画布平移 · 滚轮缩放 · 点击或拖拽端口连线 · 双击节点编辑</div>
+            <div class="ic-cmd-bar" id="wfCommandBar">
+              <input
+                type="text"
+                id="inputWfCommand"
+                class="ic-cmd-input"
+                placeholder="输入你要让这条工作流完成的任务，按回车或点右侧运行..."
+                autocomplete="off"
+              />
+              <button type="button" class="btn-weave-cta wf-btn" id="btnWfRunLive" title="在画布中按连线顺序逐步调用各节点选定的模型运行">
+                <svg class="ic-run-ico" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5Z" /></svg>
+                <span id="labelWfRunLive">运行工作流</span>
+              </button>
+            </div>
+            <div class="ic-status-pill mono" id="wfStatusBar">① 写下任务 → ② 点各卡片切模型/连线 → ③ 点「运行工作流」，结果自动汇总到「画布卡片总结框」</div>
           </div>
 
-          <!-- Floating Bottom-Left: Compact Zoom, Grid & Fit Controls -->
+          <!-- Floating Bottom-Left: Compact Zoom, Grid, Fit & Direct JSON File Import/Export -->
           <div class="ic-floating-bar ic-zoom-hud">
             <button type="button" class="ic-zoom-btn mono" id="btnWfZoomOut" title="缩小画布">−</button>
             <button type="button" class="ic-zoom-val mono" id="btnWfZoomReset" title="点击重置为 100%">84%</button>
@@ -310,7 +327,9 @@
             <span class="ic-divider" aria-hidden="true"></span>
             <button type="button" class="ic-chip-btn" id="btnWfGridCycle" title="切换画布背景底纹">底纹: 点阵</button>
             <button type="button" class="ic-chip-btn" id="btnWfFit" title="将全部节点适配到当前视野 (F)">全览</button>
-            <button type="button" class="ic-chip-btn" id="btnWfExport" title="复制当前流程配置 JSON">导出 JSON</button>
+            <span class="ic-divider" aria-hidden="true"></span>
+            <button type="button" class="ic-chip-btn" id="btnWfExport" title="下载当前工作流为本地 .json 文件（含模型、提示词与位置）">导出 .json</button>
+            <button type="button" class="ic-chip-btn" id="btnWfImport" title="从本地导入 .json 工作流文件（也支持直接拖入画布）">导入 .json</button>
           </div>
 
           <!-- Floating Bottom-Right: Live Interactive Minimap -->
@@ -318,15 +337,15 @@
             <canvas id="wfMinimapCanvas" width="164" height="100"></canvas>
           </div>
 
-          <!-- Right-Click / Quick-Add Context Menu -->
+          <!-- Right-Click / Quick-Add Context Menu & Model Picker -->
           <div class="ic-ctx-menu hidden" id="wfContextMenu" role="menu" aria-label="画布快捷菜单"></div>
 
-          <!-- Slide-Over Flow Overview & Node Config Drawer -->
-          <aside class="ic-result-drawer hidden" id="wfResultDrawer" aria-label="流程概览与节点配置面板">
+          <!-- Slide-Over Flow Overview & Node Advanced Settings Drawer -->
+          <aside class="ic-result-drawer hidden" id="wfResultDrawer" aria-label="流程概览与节点高级设置">
             <header class="ic-drawer-head">
               <div class="ic-drawer-tabs" id="wfResultTabs" role="tablist">
                 <button type="button" class="ic-dtab active" role="tab" aria-selected="true" data-drawer-tab="summary">流程概览</button>
-                <button type="button" class="ic-dtab" role="tab" aria-selected="false" data-drawer-tab="node">节点配置</button>
+                <button type="button" class="ic-dtab" role="tab" aria-selected="false" data-drawer-tab="node">节点设置</button>
               </div>
               <button type="button" class="rail-icon-btn" id="btnWfDrawerClose" title="收起详情面板">
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -336,8 +355,8 @@
             </header>
             <div class="ic-drawer-body" id="wfResultBody"></div>
             <footer class="ic-drawer-foot">
-              <input type="text" class="text-input ic-drawer-followup" id="inputWfFollowup" placeholder="输入本次任务目标，回车按当前流程真实执行..." autocomplete="off" />
-              <button type="button" class="btn-primary-sm" id="btnWfFollowupSend">执行</button>
+              <input type="text" class="text-input ic-drawer-followup" id="inputWfFollowup" placeholder="输入任务目标，回车直接在画布运行整条流程..." autocomplete="off" />
+              <button type="button" class="btn-primary-sm" id="btnWfFollowupSend">运行</button>
             </footer>
           </aside>
         </div>
