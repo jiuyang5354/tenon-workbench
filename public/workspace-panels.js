@@ -126,7 +126,7 @@
     } catch {}
     return {
       personality: 'default',
-      instructions: '先给核心结论与接口契约，再用简洁中文列出验证步骤。',
+      instructions: '',
     };
   }
 

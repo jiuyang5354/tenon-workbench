@@ -3193,12 +3193,17 @@
       ? window.ConduitEffortSlider.toCodexCliEffort(rawEffort)
       : rawEffort;
     const prefCtx = workspacePanels ? workspacePanels.getInstructionContext() : null;
+    const LEGACY_DEFAULT_INSTR = '先给核心结论与接口契约，再用简洁中文列出验证步骤。';
+    const cleanInstr =
+      mode === 'agent-chat' && prefCtx?.instructions?.trim() === LEGACY_DEFAULT_INSTR
+        ? ''
+        : (prefCtx?.instructions || '').trim();
     const refNotes = appState.contextChips.length
       ? `\n\n[附加参考上下文: ${appState.contextChips.map((c) => c.label).join(', ')}]`
       : '';
     const prefNote =
-      prefCtx && (prefCtx.instructions || prefCtx.personality !== 'default')
-        ? `\n\n[用户偏好风格: ${prefCtx.personalityName}${prefCtx.instructions ? ` | ${prefCtx.instructions}` : ''}]`
+      prefCtx && (cleanInstr || prefCtx.personality !== 'default')
+        ? `\n\n[用户偏好风格: ${prefCtx.personalityName}${cleanInstr ? ` | ${cleanInstr}` : ''}]`
         : '';
 
     const payload = {
