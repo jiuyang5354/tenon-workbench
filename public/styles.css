@@ -11820,3 +11820,96 @@ html[data-surface="charcoal"] .ic-drop-overlay {
     left: 16px;
   }
 }
+
+/* =========================================================================
+   14. v1.0.10 Canvas Dual Mode Switcher (简单模式 / 专业模式)
+   ========================================================================= */
+.ic-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--line-subtle);
+}
+
+.ic-mode-btn {
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-secondary);
+  background: transparent;
+  transition: background 130ms ease, color 130ms ease, box-shadow 130ms ease;
+}
+
+.ic-mode-btn:hover {
+  color: var(--ink-primary);
+}
+
+.ic-mode-btn.active {
+  background: var(--bg-surface-1);
+  color: var(--ink-primary);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(17, 19, 21, 0.08);
+}
+
+html[data-surface="charcoal"] .ic-mode-btn.active {
+  background: var(--cta-bg);
+  color: var(--cta-ink);
+}
+
+/* Mode visibility gates on #workflowStage */
+#workflowStage[data-canvas-mode="simple"] .ic-pro-only {
+  display: none !important;
+}
+
+#workflowStage[data-canvas-mode="pro"] .ic-simple-only {
+  display: none !important;
+}
+
+/* Compact spacing in Pro Mode so top-left & top-right never collide at 1280/1440px */
+#workflowStage[data-canvas-mode="pro"] .ic-top-left .ic-chip-btn,
+#workflowStage[data-canvas-mode="pro"] .ic-top-right .ic-chip-btn {
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+#workflowStage[data-canvas-mode="pro"] .ic-top-right .ic-chip-check {
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+#workflowStage[data-canvas-mode="pro"] .ic-wf-switcher {
+  max-width: 196px;
+  padding: 0 7px;
+}
+
+#workflowStage[data-canvas-mode="pro"] .ic-wf-name {
+  max-width: 96px;
+}
+
+.ic-chip-btn.is-dispatch-chat {
+  border: 1px solid var(--line-subtle);
+  background: var(--bg-surface-2);
+  color: var(--ink-primary);
+  font-size: 11.5px;
+  flex-shrink: 0;
+}
+
+.ic-chip-btn.is-dispatch-chat:hover {
+  border-color: var(--ink-primary);
+  background: var(--bg-surface-1);
+}
+
+@container canvas (max-width: 1135px) {
+  #workflowStage[data-canvas-mode="pro"] .ic-top-right {
+    top: 56px;
+    right: 16px;
+  }
+  #workflowStage[data-canvas-mode="pro"] .ic-result-drawer {
+    top: 102px;
+  }
+}

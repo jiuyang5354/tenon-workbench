@@ -247,8 +247,8 @@
         </button>
       </div>
 
-      <!-- Full-Viewport Multi-Agent Node Canvas (ComfyUI-Style Save/Load & Direct In-Canvas Run) -->
-      <section class="workflow-stage hidden" id="workflowStage" aria-label="多 Agent 节点编排画布">
+      <!-- Full-Viewport Multi-Agent Node Canvas (ComfyUI-Style Save/Load + Simple / Pro Dual Mode) -->
+      <section class="workflow-stage hidden" id="workflowStage" data-canvas-mode="simple" aria-label="多 Agent 节点编排画布">
         <div class="ic-viewport" id="wfViewport" tabindex="0">
           <!-- Transformed Infinite World Layer -->
           <div class="ic-world" id="wfWorld">
@@ -268,7 +268,7 @@
           <!-- Hidden File Picker for JSON Workflow Import -->
           <input type="file" id="inputWfImportFile" accept=".json,application/json" hidden />
 
-          <!-- Floating Top-Left: ComfyUI Workflow Manager, Quick Save & Plain-Chinese Add Menu -->
+          <!-- Floating Top-Left: ComfyUI Workflow Manager, Quick Save & Mode-Aware Node Creation -->
           <div class="ic-floating-bar ic-top-left">
             <button type="button" class="ic-wf-switcher" id="btnWfLibrary" aria-haspopup="dialog" aria-expanded="false" title="管理已保存工作流、切换模板或导入/导出 .json 文件">
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -282,15 +282,36 @@
             </button>
             <button type="button" class="ic-chip-btn is-save-btn" id="btnWfQuickSave" title="保存当前工作流到本地磁盘 (Ctrl+S)">保存</button>
             <span class="ic-divider" aria-hidden="true"></span>
-            <button type="button" class="ic-chip-btn is-add-trigger" id="btnWfAddMenu" aria-haspopup="menu" aria-expanded="false" title="选择要添加到画布的节点类型">+ 添加节点 ▾</button>
-            <button type="button" class="ic-chip-btn is-summary-add" data-ic-add="summary-card" title="添加一个独立的画布卡片总结框，在末尾提炼最终结论并复述给你">+ 总结框</button>
+            <!-- Simple Mode: Clean Guided Add Menu -->
+            <button type="button" class="ic-chip-btn is-add-trigger ic-simple-only" id="btnWfAddMenu" aria-haspopup="menu" aria-expanded="false" title="选择要添加到画布的节点类型">+ 添加节点 ▾</button>
+            <button type="button" class="ic-chip-btn is-summary-add ic-simple-only" data-ic-add="summary-card" title="添加一个独立的画布卡片总结框，在末尾提炼最终结论并复述给你">+ 总结框</button>
+            <!-- Pro Mode: Full Direct Quick-Add Node & Group Strip -->
+            <div class="ic-add-group ic-pro-only" role="group" aria-label="专业模式快捷添加节点">
+              <button type="button" class="ic-chip-btn" data-ic-add="gemini-plan" title="添加需求分析与规划节点">+ 规划</button>
+              <button type="button" class="ic-chip-btn" data-ic-add="codex-exec" title="添加代码实现节点">+ 开发</button>
+              <button type="button" class="ic-chip-btn" data-ic-add="custom-agent" title="添加外部模型节点">+ 外部</button>
+              <button type="button" class="ic-chip-btn" data-ic-add="cluster-merge" title="添加多路汇总节点">+ 汇总</button>
+              <button type="button" class="ic-chip-btn" data-ic-add="codex-review" title="添加代码审查节点">+ 审查</button>
+              <button type="button" class="ic-chip-btn is-summary-add" data-ic-add="summary-card" title="添加画布卡片总结框">+ 总结框</button>
+              <button type="button" class="ic-chip-btn is-group-add" id="btnWfAddGroup" title="将相关节点归为一组方便整体移动 (Ctrl+G)">+ 分组</button>
+            </div>
           </div>
 
-          <!-- Floating Top-Right: Clean Canvas Utilities (No confusing mock/preview jargon!) -->
+          <!-- Floating Top-Right: Simple / Pro Mode Switcher + Canvas Utilities -->
           <div class="ic-floating-bar ic-top-right">
+            <div class="ic-mode-switch" id="wfModeSwitch" role="tablist" aria-label="画布操作模式切换">
+              <button type="button" class="ic-mode-btn active" role="tab" aria-selected="true" data-wf-mode="simple" title="简单模式：精简卡片，直观三步上手">简单</button>
+              <button type="button" class="ic-mode-btn" role="tab" aria-selected="false" data-wf-mode="pro" title="专业模式：显示完整技术参数、执行步骤树、分支开关与流程预演">专业</button>
+            </div>
+            <span class="ic-divider" aria-hidden="true"></span>
             <button type="button" class="ic-chip-btn" id="btnWfLayout" title="按执行顺序自动整理对齐全部节点 (L)">自动排列</button>
             <button type="button" class="ic-chip-btn" id="btnWfUndo" title="撤销上一步画布操作 (Ctrl+Z)">撤销</button>
             <button type="button" class="ic-chip-btn" id="btnWfReset" title="清空所有节点的运行输出，保留节点配置">清空输出</button>
+            <label class="ic-chip-check ic-pro-only" title="勾选后在流程预演时演示审查拦截效果">
+              <input type="checkbox" id="chkWfFailLast" />
+              <span>预演拦截</span>
+            </label>
+            <button type="button" class="ic-chip-btn ic-pro-only" id="btnWfPreviewAll" title="仅在画布内演示各阶段执行顺序，不会修改本地文件">流程预演</button>
             <span class="ic-divider" aria-hidden="true"></span>
             <button type="button" class="ic-chip-btn" id="btnWfDrawerToggle" title="展开或收起流程概览与节点高级设置">详情与设置</button>
           </div>
@@ -311,6 +332,7 @@
                 placeholder="输入你要让这条工作流完成的任务，按回车或点右侧运行..."
                 autocomplete="off"
               />
+              <button type="button" class="ic-chip-btn ic-pro-only is-dispatch-chat" id="btnWfDispatchChat" title="切到对话流以全链路模式执行（支持人工拍板闸门与独立 Git Worktree）">转对话流</button>
               <button type="button" class="btn-weave-cta wf-btn" id="btnWfRunLive" title="在画布中按连线顺序逐步调用各节点选定的模型运行">
                 <svg class="ic-run-ico" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5Z" /></svg>
                 <span id="labelWfRunLive">运行工作流</span>

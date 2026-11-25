@@ -4420,6 +4420,8 @@
     if (!window.ConduitCanvas || !el('wfViewport')) return null;
     return window.ConduitCanvas.createInfiniteCanvas({
       viewportEl: el('wfViewport'),
+      stageEl: el('workflowStage'),
+      modeSwitchEl: el('wfModeSwitch'),
       worldEl: el('wfWorld'),
       framesLayerEl: el('wfFramesLayer'),
       edgesSvgEl: el('wfEdgesSvg'),
@@ -5602,6 +5604,11 @@
     el('btnWfLayout')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.autoLayout(); });
     el('btnWfUndo')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.undo(); });
     el('btnWfReset')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.resetDemo(); });
+    el('btnWfPreviewAll')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.runClusterDemo(); });
+    el('chkWfFailLast')?.addEventListener('change', (e) => { if (canvasEngine) canvasEngine.setFailLast(e.target.checked); });
+    el('btnWfDispatchChat')?.addEventListener('click', () => {
+      if (canvasEngine) canvasEngine.dispatchFlowReal(el('inputWfCommand')?.value || '');
+    });
     el('btnWfExport')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.exportWorkflowFile(); });
     el('btnWfImport')?.addEventListener('click', () => { el('inputWfImportFile')?.click(); });
     el('inputWfImportFile')?.addEventListener('change', async (e) => {

@@ -21,7 +21,9 @@
   const DRAG_THRESHOLD = 4;
   const CUSTOM_STORAGE_KEY = 'conduit_custom_cluster_graph_v1';
   const DRAFT_STORAGE_KEY = 'tenon_canvas_draft_v2';
+  const CANVAS_MODE_STORAGE_KEY = 'tenon_canvas_mode_v1';
   const DEFAULT_GUIDE_TEXT = '① 写下任务 → ② 点各卡片切模型/连线 → ③ 点「运行工作流」，结果自动汇总到「画布卡片总结框」';
+  const PRO_GUIDE_TEXT = '专业模式：拖拽画布平移 · 滚轮缩放 · 端口连线 · 卡片内含完整参数 / 步骤树 / 分支开关与流程预演 · Ctrl+S 保存';
 
   const ADD_NODE_MENU_ITEMS = [
     { kind: 'gemini-plan', tag: '规划', title: '需求分析与规划', desc: '先看懂任务和项目目录，理出要改动的文件与步骤' },
@@ -721,6 +723,8 @@
   function createInfiniteCanvas(opts) {
     const {
       viewportEl,
+      stageEl,
+      modeSwitchEl,
       worldEl,
       framesLayerEl,
       edgesSvgEl,
@@ -759,7 +763,13 @@
       onToast,
     } = opts;
 
+    let initialCanvasMode = 'simple';
+    try {
+      if (localStorage.getItem(CANVAS_MODE_STORAGE_KEY) === 'pro') initialCanvasMode = 'pro';
+    } catch {}
+
     const state = {
+      canvasMode: initialCanvasMode,
       graph: makeLinearPreset(),
       history: [],
       selectedId: 'n-plan',
@@ -1503,6 +1513,48 @@
       return true;
     }
 
+    function syncCanvasModeUi() {
+      const isPro = state.canvasMode === 'pro';
+      if (stageEl) stageEl.dataset.canvasMode = isPro ? 'pro' : 'simple';
+      if (modeSwitchEl) {
+        modeSwitchEl.querySelectorAll('[data-wf-mode]').forEach((btn) => {
+          const active = btn.dataset.wfMode === state.canvasMode;
+          btn.classList.toggle('active', active);
+          btn.setAttribute('aria-selected', String(active));
+        });
+      }
+    }
+
+    function setCanvasMode(mode, { announce = true } = {}) {
+      const next = mode === 'pro' ? 'pro' : 'simple';
+      const changed = state.canvasMode !== next;
+      state.canvasMode = next;
+      try { localStorage.setItem(CANVAS_MODE_STORAGE_KEY, next); } catch {}
+      closeAddMenuPopover();
+      closeContextMenu();
+      syncCanvasModeUi();
+      renderAll();
+      if (changed && announce) {
+        setStatus(next === 'pro' ? PRO_GUIDE_TEXT : DEFAULT_GUIDE_TEXT);
+        if (onToast) {
+          onToast(
+            next === 'pro'
+              ? '已切换为专业模式：已展开完整参数、执行步骤树、分组与流程预演'
+              : '已切换为简单模式：精简卡片视图，已保存内容完整保留'
+          );
+        }
+      }
+    }
+
+    if (modeSwitchEl) {
+      modeSwitchEl.querySelectorAll('[data-wf-mode]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setCanvasMode(btn.dataset.wfMode, { announce: true });
+        });
+      });
+    }
+
     if (libraryBtnEl) {
       libraryBtnEl.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -2154,14 +2206,59 @@
       };
     }
 
+    function ensureProParams(node) {
+      if (!Array.isArray(node.params)) node.params = [];
+      if (!node.params.some((p) => p.dynamic === 'nodeModel')) {
+        node.params.unshift({ k: '模型', dynamic: 'nodeModel' });
+      }
+      if (node.params.length <= 1) {
+        if (node.kind === 'gemini-plan') {
+          node.params.push({ k: '方案策略', v: '多方案对比' });
+        } else if (node.kind === 'codex-exec') {
+          node.params.push({ k: '推理深度', dynamic: 'nodeEffort' }, { k: '沙箱模式', dynamic: 'sandbox' });
+        } else if (node.kind === 'codex-review') {
+          node.params.push({ k: '推理深度', dynamic: 'nodeEffort' }, { k: '复审上限', dynamic: 'maxRounds' });
+        } else if (node.kind === 'cluster-merge' || node.kind === 'summary-card') {
+          node.params.push({ k: '输入路数', dynamic: 'inCount' });
+        } else if (node.kind === 'custom-agent') {
+          node.params.push({ k: '执行方式', v: '实时直连' });
+        } else {
+          node.params.push({ k: '风格', v: '简明直白' });
+        }
+      }
+      return node.params;
+    }
+
+    function ensureProToggles(node) {
+      if (Array.isArray(node.toggles) && node.toggles.length > 0) return node.toggles;
+      if (node.kind === 'gemini-plan') {
+        node.toggles = [{ key: 'approval', label: '执行前人工确认', desc: '派发开发前允许编辑方案' }];
+      } else if (node.kind === 'codex-exec') {
+        node.toggles = [{ key: 'worktree', label: '独立分支隔离', desc: '在独立 Worktree 中修改' }];
+      } else if (node.kind === 'cluster-merge') {
+        node.toggles = [{ key: 'autoNewDiff', label: '包含新建文件', desc: '一并纳入代码对比视图' }];
+      } else {
+        node.toggles = [];
+      }
+      return node.toggles;
+    }
+
     function renderNodes() {
+      const isPro = state.canvasMode === 'pro';
       const statusMap = effectiveStatuses();
-      const statusMeta = {
-        idle: { label: '待运行', btn: '运行此步' },
-        running: { label: '运行中', btn: '运行中...' },
-        completed: { label: '已完成', btn: '重新运行' },
-        error: { label: '出错', btn: '重试' },
-      };
+      const statusMeta = isPro
+        ? {
+            idle: { label: '待运行', btn: '运行' },
+            running: { label: '运行中', btn: '运行中...' },
+            completed: { label: '已完成', btn: '再次运行' },
+            error: { label: '已拦截', btn: '重试' },
+          }
+        : {
+            idle: { label: '待运行', btn: '运行此步' },
+            running: { label: '运行中', btn: '运行中...' },
+            completed: { label: '已完成', btn: '重新运行' },
+            error: { label: '出错', btn: '重试' },
+          };
 
       const incomingSet = new Set(state.graph.edges.map((e) => e.target));
       const outgoingSet = new Set(state.graph.edges.map((e) => e.source));
@@ -2195,6 +2292,36 @@
           const nh = !n.collapsed ? nodeHeight(n) : null;
           const hasNodeOutput = !isSummaryCard && Boolean((n.outputMd && n.outputMd.trim()) || running);
           const durSec = n.durationMs > 0 ? `${(n.durationMs / 1000).toFixed(1)}s` : '';
+
+          const proParamsHtml = isPro
+            ? ensureProParams(n)
+                .map(
+                  (p, idx) => `
+                  <div class="wf-param-row">
+                    <dt class="wf-param-label">${escapeHtml(p.k)}</dt>
+                    ${resolveParamHtml(p, n, idx)}
+                  </div>`
+                )
+                .join('')
+            : '';
+
+          const proTogglesHtml = isPro
+            ? ensureProToggles(n)
+                .map((t) => {
+                  const checked = resolveToggleChecked(t.key);
+                  return `
+                    <div class="wf-toggle-row">
+                      <div class="wf-toggle-text">
+                        <div class="wf-toggle-label">${escapeHtml(t.label)}</div>
+                        ${t.desc ? `<div class="wf-toggle-desc">${escapeHtml(t.desc)}</div>` : ''}
+                      </div>
+                      <button type="button" class="wf-switch" role="switch" aria-checked="${checked}" data-ic-toggle="${escapeHtml(t.key)}" aria-label="${escapeHtml(t.label)}">
+                        <span class="wf-switch-thumb"></span>
+                      </button>
+                    </div>`;
+                })
+                .join('')
+            : '';
 
           const nodeOutputPreviewHtml = hasNodeOutput
             ? `<div class="ic-node-output-box ${running ? 'is-running' : st === 'error' ? 'is-error' : ''}">
@@ -2246,10 +2373,14 @@
                   </header>
 
                   <div class="agent-node-body">
-                    <button type="button" class="ic-node-model-bar ${isCustomModel ? 'is-custom' : ''}" data-ic-pick-model="${escapeHtml(n.id)}" title="点击自由切换此节点模型（Gemini / Codex / 外部 API / 自定义 ID）">
-                      <span class="ic-node-model-k">使用模型</span>
-                      <span class="ic-node-model-v">${escapeHtml(extModel)} ▾</span>
-                    </button>
+                    ${
+                      !isPro
+                        ? `<button type="button" class="ic-node-model-bar ${isCustomModel ? 'is-custom' : ''}" data-ic-pick-model="${escapeHtml(n.id)}" title="点击自由切换此节点模型（Gemini / Codex / 外部 API / 自定义 ID）">
+                            <span class="ic-node-model-k">使用模型</span>
+                            <span class="ic-node-model-v">${escapeHtml(extModel)} ▾</span>
+                          </button>`
+                        : ''
+                    }
                     ${
                       isSummaryCard
                         ? `<div class="ic-summary-panel ${running ? 'is-live' : ''}">
@@ -2274,11 +2405,14 @@
                     }
                     <div class="ic-node-prompt-box">
                       <div class="ic-prompt-head">
-                        <span class="mono-xs">${isSummaryCard ? '总结与复述要求' : '这一步要做什么'}</span>
-                        <span class="mono-xs ic-prompt-hint">自动保存</span>
+                        <span class="mono-xs">${isSummaryCard ? '总结与复述要求' : isPro ? '节点指令' : '这一步要做什么'}</span>
+                        <span class="mono-xs ic-prompt-hint">${isPro ? 'Ctrl+Enter 运行' : '自动保存'}</span>
                       </div>
                       <textarea class="ic-inline-prompt" rows="2" data-ic-prompt="${escapeHtml(n.id)}" placeholder="${isSummaryCard ? '例如：用简洁直白的话总结最终结论，并列出 3 条关键要点...' : '写下这一步让模型具体完成什么任务...'}">${escapeHtml(n.prompt)}</textarea>
                     </div>
+                    ${isPro && proParamsHtml ? `<dl class="wf-params">${proParamsHtml}</dl>` : ''}
+                    ${isPro ? renderNodeCoTTree(n, st) : ''}
+                    ${isPro && proTogglesHtml ? `<div class="wf-toggles">${proTogglesHtml}</div>` : ''}
                     ${nodeOutputPreviewHtml}
                   </div>
 
@@ -2286,10 +2420,17 @@
 
                   <footer class="agent-node-foot">
                     <button type="button" class="ic-inspect-link mono" data-ic-inspect="${escapeHtml(n.id)}" title="在右侧查看完整输出或调整高级设置">
-                      ${n.outputMd ? '展开全文 →' : '高级设置 →'}
+                      ${n.outputMd ? (isPro ? '查看输出 →' : '展开全文 →') : (isPro ? '节点配置 →' : '高级设置 →')}
                     </button>
                     <div class="ic-foot-actions">
                       <button type="button" class="ic-icon-del" data-ic-del="${escapeHtml(n.id)}" title="删除此节点">×</button>
+                      ${
+                        isPro
+                          ? `<button type="button" class="wf-run-btn is-secondary" data-ic-preview="${escapeHtml(n.id)}" ${running || n.muted ? 'disabled' : ''} title="仅在画布内预演步骤，不改本地文件">
+                              <span>预演</span>
+                            </button>`
+                          : ''
+                      }
                       <button type="button" class="wf-run-btn" data-ic-run="${escapeHtml(n.id)}" ${running || n.muted ? 'disabled' : ''} title="${isSummaryCard ? '调用所选模型汇总上游内容并在这里复述' : '只在画布中单独运行这一步（自动带入上游结果）'}">
                         <span>${runBtnText}</span>
                       </button>
@@ -2507,6 +2648,7 @@
           const idx = Number(inp.dataset.icParamIdx);
           if (n && n.params && n.params[idx]) {
             n.params[idx].v = inp.value;
+            scheduleAutoSave(450);
           }
         });
       });
@@ -2612,6 +2754,20 @@
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           removeNode(btn.dataset.icDel);
+        });
+      });
+
+      nodesLayerEl.querySelectorAll('[data-ic-preview]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const nid = btn.dataset.icPreview;
+          const node = state.graph.nodes.find((x) => x.id === nid);
+          if (!node) return;
+          if (node.muted) {
+            if (onToast) onToast('该节点已设为跳过，请先恢复');
+            return;
+          }
+          runSinglePreview(nid);
         });
       });
 
@@ -2967,11 +3123,13 @@
       try { hasSaved = Boolean(localStorage.getItem(CUSTOM_STORAGE_KEY)); } catch {}
       const targetNode = nodeId ? state.graph.nodes.find((n) => n.id === nodeId) : null;
 
+      const isPro = state.canvasMode === 'pro';
       const items = targetNode
         ? [
             { type: 'group', label: `节点操作 · ${targetNode.title.slice(0, 18)}` },
             { id: 'node:model', label: '自由切换此节点模型', shortcut: '模型', accent: true },
             { id: 'node:cli', label: '在画布中运行此节点', shortcut: '运行' },
+            ...(isPro ? [{ id: 'node:run', label: '仅预演此节点步骤', shortcut: 'R' }] : []),
             { id: 'node:inspect', label: '打开高级设置与完整输出', shortcut: 'Enter' },
             { type: 'sep' },
             { id: 'node:dup', label: '复制节点', shortcut: 'Shift+D' },
@@ -2989,6 +3147,12 @@
             { id: 'add:codex-review', label: '+ 代码审查', shortcut: '审查' },
             { id: 'add:summary-card', label: '+ 画布卡片总结框', shortcut: '总结框', accent: true },
             { id: 'add:gemini-copy', label: '+ 界面文案润色', shortcut: '文案' },
+            ...(isPro
+              ? [
+                  { id: 'add:image-gen', label: '+ 图像生成', shortcut: '图像' },
+                  { id: 'add:video-gen', label: '+ 视频生成', shortcut: '视频' },
+                ]
+              : []),
             { type: 'sep' },
             { type: 'group', label: '工作流保存与画布管理' },
             { id: 'act:save', label: '保存当前工作流', shortcut: 'Ctrl+S' },
@@ -3317,6 +3481,15 @@
             </div>
           </div>
 
+          ${
+            state.canvasMode === 'pro'
+              ? `<div class="ic-drawer-cot-section">
+                  <div class="mono-xs ic-drawer-subcap">执行步骤（共 ${(node.steps || []).length} 步）</div>
+                  <div class="ic-drawer-cot-list">${renderDrawerCoTStepsHtml(node)}</div>
+                </div>`
+              : ''
+          }
+
           <div class="ic-drawer-md markdown-output">
             ${
               node.outputMd
@@ -3327,6 +3500,7 @@
 
           <div class="ic-drawer-actions">
             <button type="button" class="btn-primary-sm" id="btnDrawerRealCli" ${node.muted ? 'disabled' : ''}>${node.kind === 'summary-card' ? '立即生成总结' : '单独运行此步'}</button>
+            ${state.canvasMode === 'pro' ? `<button type="button" class="btn-secondary-sm" id="btnDrawerRunNode" ${node.muted ? 'disabled' : ''}>仅预演步骤</button>` : ''}
             ${node.outputMd ? '<button type="button" class="btn-secondary-sm" id="btnDrawerCopyNodeOut">复制输出</button>' : ''}
           </div>`;
 
@@ -3398,6 +3572,9 @@
               if (onToast) onToast(`已复制「${node.title}」输出内容`);
             }).catch(() => {});
           }
+        });
+        resultBodyEl.querySelector('#btnDrawerRunNode')?.addEventListener('click', () => {
+          runSinglePreview(node.id);
         });
         resultBodyEl.querySelector('#btnDrawerRealCli')?.addEventListener('click', () => {
           runSingleNodeLive(node.id);
@@ -4783,6 +4960,7 @@
     }
 
     // Hydrate saved draft synchronously (zero flash!) then sync named workflows & latest disk state
+    syncCanvasModeUi();
     const localUpdatedAt = restoreFromLocalSync();
     renderAll();
     updateWorkflowHeaderHud();
@@ -4791,6 +4969,8 @@
 
     return {
       render: renderAll,
+      setCanvasMode,
+      getCanvasMode: () => state.canvasMode,
       fitView,
       autoLayout,
       zoomIn: () => { zoomAt(1.18); scheduleAutoSave(600); },
