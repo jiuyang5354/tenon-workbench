@@ -3287,6 +3287,273 @@ html[data-metal-fallback="css"]:not([data-metal="off"]) .metal-fx-wrap {
   border-top: 1px solid var(--line-subtle);
 }
 
+/* =========================================================================
+   Live Thinking Chain & Tool-Call Trace (Per-Message in Agent Chat)
+   ========================================================================= */
+.chat-trace-box {
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sharp);
+  background: var(--bg-surface-2);
+  overflow: hidden;
+  transition: border-color 140ms ease;
+}
+
+.chat-trace-box.is-live {
+  border-color: var(--line-strong);
+}
+
+.chat-trace-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  text-align: left;
+  color: var(--ink-secondary);
+  font-size: 12px;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.chat-trace-head:hover {
+  background: var(--hover-film);
+  color: var(--ink-primary);
+}
+
+.chat-trace-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--ink-muted);
+}
+
+.chat-trace-dot.is-pulse {
+  background: var(--effort-accent, var(--accent));
+  animation: chatTracePulse 1.3s ease-in-out infinite;
+}
+
+@keyframes chatTracePulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.18); }
+}
+
+.chat-trace-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.chat-trace-toggle-chev {
+  flex: 0 0 auto;
+  color: var(--ink-muted);
+}
+
+.chat-trace-body {
+  border-top: 1px solid var(--line-subtle);
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-surface-1);
+}
+
+.chat-trace-thought {
+  border-left: 2px solid var(--line-strong);
+  padding-left: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-trace-thought-label {
+  color: var(--ink-muted);
+  letter-spacing: 0.06em;
+}
+
+.chat-trace-thought-text {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.chat-trace-thought-text::-webkit-scrollbar {
+  display: none;
+}
+
+.chat-trace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-trace-item {
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sharp);
+  background: var(--bg-surface-2);
+  overflow: hidden;
+}
+
+.chat-trace-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  text-align: left;
+  color: var(--ink-primary);
+  cursor: default;
+}
+
+.chat-trace-row.is-expandable {
+  cursor: pointer;
+}
+
+.chat-trace-row.is-expandable:hover {
+  background: var(--hover-film);
+}
+
+.chat-trace-glyph {
+  font-size: 10px;
+  width: 12px;
+  text-align: center;
+  flex: 0 0 auto;
+  color: var(--ink-muted);
+}
+
+.chat-trace-glyph.is-running {
+  color: var(--effort-accent, var(--state-warn));
+  animation: chatTracePulse 1.2s ease-in-out infinite;
+}
+
+.chat-trace-glyph.is-done {
+  color: var(--state-ok);
+}
+
+.chat-trace-glyph.is-error {
+  color: var(--state-err);
+}
+
+.chat-trace-badge {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--line-subtle);
+  background: var(--bg-surface-1);
+  color: var(--ink-secondary);
+  letter-spacing: 0.04em;
+}
+
+.chat-trace-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-secondary);
+}
+
+.chat-trace-right {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-trace-detail {
+  margin: 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line-subtle);
+  background: var(--bg-canvas);
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  line-height: 1.48;
+}
+
+.chat-trace-detail::-webkit-scrollbar {
+  display: none;
+}
+
+.chat-trace-live-placeholder {
+  color: var(--ink-muted);
+  padding: 2px 2px;
+}
+
+/* =========================================================================
+   Draggable Pane & Split Resize Handles (Sidebar, Inspector, Code/Preview)
+   ========================================================================= */
+.pane-resize-handle {
+  position: relative;
+  width: 6px;
+  margin: 0 -3px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  z-index: 42;
+  background: transparent;
+  touch-action: none;
+}
+
+.pane-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background 140ms ease;
+}
+
+.pane-resize-handle:hover::after,
+.pane-resize-handle.is-dragging::after {
+  background: var(--line-strong);
+}
+
+[data-surface="charcoal"] .pane-resize-handle:hover::after,
+[data-surface="charcoal"] .pane-resize-handle.is-dragging::after {
+  background: var(--cta-border);
+}
+
+.sidebar.is-collapsed + .pane-resize-handle.is-sidebar {
+  display: none;
+}
+
+body.is-resizing {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+body.is-resizing .sidebar,
+body.is-resizing .inspector-pane {
+  transition: none !important;
+}
+
+body.is-resizing iframe {
+  pointer-events: none !important;
+}
+
+@media (max-width: 920px) {
+  .pane-resize-handle {
+    display: none !important;
+  }
+}
+
 .guardrails-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -9156,7 +9423,7 @@ html[data-surface="charcoal"] .wf-port[data-socket-type="multi"] .wf-port-dot { 
 /* --- Right Control: Code + Live Preview Split Workspace --- */
 .code-preview-split {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  grid-template-columns: minmax(120px, var(--cps-left, 52%)) 6px minmax(120px, 1fr);
   border-radius: 10px;
   border: 1px solid var(--line-subtle);
   background: var(--bg-surface-1);
@@ -9168,8 +9435,37 @@ html[data-surface="charcoal"] .wf-port[data-socket-type="multi"] .wf-port-dot { 
 .cps-code-pane {
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--line-subtle);
   min-width: 0;
+}
+
+.cps-split-handle {
+  position: relative;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+}
+
+.cps-split-handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--line-subtle);
+  transition: width 120ms ease, background 120ms ease;
+}
+
+.cps-split-handle:hover::before,
+.cps-split-handle.is-dragging::before {
+  width: 2px;
+  background: var(--line-strong);
+}
+
+[data-surface="charcoal"] .cps-split-handle:hover::before,
+[data-surface="charcoal"] .cps-split-handle.is-dragging::before {
+  background: var(--cta-border);
 }
 
 .cps-preview-pane {

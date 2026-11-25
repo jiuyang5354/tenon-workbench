@@ -1250,6 +1250,18 @@
       '}',
     ].join('\n');
 
+    function loadSplitRatio() {
+      try {
+        const v = Number(localStorage.getItem('tenon_preview_split'));
+        if (Number.isFinite(v) && v >= 22 && v <= 78) return v;
+      } catch {}
+      return 52;
+    }
+
+    function saveSplitRatio(pct) {
+      try { localStorage.setItem('tenon_preview_split', String(Math.round(pct * 10) / 10)); } catch {}
+    }
+
     function render() {
       const safeSrcdoc = htmlSnippet || '';
       const hasUrl = Boolean(currentUrl);
@@ -1259,6 +1271,7 @@
       const fileLabel = codeLang === 'diff' ? 'workspace.patch' : codeLang === 'html' ? 'preview.html' : `artifact.${codeLang || 'tsx'}`;
       const targetName = runMeta?.title ? runMeta.title.slice(0, 24) : 'tenon-workbench@main';
       const durSec = runMeta?.durationSec || '1.4';
+      const splitPct = loadSplitRatio();
       const checks = [
         { name: 'Syntax Check', time: '0.2 s' },
         { name: 'Pre-CI Gate', time: `${durSec} s` },
@@ -1277,7 +1290,7 @@
 
           ${
             viewMode === 'split'
-              ? `<div class="code-preview-split" data-slot="code-preview-split">
+              ? `<div class="code-preview-split" data-slot="code-preview-split" style="--cps-left:${splitPct}%">
                   <div class="cps-code-pane">
                     <div class="cps-pane-head">
                       <span class="cps-filename mono-xs">${escapeHtml(fileLabel)}</span>
@@ -1288,6 +1301,7 @@
                     </div>
                     <pre class="cps-code-pre"><code>${escapeHtml(activeCode)}</code></pre>
                   </div>
+                  <div class="cps-split-handle" id="cpsSplitHandle" role="separator" aria-orientation="vertical" aria-label="拖动调整代码与预览比例" title="拖动调整代码与预览比例（双击重置）"></div>
                   <div class="cps-preview-pane">
                     <div class="cps-pane-head">
                       <span class="cps-filename mono-xs">Preview</span>
@@ -1362,6 +1376,41 @@
           if (onToast) onToast(`已复制 ${fileLabel}`);
         }).catch(() => {});
       });
+
+      const splitEl = container.querySelector('.code-preview-split');
+      const splitHandle = container.querySelector('#cpsSplitHandle');
+      if (splitEl && splitHandle) {
+        splitHandle.addEventListener('dblclick', () => {
+          splitEl.style.setProperty('--cps-left', '52%');
+          saveSplitRatio(52);
+        });
+        splitHandle.addEventListener('pointerdown', (ev) => {
+          ev.preventDefault();
+          splitHandle.setPointerCapture(ev.pointerId);
+          splitHandle.classList.add('is-dragging');
+          document.body.classList.add('is-resizing');
+          const rect = splitEl.getBoundingClientRect();
+          let lastPct = loadSplitRatio();
+
+          const onMove = (mEv) => {
+            if (rect.width <= 0) return;
+            const rawPct = ((mEv.clientX - rect.left) / rect.width) * 100;
+            lastPct = Math.max(22, Math.min(78, rawPct));
+            splitEl.style.setProperty('--cps-left', `${lastPct.toFixed(1)}%`);
+          };
+          const onUp = () => {
+            splitHandle.classList.remove('is-dragging');
+            document.body.classList.remove('is-resizing');
+            saveSplitRatio(lastPct);
+            splitHandle.removeEventListener('pointermove', onMove);
+            splitHandle.removeEventListener('pointerup', onUp);
+            splitHandle.removeEventListener('pointercancel', onUp);
+          };
+          splitHandle.addEventListener('pointermove', onMove);
+          splitHandle.addEventListener('pointerup', onUp);
+          splitHandle.addEventListener('pointercancel', onUp);
+        });
+      }
 
       container.querySelector('#btnCpsOpenSafari')?.addEventListener('click', () => {
         viewMode = 'safari';

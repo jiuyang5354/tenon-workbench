@@ -102,6 +102,8 @@
     gateDirtyText: null,
     treeGroupOpen: new Map(), // key -> boolean (manual override)
     treeRowOpen: new Set(),   // key -> expanded row
+    chatTraceOpen: new Map(), // msgId -> boolean (manual override)
+    chatToolOpen: new Set(),  // msgId:traceId -> expanded tool detail
     branchDeckOpen: new Map(), // runId -> boolean
     branchSelected: new Map(), // runId -> branchId
     wf: {
@@ -2096,6 +2098,102 @@
       </section>`;
   }
 
+  function renderChatTraceHtml(msg, isStreaming) {
+    const trace = Array.isArray(msg.trace) ? msg.trace : [];
+    const thoughtText = String(msg.thinkingText || '').trim();
+    const thinkTok = Number(msg.thinkingTokens) || 0;
+    const toolCount = trace.filter((t) => t.kind === 'tool' || t.kind === 'file_change').length;
+    const thinkCount = trace.filter((t) => t.kind === 'thinking').length;
+    const hasContent = trace.length > 0 || Boolean(thoughtText) || thinkTok > 0;
+
+    if (!isStreaming && !hasContent) return '';
+
+    const hasManual = appState.chatTraceOpen.has(msg.id);
+    const isOpen = hasManual ? appState.chatTraceOpen.get(msg.id) : isStreaming;
+
+    const activeTool = [...trace].reverse().find((t) => t.status === 'running' && t.kind === 'tool');
+    const summaryBits = [];
+    if (thinkCount > 0) summaryBits.push(`${thinkCount} 步思考`);
+    if (toolCount > 0) summaryBits.push(`${toolCount} 次工具调用`);
+    if (thinkTok > 0) summaryBits.push(`${thinkTok.toLocaleString()} 推理 tokens`);
+
+    let titleText = '';
+    if (isStreaming) {
+      if (activeTool) {
+        titleText = `正在调用 ${activeTool.title}${activeTool.detail ? ` · ${activeTool.detail.slice(0, 42)}` : ''}`;
+      } else if (thoughtText) {
+        titleText = `正在推演思考链${summaryBits.length ? `（${summaryBits.join(' · ')}）` : ''}`;
+      } else if (msg.liveStep) {
+        titleText = `正在执行 ${msg.liveStep}...`;
+      } else {
+        titleText = summaryBits.length ? `深度思考中 · ${summaryBits.join(' · ')}` : '深度思考中...';
+      }
+    } else {
+      titleText = summaryBits.length
+        ? `思考链与工具调用 · ${summaryBits.join(' · ')}`
+        : '查看思考与执行轨迹';
+    }
+
+    const bodyRows = [];
+    if (thoughtText) {
+      bodyRows.push(`
+        <div class="chat-trace-thought">
+          <div class="chat-trace-thought-label mono-xs">CHAIN OF THOUGHT</div>
+          <div class="chat-trace-thought-text">${escapeHtml(thoughtText)}</div>
+        </div>`);
+    }
+
+    const nonDuplicateSteps = trace.filter((t) => !(t.id === 'reason_stream' && thoughtText));
+    if (nonDuplicateSteps.length > 0) {
+      const rowsHtml = nonDuplicateSteps
+        .map((item) => {
+          const itemKey = `${msg.id}:${item.id}`;
+          const expanded = appState.chatToolOpen.has(itemKey);
+          const hasDetail = Boolean(item.body && String(item.body).trim());
+          const statusCls = item.status === 'error' ? 'is-error' : item.status === 'running' ? 'is-running' : 'is-done';
+          const statusGlyph = item.status === 'error' ? '✕' : item.status === 'running' ? '●' : '✓';
+          const badgeLabel =
+            item.kind === 'thinking'
+              ? 'THINK'
+              : item.kind === 'file_change'
+                ? 'EDIT'
+                : String(item.title || 'TOOL').toUpperCase();
+          const durText = item.durationMs ? `${(item.durationMs / 1000).toFixed(1)}s` : '';
+
+          return `
+            <div class="chat-trace-item ${statusCls}">
+              <button type="button" class="chat-trace-row ${hasDetail ? 'is-expandable' : ''}" ${hasDetail ? `data-chat-tool-toggle="${escapeHtml(itemKey)}" aria-expanded="${expanded}"` : 'disabled'}>
+                <span class="chat-trace-glyph ${statusCls}" aria-hidden="true">${statusGlyph}</span>
+                <span class="chat-trace-badge mono-xs">${escapeHtml(badgeLabel)}</span>
+                <span class="chat-trace-summary mono-xs">${escapeHtml(item.detail || item.title || '')}</span>
+                <span class="chat-trace-right mono-xs">
+                  ${durText ? `<span>${escapeHtml(durText)}</span>` : ''}
+                  ${hasDetail ? `<span class="chat-trace-chev">${expanded ? '▴' : '▾'}</span>` : ''}
+                </span>
+              </button>
+              ${expanded && hasDetail ? `<pre class="chat-trace-detail mono-xs">${escapeHtml(item.body)}</pre>` : ''}
+            </div>`;
+        })
+        .join('');
+      bodyRows.push(`<div class="chat-trace-list">${rowsHtml}</div>`);
+    } else if (isStreaming && !thoughtText) {
+      bodyRows.push(`
+        <div class="chat-trace-live-placeholder mono-xs is-shimmer">
+          正在建立推理上下文并监听本机工具调用...
+        </div>`);
+    }
+
+    return `
+      <div class="chat-trace-box ${isOpen ? 'is-open' : ''} ${isStreaming ? 'is-live' : ''}">
+        <button type="button" class="chat-trace-head" data-chat-trace-toggle="${escapeHtml(msg.id)}" aria-expanded="${isOpen}">
+          <span class="chat-trace-dot ${isStreaming ? 'is-pulse' : ''}" aria-hidden="true"></span>
+          <span class="chat-trace-title">${escapeHtml(titleText)}</span>
+          <span class="chat-trace-toggle-chev mono-xs">${isOpen ? '收起 ▴' : '展开 ▾'}</span>
+        </button>
+        ${isOpen ? `<div class="chat-trace-body">${bodyRows.join('')}</div>` : ''}
+      </div>`;
+  }
+
   function renderConversationThread(run) {
     if (!run) return;
     el('welcomeStage').classList.add('hidden');
@@ -2158,9 +2256,7 @@
           if (msg.durationMs) metaBits.push(`${(msg.durationMs / 1000).toFixed(1)}s`);
           if (!metaBits.length) metaBits.push(isStreamingMsg ? '回复中...' : ts);
 
-          const liveHint = msg.liveStep
-            ? `正在调用工具 (${msg.liveStep})...`
-            : '思考中...';
+          const traceHtml = renderChatTraceHtml(msg, isStreamingMsg);
 
           parts.push(`
             <article class="agent-turn chat-turn ${isStreamingMsg ? 'is-streaming' : ''}">
@@ -2170,9 +2266,10 @@
                   <span class="agent-role-name">${escapeHtml(engineLabel)}</span>
                   ${msg.model ? `<span class="agent-model-tag">${escapeHtml(msg.model)}</span>` : ''}
                 </div>
-                ${isStreamingMsg ? `<span class="agent-status-pill running is-shimmer"><span>${escapeHtml(msg.liveStep ? '执行工具中...' : '回复中...')}</span></span>` : ''}
+                ${isStreamingMsg ? `<span class="agent-status-pill running is-shimmer"><span>${escapeHtml(msg.liveStep ? '执行工具中...' : '思考与回复中...')}</span></span>` : ''}
               </header>
-              ${msg.content ? `<div class="markdown-output">${renderMarkdown(msg.content)}</div>` : isStreamingMsg ? `<div class="mono-xs is-shimmer">${escapeHtml(liveHint)}</div>` : ''}
+              ${traceHtml}
+              ${msg.content ? `<div class="markdown-output">${renderMarkdown(msg.content)}</div>` : ''}
               ${msg.error ? `<div class="error-banner">${escapeHtml(msg.error)}</div>` : ''}
               <footer class="agent-turn-foot">
                 <span class="mono-xs">${escapeHtml(metaBits.join(' · '))}</span>
@@ -2530,6 +2627,24 @@
     container.querySelectorAll('[data-open-insp]').forEach((btn) => {
       btn.addEventListener('click', () => {
         openInspector(btn.dataset.openInsp);
+      });
+    });
+
+    container.querySelectorAll('[data-chat-trace-toggle]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const mid = btn.dataset.chatTraceToggle;
+        const curr = btn.getAttribute('aria-expanded') === 'true';
+        appState.chatTraceOpen.set(mid, !curr);
+        renderConversationThread(run);
+      });
+    });
+
+    container.querySelectorAll('[data-chat-tool-toggle]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.chatToolToggle;
+        if (appState.chatToolOpen.has(key)) appState.chatToolOpen.delete(key);
+        else appState.chatToolOpen.add(key);
+        renderConversationThread(run);
       });
     });
 
@@ -2984,6 +3099,7 @@
   function openInspector(tabName = null) {
     appState.inspectorOpen = true;
     el('inspectorPane').classList.remove('hidden');
+    el('inspectorResizeHandle')?.classList.remove('hidden');
     el('btnToggleInspector').setAttribute('aria-expanded', 'true');
     if (tabName) switchInspectorTab(tabName);
     else renderInspectorContent(appState.currentRun);
@@ -2993,7 +3109,94 @@
   function closeInspector() {
     appState.inspectorOpen = false;
     el('inspectorPane').classList.add('hidden');
+    el('inspectorResizeHandle')?.classList.add('hidden');
     el('btnToggleInspector').setAttribute('aria-expanded', 'false');
+  }
+
+  function initPaneResizers() {
+    const root = document.documentElement;
+    const clampSidebar = (w) => Math.max(204, Math.min(380, Math.round(w)));
+    const clampInspector = (w) => {
+      const maxW = Math.max(460, Math.round(window.innerWidth * 0.74));
+      return Math.max(340, Math.min(maxW, Math.round(w)));
+    };
+
+    try {
+      const savedSide = Number(localStorage.getItem('tenon_sidebar_w'));
+      if (Number.isFinite(savedSide) && savedSide >= 204) {
+        root.style.setProperty('--sidebar-w', `${clampSidebar(savedSide)}px`);
+      }
+      const savedInsp = Number(localStorage.getItem('tenon_inspector_w'));
+      if (Number.isFinite(savedInsp) && savedInsp >= 340) {
+        root.style.setProperty('--inspector-w', `${clampInspector(savedInsp)}px`);
+      }
+    } catch {}
+
+    const sideHandle = el('sidebarResizeHandle');
+    if (sideHandle) {
+      sideHandle.addEventListener('dblclick', () => {
+        root.style.setProperty('--sidebar-w', '248px');
+        try { localStorage.removeItem('tenon_sidebar_w'); } catch {}
+        requestAnimationFrame(syncAllFluidTracks);
+      });
+      sideHandle.addEventListener('pointerdown', (ev) => {
+        const sidebar = el('sidebar');
+        if (!sidebar || sidebar.classList.contains('is-collapsed')) return;
+        ev.preventDefault();
+        sideHandle.setPointerCapture(ev.pointerId);
+        sideHandle.classList.add('is-dragging');
+        document.body.classList.add('is-resizing');
+        let lastW = sidebar.getBoundingClientRect().width;
+        const onMove = (mEv) => {
+          lastW = clampSidebar(mEv.clientX);
+          root.style.setProperty('--sidebar-w', `${lastW}px`);
+        };
+        const onUp = () => {
+          sideHandle.classList.remove('is-dragging');
+          document.body.classList.remove('is-resizing');
+          try { localStorage.setItem('tenon_sidebar_w', String(lastW)); } catch {}
+          requestAnimationFrame(syncAllFluidTracks);
+          sideHandle.removeEventListener('pointermove', onMove);
+          sideHandle.removeEventListener('pointerup', onUp);
+          sideHandle.removeEventListener('pointercancel', onUp);
+        };
+        sideHandle.addEventListener('pointermove', onMove);
+        sideHandle.addEventListener('pointerup', onUp);
+        sideHandle.addEventListener('pointercancel', onUp);
+      });
+    }
+
+    const inspHandle = el('inspectorResizeHandle');
+    if (inspHandle) {
+      inspHandle.addEventListener('dblclick', () => {
+        root.style.setProperty('--inspector-w', '448px');
+        try { localStorage.removeItem('tenon_inspector_w'); } catch {}
+        requestAnimationFrame(syncAllFluidTracks);
+      });
+      inspHandle.addEventListener('pointerdown', (ev) => {
+        ev.preventDefault();
+        inspHandle.setPointerCapture(ev.pointerId);
+        inspHandle.classList.add('is-dragging');
+        document.body.classList.add('is-resizing');
+        let lastW = el('inspectorPane')?.getBoundingClientRect().width || 448;
+        const onMove = (mEv) => {
+          lastW = clampInspector(window.innerWidth - mEv.clientX);
+          root.style.setProperty('--inspector-w', `${lastW}px`);
+        };
+        const onUp = () => {
+          inspHandle.classList.remove('is-dragging');
+          document.body.classList.remove('is-resizing');
+          try { localStorage.setItem('tenon_inspector_w', String(lastW)); } catch {}
+          requestAnimationFrame(syncAllFluidTracks);
+          inspHandle.removeEventListener('pointermove', onMove);
+          inspHandle.removeEventListener('pointerup', onUp);
+          inspHandle.removeEventListener('pointercancel', onUp);
+        };
+        inspHandle.addEventListener('pointermove', onMove);
+        inspHandle.addEventListener('pointerup', onUp);
+        inspHandle.addEventListener('pointercancel', onUp);
+      });
+    }
   }
 
   function switchInspectorTab(tab) {
@@ -5724,6 +5927,7 @@
     });
   }
   bindEvents();
+  initPaneResizers();
   waveEngine = initWaveEngine();
   inkDiagrams = initInkOrbitDiagrams();
   canvasEngine = initInfiniteWorkflowCanvas();

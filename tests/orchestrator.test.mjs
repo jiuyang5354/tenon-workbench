@@ -696,6 +696,7 @@ test('agent-chat mode supports lightweight multi-turn conversation via POST /api
     receivedPrompts.push(userMsg);
     const reply = receivedPrompts.length === 1 ? '你好！随时直接问我任何代码问题。' : '收到，记住第一轮你说过你好。';
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: '分析用户意图并准备简短回复。' } }] })}\n\n`);
     res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: reply } }] })}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
@@ -773,6 +774,8 @@ test('agent-chat mode supports lightweight multi-turn conversation via POST /api
     assert.equal(afterTurn1.messages[0].content, '你好');
     assert.equal(afterTurn1.messages[1].role, 'assistant');
     assert.match(afterTurn1.messages[1].content, /你好/);
+    assert.match(afterTurn1.messages[1].thinkingText, /分析用户意图/);
+    assert.ok(Array.isArray(afterTurn1.messages[1].trace) && afterTurn1.messages[1].trace.length >= 1);
 
     // Turn 2: Follow-up in the SAME thread
     const r2 = await fetch(`${base}/api/runs/${created.id}/message`, {
