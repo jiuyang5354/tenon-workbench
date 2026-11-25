@@ -1,35 +1,106 @@
+import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, Menu, shell, dialog, ipcMain, nativeTheme } from 'electron';
+import { hydrateRuntimePath, killAllActiveChildrenSync } from '../lib/runners.mjs';
 import { createWorkbenchServer } from '../server.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
 
+const VALID_SURFACES = new Set(['weave', 'paper', 'charcoal']);
+
 let mainWindow = null;
 let workbench = null;
 let serverUrl = '';
+let isShuttingDown = false;
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (mainWindow) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
   });
 }
 
+function resolveUnpackedPath(...segments) {
+  const raw = path.join(ROOT_DIR, ...segments);
+  if (app.isPackaged) {
+    const unpacked = raw.replace(/app\.asar([\\/])/i, 'app.asar.unpacked$1');
+    if (fsSync.existsSync(unpacked)) return unpacked;
+  }
+  return raw;
+}
+
+function isUsableRealDir(dirPath) {
+  if (!dirPath || typeof dirPath !== 'string') return false;
+  if (/\.asar(?:[\\/]|$)/i.test(dirPath)) return false;
+  try {
+    return fsSync.statSync(dirPath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function resolveDefaultWorkspace() {
+  const candidates = [
+    os.homedir(),
+    (() => { try { return app.getPath('documents'); } catch { return ''; } })(),
+    (() => { try { return app.getPath('home'); } catch { return ''; } })(),
+  ];
+  for (const dir of candidates) {
+    if (isUsableRealDir(dir)) return path.resolve(dir);
+  }
+  return os.homedir();
+}
+
+function getChromePrefsPath() {
+  return path.join(app.getPath('userData'), 'ui-chrome.json');
+}
+
+let lastSavedSurface = null;
+
+function readSavedSurface() {
+  try {
+    const raw = fsSync.readFileSync(getChromePrefsPath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (VALID_SURFACES.has(parsed?.surface)) {
+      lastSavedSurface = parsed.surface;
+      return parsed.surface;
+    }
+  } catch {
+    // First launch or unreadable prefs — default to Weave daylight
+  }
+  return 'weave';
+}
+
+function saveSurfacePreference(surface) {
+  if (!VALID_SURFACES.has(surface) || surface === lastSavedSurface) return;
+  try {
+    const prefsPath = getChromePrefsPath();
+    fsSync.mkdirSync(path.dirname(prefsPath), { recursive: true });
+    fsSync.writeFileSync(prefsPath, JSON.stringify({ surface }, null, 2), 'utf8');
+    lastSavedSurface = surface;
+  } catch {
+    // Best-effort UI preference persistence
+  }
+}
+
 function listenWithFallback(server, preferredPort = 4177, host = '127.0.0.1') {
   return new Promise((resolve, reject) => {
-    const onErr = (err) => {
+    const onPreferredErr = (err) => {
       if (err.code === 'EADDRINUSE' && preferredPort !== 0) {
-        server.removeListener('error', onErr);
+        server.removeListener('error', onPreferredErr);
+        const onFallbackErr = (fallbackErr) => reject(fallbackErr);
+        server.once('error', onFallbackErr);
         server.listen(0, host, () => {
+          server.removeListener('error', onFallbackErr);
           const addr = server.address();
           resolve(addr.port);
         });
@@ -37,9 +108,9 @@ function listenWithFallback(server, preferredPort = 4177, host = '127.0.0.1') {
         reject(err);
       }
     };
-    server.once('error', onErr);
+    server.once('error', onPreferredErr);
     server.listen(preferredPort, host, () => {
-      server.removeListener('error', onErr);
+      server.removeListener('error', onPreferredErr);
       const addr = server.address();
       resolve(addr.port);
     });
@@ -47,21 +118,31 @@ function listenWithFallback(server, preferredPort = 4177, host = '127.0.0.1') {
 }
 
 async function startEmbeddedWorkbench() {
+  // Hydrate PATH before initializing server/workspace/providers so Explorer/Start Menu launches
+  // reliably find agy, codex, claude, git, gh, node, npm, etc.
+  hydrateRuntimePath({ mergeRegistry: true });
+
   const userDataDir = app.getPath('userData');
   const dataDir = path.join(userDataDir, 'data');
   const templatesDir = path.join(userDataDir, 'templates');
+  const updatesDir = path.join(userDataDir, 'updates');
+  const defaultWorkspace = resolveDefaultWorkspace();
+
+  // Route updater downloads into writable per-userData directory (isolated & safe from %TEMP% GPO)
+  process.env.TENON_UPDATE_DIR = updatesDir;
 
   workbench = await createWorkbenchServer({
     dataDir,
     templatesDir,
-    defaultWorkspace: os.homedir(),
+    defaultWorkspace,
     runtime: 'electron',
     appVersion: app.getVersion(),
     onPickDirectory: async (defaultPath) => {
       const targetWin = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+      const safeDefault = isUsableRealDir(defaultPath) ? path.resolve(defaultPath) : defaultWorkspace;
       const result = await dialog.showOpenDialog(targetWin, {
         title: '选择目标工程目录',
-        defaultPath: defaultPath || os.homedir(),
+        defaultPath: safeDefault,
         properties: ['openDirectory'],
       });
       if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
@@ -90,9 +171,13 @@ function resolveTitleBarPalette(surface = 'weave') {
   return { themeSource: 'light', bg: '#eff1f4', overlayColor: '#eff1f4', symbolColor: '#111315' };
 }
 
-function applyWindowChromeTheme(win, surface = 'weave') {
+function applyWindowChromeTheme(win, rawSurface = 'weave') {
+  const surface = VALID_SURFACES.has(rawSurface) ? rawSurface : 'weave';
   const pal = resolveTitleBarPalette(surface);
-  nativeTheme.themeSource = pal.themeSource;
+  saveSurfacePreference(surface);
+  try {
+    nativeTheme.themeSource = pal.themeSource;
+  } catch { /* ignore */ }
   if (!win || win.isDestroyed()) return;
   try {
     win.setBackgroundColor(pal.bg);
@@ -110,22 +195,35 @@ function applyWindowChromeTheme(win, surface = 'weave') {
 
 ipcMain.on('tenon:titlebar-theme', (event, surface) => {
   const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
-  applyWindowChromeTheme(win, surface);
+  applyWindowChromeTheme(win, typeof surface === 'string' ? surface : 'weave');
 });
 
-function createMainWindow(url) {
-  const iconPath = path.join(ROOT_DIR, 'build', 'icon.ico');
-  const isMac = process.platform === 'darwin';
-  const initialPal = resolveTitleBarPalette('charcoal');
-  nativeTheme.themeSource = initialPal.themeSource;
+function isSameServerOrigin(targetUrl) {
+  if (!serverUrl || !targetUrl) return false;
+  try {
+    return new URL(targetUrl).origin === new URL(serverUrl).origin;
+  } catch {
+    return false;
+  }
+}
 
-  mainWindow = new BrowserWindow({
+function createMainWindow(url) {
+  const iconCandidate = resolveUnpackedPath('build', 'icon.ico');
+  const iconPath = fsSync.existsSync(iconCandidate) ? iconCandidate : undefined;
+  const isMac = process.platform === 'darwin';
+  const initialSurface = readSavedSurface();
+  const initialPal = resolveTitleBarPalette(initialSurface);
+  try {
+    nativeTheme.themeSource = initialPal.themeSource;
+  } catch { /* ignore */ }
+
+  const windowOpts = {
     width: 1440,
     height: 900,
     minWidth: 1080,
     minHeight: 680,
     title: 'TENON（榫）— 多模型协同工作台',
-    icon: iconPath,
+    ...(iconPath ? { icon: iconPath } : {}),
     backgroundColor: initialPal.bg,
     titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
     ...(isMac
@@ -145,7 +243,9 @@ function createMainWindow(url) {
       nodeIntegration: false,
       sandbox: true,
     },
-  });
+  };
+
+  mainWindow = new BrowserWindow(windowOpts);
 
   // Clean minimal menu keeping standard shortcuts (Copy/Paste/Reload/DevTools) while hidden by default
   const menu = Menu.buildFromTemplate([
@@ -173,24 +273,79 @@ function createMainWindow(url) {
   ]);
   Menu.setApplicationMenu(menu);
 
-  // Open external links (GitHub Releases, docs) in the system default browser
+  // Open external http(s) links in the system default browser; deny unknown/unsafe protocols
   mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
-    if (/^https?:\/\//i.test(targetUrl) && !targetUrl.startsWith(serverUrl)) {
-      shell.openExternal(targetUrl);
-      return { action: 'deny' };
+    if (isSameServerOrigin(targetUrl)) {
+      return { action: 'allow' };
     }
-    return { action: 'allow' };
+    if (/^https?:\/\//i.test(targetUrl)) {
+      shell.openExternal(targetUrl).catch(() => {});
+    }
+    return { action: 'deny' };
   });
 
+  // Prevent accidental drag-and-drop or link clicks from navigating the workbench away from local server
+  mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
+    if (isSameServerOrigin(targetUrl)) return;
+    event.preventDefault();
+    if (/^https?:\/\//i.test(targetUrl)) {
+      shell.openExternal(targetUrl).catch(() => {});
+    }
+  });
+
+  let shown = false;
+  const showWindowSafely = () => {
+    if (shown || !mainWindow || mainWindow.isDestroyed()) return;
+    shown = true;
+    mainWindow.show();
+  };
+
+  const showFallbackTimer = setTimeout(showWindowSafely, 4500);
+  showFallbackTimer.unref();
+
   mainWindow.once('ready-to-show', () => {
-    mainWindow?.show();
+    clearTimeout(showFallbackTimer);
+    showWindowSafely();
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return; // Ignore aborted sub-loads
+    clearTimeout(showFallbackTimer);
+    showWindowSafely();
+    dialog.showErrorBox(
+      'TENON 页面加载异常',
+      `无法加载本地工作台界面 (${validatedURL || url})：\n${errorDescription} (${errorCode})`
+    );
   });
 
   mainWindow.on('closed', () => {
+    clearTimeout(showFallbackTimer);
     mainWindow = null;
   });
 
   mainWindow.loadURL(url);
+}
+
+function shutdownWorkbench() {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  if (workbench) {
+    try { workbench.updater?.cancelDownload?.(); } catch { /* ignore */ }
+    try { workbench.orchestrator?.shutdown?.(); } catch { /* ignore */ }
+  }
+
+  // Synchronously reap every spawned agy/codex/claude/custom CLI tree before process exit
+  try { killAllActiveChildrenSync(); } catch { /* ignore */ }
+
+  if (workbench?.server) {
+    try {
+      if (typeof workbench.server.closeAllConnections === 'function') {
+        workbench.server.closeAllConnections();
+      }
+      workbench.server.close();
+    } catch { /* ignore */ }
+  }
 }
 
 app.whenReady().then(async () => {
@@ -211,10 +366,11 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
-  if (workbench) {
-    try { workbench.orchestrator.shutdown(); } catch { /* ignore */ }
-    try { workbench.server.close(); } catch { /* ignore */ }
-  }
+  shutdownWorkbench();
+});
+
+app.on('will-quit', () => {
+  shutdownWorkbench();
 });
 
 app.on('window-all-closed', () => {

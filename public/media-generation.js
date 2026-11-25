@@ -634,6 +634,7 @@
       idle = false;
       clearTimeout(idleTimer);
       idleTimer = setTimeout(() => {
+        if (!root.isConnected) return;
         idle = true;
         syncBar();
       }, 2000);
@@ -699,7 +700,15 @@
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
       else root.requestFullscreen?.().catch(() => {});
     });
-    document.addEventListener('fullscreenchange', syncBar);
+    const onFullscreenChange = () => {
+      if (!root.isConnected) {
+        document.removeEventListener('fullscreenchange', onFullscreenChange);
+        clearTimeout(idleTimer);
+        return;
+      }
+      syncBar();
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
 
     root.addEventListener('pointermove', wake);
     root.addEventListener('pointerleave', () => {
@@ -1191,8 +1200,13 @@
         if (elapsed < seconds) requestAnimationFrame(step);
         else if (recorder.state === 'recording') recorder.stop();
       };
-      recorder.start(200);
-      requestAnimationFrame(step);
+      try {
+        recorder.start(200);
+        requestAnimationFrame(step);
+      } catch {
+        stream.getTracks().forEach((tr) => tr.stop());
+        resolve(null);
+      }
     });
 
     return { posterSrc, videoPromise };

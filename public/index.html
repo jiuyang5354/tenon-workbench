@@ -912,6 +912,10 @@
           <input type="checkbox" id="chkWorktree" />
           <span>使用独立 Git Worktree 隔离施工与审查</span>
         </label>
+        <label class="check-item" title="仅在 workspace-write 沙箱下生效；Pre-CI read-only 审查始终禁网">
+          <input type="checkbox" id="chkCodexNetwork" />
+          <span>允许 Codex 沙箱联网（git fetch / gh）</span>
+        </label>
       </div>
     </div>
   </aside>

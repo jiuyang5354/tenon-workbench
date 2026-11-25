@@ -302,19 +302,29 @@
           });
           const found = PERSONALITIES.find((p) => p.id === currentStyle);
           if (found && sampleEl) sampleEl.textContent = found.sample;
+          if (savedHint) savedHint.textContent = '有未保存的更改';
         });
       });
 
       ta.addEventListener('input', () => {
+        if (ta.value.length > MAX_INSTR_LEN) {
+          ta.value = ta.value.slice(0, MAX_INSTR_LEN);
+        }
         counter.textContent = `${ta.value.length} / ${MAX_INSTR_LEN}`;
+        if (savedHint) savedHint.textContent = '有未保存的更改';
       });
 
       body.querySelectorAll('[data-ci-chip]').forEach((chip) => {
         chip.addEventListener('click', () => {
           const line = chip.dataset.ciChip;
           if (!ta.value.includes(line)) {
-            ta.value = ta.value.trim() ? `${ta.value.trim()}\n${line}` : line;
-            ta.dispatchEvent(new Event('input'));
+            const nextVal = ta.value.trim() ? `${ta.value.trim()}\n${line}` : line;
+            if (nextVal.length > MAX_INSTR_LEN) {
+              if (hooks.onToast) hooks.onToast(`偏好指令已达上限（${MAX_INSTR_LEN} 字）`);
+            } else {
+              ta.value = nextVal;
+              ta.dispatchEvent(new Event('input'));
+            }
           }
           ta.focus();
         });
@@ -338,81 +348,17 @@
     function renderMemoryInto(body) {
       if (!body) return;
       syncMemCountBadge();
-      const q = memSearch.trim().toLowerCase();
-      const filtered = memories.filter(
-        (m) => !q || m.text.toLowerCase().includes(q) || (m.topic || '').toLowerCase().includes(q)
-      );
-      const pct = Math.min(100, Math.round((memories.length / MAX_MEMORIES) * 100));
-      const groupsMap = new Map();
-      filtered.forEach((m) => {
-        const t = m.topic || '通用';
-        if (!groupsMap.has(t)) groupsMap.set(t, []);
-        groupsMap.get(t).push(m);
-      });
-
-      const groupsHtml =
-        groupsMap.size === 0
-          ? `<div class="mm-empty mono-xs">${q ? '未找到匹配的记忆条目' : '暂无持久记忆，可在下方新增一条工作偏好'}</div>`
-          : Array.from(groupsMap.entries())
-              .map(
-                ([topic, items]) => `
-                <section class="mm-group" aria-label="${escapeHtml(topic)}">
-                  <div class="mm-group-head mono-xs">
-                    <span>${escapeHtml(topic)}</span>
-                    <span>${items.length}</span>
-                  </div>
-                  <div class="mm-rows">
-                    ${items
-                      .map((m) => {
-                        if (editingMemId === m.id) {
-                          return `
-                            <div class="mm-editor" data-slot="memory-editor">
-                              <textarea class="gate-editor mm-edit-input" rows="2">${escapeHtml(m.text)}</textarea>
-                              <div class="mm-edit-actions">
-                                <button type="button" class="btn-secondary-sm" data-mm-cancel>取消</button>
-                                <button type="button" class="btn-primary-sm" data-mm-save="${escapeHtml(m.id)}">保存修改</button>
-                              </div>
-                            </div>`;
-                        }
-                        return `
-                          <div class="mm-row" data-slot="memory-row">
-                            <div class="mm-row-main">
-                              <p class="mm-row-text">${highlightMatch(m.text, memSearch)}</p>
-                              <span class="mm-row-meta mono-xs">${escapeHtml(m.source || '手动记录')} · ${escapeHtml(m.updatedAt || '今天')}</span>
-                            </div>
-                            <div class="mm-row-actions">
-                              <button type="button" class="link-btn" data-mm-edit="${escapeHtml(m.id)}">编辑</button>
-                              <button type="button" class="link-btn mm-del-btn" data-mm-del="${escapeHtml(m.id)}">删除</button>
-                            </div>
-                          </div>`;
-                      })
-                      .join('')}
-                  </div>
-                </section>`
-              )
-              .join('');
 
       body.innerHTML = `
         <div class="mm-wrap" data-slot="memory-manager">
           <div class="mm-top-bar">
             <input type="text" class="text-input mm-search" value="${escapeHtml(memSearch)}" placeholder="搜索跨会话记忆..." autocomplete="off" />
-            <div class="mm-capacity" aria-label="记忆容量">
-              <span class="mono-xs">${memories.length} 条记忆</span>
-              <span class="mm-cap-bar"><span class="mm-cap-fill" style="width:${pct}%"></span></span>
-              <span class="mono-xs">${pct}%</span>
-            </div>
+            <div class="mm-capacity" aria-label="记忆容量"></div>
           </div>
 
-          ${
-            lastDeleted
-              ? `<div class="mm-undo-bar" data-slot="memory-undo">
-                  <span>已删除「${escapeHtml(lastDeleted.text.slice(0, 26))}${lastDeleted.text.length > 26 ? '…' : ''}」</span>
-                  <button type="button" class="link-btn" data-mm-undo>撤销删除</button>
-                </div>`
-              : ''
-          }
+          <div class="mm-undo-slot"></div>
 
-          <div class="mm-list is-fullpage">${groupsHtml}</div>
+          <div class="mm-list is-fullpage"></div>
 
           <form class="mm-add-form">
             <input type="text" class="text-input mm-add-topic mono" placeholder="分类（如 工程偏好）" value="工程偏好" />
@@ -421,68 +367,153 @@
           </form>
         </div>`;
 
+      const capEl = body.querySelector('.mm-capacity');
+      const undoSlotEl = body.querySelector('.mm-undo-slot');
+      const listEl = body.querySelector('.mm-list');
       const searchInp = body.querySelector('.mm-search');
+
+      function updateMemoryDynamic() {
+        if (!body.isConnected) return;
+        syncMemCountBadge();
+        const q = memSearch.trim().toLowerCase();
+        const filtered = memories.filter(
+          (m) => !q || m.text.toLowerCase().includes(q) || (m.topic || '').toLowerCase().includes(q)
+        );
+        const pct = Math.min(100, Math.round((memories.length / MAX_MEMORIES) * 100));
+        if (capEl) {
+          capEl.innerHTML = `
+            <span class="mono-xs">${memories.length} 条记忆</span>
+            <span class="mm-cap-bar"><span class="mm-cap-fill" style="width:${pct}%"></span></span>
+            <span class="mono-xs">${pct}%</span>`;
+        }
+
+        if (undoSlotEl) {
+          undoSlotEl.innerHTML = lastDeleted
+            ? `<div class="mm-undo-bar" data-slot="memory-undo">
+                <span>已删除「${escapeHtml(lastDeleted.text.slice(0, 26))}${lastDeleted.text.length > 26 ? '…' : ''}」</span>
+                <button type="button" class="link-btn" data-mm-undo>撤销删除</button>
+              </div>`
+            : '';
+          undoSlotEl.querySelector('[data-mm-undo]')?.addEventListener('click', () => {
+            if (!lastDeleted) return;
+            clearTimeout(undoTimer);
+            undoTimer = null;
+            const { _idx, ...item } = lastDeleted;
+            memories.splice(Math.min(_idx, memories.length), 0, item);
+            lastDeleted = null;
+            saveMemories(memories);
+            updateMemoryDynamic();
+            if (hooks.onToast) hooks.onToast('已恢复删除的记忆');
+          });
+        }
+
+        const groupsMap = new Map();
+        filtered.forEach((m) => {
+          const t = m.topic || '通用';
+          if (!groupsMap.has(t)) groupsMap.set(t, []);
+          groupsMap.get(t).push(m);
+        });
+
+        const groupsHtml =
+          groupsMap.size === 0
+            ? `<div class="mm-empty mono-xs">${q ? '未找到匹配的记忆条目' : '暂无持久记忆，可在下方新增一条工作偏好'}</div>`
+            : Array.from(groupsMap.entries())
+                .map(
+                  ([topic, items]) => `
+                  <section class="mm-group" aria-label="${escapeHtml(topic)}">
+                    <div class="mm-group-head mono-xs">
+                      <span>${escapeHtml(topic)}</span>
+                      <span>${items.length}</span>
+                    </div>
+                    <div class="mm-rows">
+                      ${items
+                        .map((m) => {
+                          if (editingMemId === m.id) {
+                            return `
+                              <div class="mm-editor" data-slot="memory-editor">
+                                <textarea class="gate-editor mm-edit-input" rows="2">${escapeHtml(m.text)}</textarea>
+                                <div class="mm-edit-actions">
+                                  <button type="button" class="btn-secondary-sm" data-mm-cancel>取消</button>
+                                  <button type="button" class="btn-primary-sm" data-mm-save="${escapeHtml(m.id)}">保存修改</button>
+                                </div>
+                              </div>`;
+                          }
+                          return `
+                            <div class="mm-row" data-slot="memory-row">
+                              <div class="mm-row-main">
+                                <p class="mm-row-text">${highlightMatch(m.text, memSearch)}</p>
+                                <span class="mm-row-meta mono-xs">${escapeHtml(m.source || '手动记录')} · ${escapeHtml(m.updatedAt || '今天')}</span>
+                              </div>
+                              <div class="mm-row-actions">
+                                <button type="button" class="link-btn" data-mm-edit="${escapeHtml(m.id)}">编辑</button>
+                                <button type="button" class="link-btn mm-del-btn" data-mm-del="${escapeHtml(m.id)}">删除</button>
+                              </div>
+                            </div>`;
+                        })
+                        .join('')}
+                    </div>
+                  </section>`
+                )
+                .join('');
+
+        if (!listEl) return;
+        listEl.innerHTML = groupsHtml;
+
+        listEl.querySelectorAll('[data-mm-edit]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            editingMemId = btn.dataset.mmEdit;
+            updateMemoryDynamic();
+            listEl.querySelector('.mm-edit-input')?.focus();
+          });
+        });
+
+        listEl.querySelector('[data-mm-cancel]')?.addEventListener('click', () => {
+          editingMemId = null;
+          updateMemoryDynamic();
+        });
+
+        listEl.querySelector('[data-mm-save]')?.addEventListener('click', (e) => {
+          const id = e.currentTarget.dataset.mmSave;
+          const val = (listEl.querySelector('.mm-edit-input')?.value || '').trim();
+          if (val) {
+            memories = memories.map((m) => (m.id === id ? { ...m, text: val, updatedAt: '刚刚' } : m));
+            saveMemories(memories);
+          }
+          editingMemId = null;
+          updateMemoryDynamic();
+          if (hooks.onToast) hooks.onToast('记忆条目已更新');
+        });
+
+        listEl.querySelectorAll('[data-mm-del]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const id = btn.dataset.mmDel;
+            const idx = memories.findIndex((m) => m.id === id);
+            if (idx < 0) return;
+            lastDeleted = { ...memories[idx], _idx: idx };
+            memories.splice(idx, 1);
+            saveMemories(memories);
+            clearTimeout(undoTimer);
+            undoTimer = setTimeout(() => {
+              undoTimer = null;
+              lastDeleted = null;
+              if (body.isConnected) updateMemoryDynamic();
+            }, 6000);
+            updateMemoryDynamic();
+          });
+        });
+      }
+
       searchInp.addEventListener('input', (e) => {
         memSearch = e.target.value;
-        const pos = e.target.selectionStart || memSearch.length;
-        renderMemoryInto(body);
-        const nextInp = body.querySelector('.mm-search');
-        if (nextInp) { nextInp.focus(); nextInp.setSelectionRange(pos, pos); }
-      });
-
-      body.querySelectorAll('[data-mm-edit]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          editingMemId = btn.dataset.mmEdit;
-          renderMemoryInto(body);
-          body.querySelector('.mm-edit-input')?.focus();
-        });
-      });
-
-      body.querySelector('[data-mm-cancel]')?.addEventListener('click', () => {
-        editingMemId = null;
-        renderMemoryInto(body);
-      });
-
-      body.querySelector('[data-mm-save]')?.addEventListener('click', (e) => {
-        const id = e.currentTarget.dataset.mmSave;
-        const val = (body.querySelector('.mm-edit-input')?.value || '').trim();
-        if (val) {
-          memories = memories.map((m) => (m.id === id ? { ...m, text: val, updatedAt: '刚刚' } : m));
-          saveMemories(memories);
-        }
-        editingMemId = null;
-        renderMemoryInto(body);
-        if (hooks.onToast) hooks.onToast('记忆条目已更新');
-      });
-
-      body.querySelectorAll('[data-mm-del]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const id = btn.dataset.mmDel;
-          const idx = memories.findIndex((m) => m.id === id);
-          if (idx < 0) return;
-          lastDeleted = { ...memories[idx], _idx: idx };
-          memories.splice(idx, 1);
-          saveMemories(memories);
-          clearTimeout(undoTimer);
-          undoTimer = setTimeout(() => { lastDeleted = null; renderMemoryInto(body); }, 6000);
-          renderMemoryInto(body);
-        });
-      });
-
-      body.querySelector('[data-mm-undo]')?.addEventListener('click', () => {
-        if (!lastDeleted) return;
-        const { _idx, ...item } = lastDeleted;
-        memories.splice(Math.min(_idx, memories.length), 0, item);
-        lastDeleted = null;
-        saveMemories(memories);
-        renderMemoryInto(body);
-        if (hooks.onToast) hooks.onToast('已恢复删除的记忆');
+        updateMemoryDynamic();
       });
 
       body.querySelector('.mm-add-form').addEventListener('submit', (e) => {
         e.preventDefault();
-        const topic = (body.querySelector('.mm-add-topic').value || '').trim() || '工程偏好';
-        const text = (body.querySelector('.mm-add-text').value || '').trim();
+        const topicEl = body.querySelector('.mm-add-topic');
+        const textEl = body.querySelector('.mm-add-text');
+        const topic = (topicEl.value || '').trim() || '工程偏好';
+        const text = (textEl.value || '').trim();
         if (!text) return;
         memories.unshift({
           id: `mem-${Date.now()}`,
@@ -492,9 +523,12 @@
           updatedAt: '刚刚',
         });
         saveMemories(memories);
-        renderMemoryInto(body);
+        textEl.value = '';
+        updateMemoryDynamic();
         if (hooks.onToast) hooks.onToast('已写入持久记忆库');
       });
+
+      updateMemoryDynamic();
     }
 
     function renderShortcutsInto(mount) {
@@ -937,14 +971,21 @@
       // Bind provider list actions
       mount.querySelectorAll('[data-ph-toggle]').forEach((sw) => {
         sw.addEventListener('click', async () => {
+          if (sw.disabled) return;
           const p = providers.find((x) => x.id === sw.dataset.phToggle);
           if (!p) return;
-          await hooks.onSaveProvider?.({ id: p.id, enabled: !p.enabled });
+          sw.disabled = true;
+          try {
+            await hooks.onSaveProvider?.({ id: p.id, enabled: !p.enabled });
+          } finally {
+            if (sw.isConnected) sw.disabled = false;
+          }
         });
       });
 
       mount.querySelectorAll('[data-ph-test]').forEach((btn) => {
         btn.addEventListener('click', async () => {
+          if (providerTestingId) return;
           const id = btn.dataset.phTest;
           providerTestingId = id;
           renderProvidersInto(mount, ctx);
@@ -976,9 +1017,15 @@
 
       mount.querySelectorAll('[data-ph-del]').forEach((btn) => {
         btn.addEventListener('click', async () => {
+          if (btn.disabled) return;
           const id = btn.dataset.phDel;
+          btn.disabled = true;
           if (providerDraft?.id === id) providerDraft = null;
-          await hooks.onDeleteProvider?.(id);
+          try {
+            await hooks.onDeleteProvider?.(id);
+          } finally {
+            if (btn.isConnected) btn.disabled = false;
+          }
         });
       });
     }
@@ -1003,8 +1050,9 @@
         : `本地 Web 工作台 · Node ${info.nodeVersion || ''}`;
       const relUrl = last?.releaseUrl || info.releasesUrl || 'https://github.com/jiuyang5354/tenon-workbench/releases';
 
-      const checkedStr = last?.checkedAt
-        ? new Date(last.checkedAt).toLocaleString('zh-CN', { hour12: false })
+      const checkedDate = last?.checkedAt ? new Date(last.checkedAt) : null;
+      const checkedStr = checkedDate && !Number.isNaN(checkedDate.getTime())
+        ? checkedDate.toLocaleString('zh-CN', { hour12: false })
         : '尚未检测';
 
       let statusBodyHtml = '';
@@ -1068,12 +1116,14 @@
             </div>`;
         }
 
+        const pubDate = last.publishedAt ? new Date(last.publishedAt) : null;
+        const pubDateStr = pubDate && !Number.isNaN(pubDate.getTime()) ? ` · 发布于 ${pubDate.toLocaleDateString('zh-CN')}` : '';
         statusBodyHtml = `
           <div class="upd-status-banner is-available">
             <span class="upd-dot is-new" aria-hidden="true"></span>
             <div class="upd-status-copy">
               <strong>发现新版本 v${escapeHtml(last.latestVersion)}</strong>
-              <span class="mono-xs">${escapeHtml(last.releaseName || '')}${last.publishedAt ? ` · 发布于 ${new Date(last.publishedAt).toLocaleDateString('zh-CN')}` : ''}</span>
+              <span class="mono-xs">${escapeHtml(last.releaseName || '')}${escapeHtml(pubDateStr)}</span>
             </div>
           </div>
           ${last.releaseNotes ? `<pre class="upd-notes mono-xs">${escapeHtml(last.releaseNotes)}</pre>` : ''}
@@ -1147,11 +1197,12 @@
       const totalRuns = runs.length;
       const doneRuns = runs.filter((r) => r.status === 'completed').length;
       const activeRuns = runs.filter((r) => r.status === 'running' || r.status === 'awaiting_approval').length;
-      const blockedRuns = runs.filter((r) => r.status === 'failed' || r.status === 'blocked' || r.status === 'cancelled').length;
+      const blockedRuns = runs.filter((r) => r.status === 'failed' || r.status === 'blocked' || r.status === 'cancelled' || r.status === 'interrupted').length;
 
       const planRuns = runs.filter((r) => r.mode === 'plan-only' || r.mode === 'copy-polish').length;
       const pipeRuns = runs.filter((r) => r.mode === 'full-pipeline' || r.mode === 'codex-exec' || r.mode === 'codex-review').length;
       const mediaRuns = runs.filter((r) => r.mode === 'image-gen' || r.mode === 'video-gen').length;
+      const chatRuns = Math.max(0, totalRuns - planRuns - pipeRuns - mediaRuns);
 
       const completionPct = totalRuns > 0 ? Math.round((doneRuns / totalRuns) * 100) : 100;
       const healthScore =
@@ -1163,9 +1214,10 @@
       const rawSlices =
         totalRuns > 0
           ? [
-              { id: 'pipeline', label: '全链路与施工', value: pipeRuns, opacity: 1 },
-              { id: 'planning', label: '架构规划与文案', value: planRuns, opacity: 0.58 },
-              { id: 'media', label: '图像与视频输出', value: mediaRuns, opacity: 0.24 },
+              { id: 'chat', label: '对话与外部 Agent', value: chatRuns, opacity: 1 },
+              { id: 'pipeline', label: '全链路与施工', value: pipeRuns, opacity: 0.72 },
+              { id: 'planning', label: '架构规划与文案', value: planRuns, opacity: 0.44 },
+              { id: 'media', label: '图像与视频输出', value: mediaRuns, opacity: 0.22 },
             ].filter((s) => s.value > 0)
           : [
               { id: 'pipeline', label: '全链路与施工', value: 52, opacity: 1 },

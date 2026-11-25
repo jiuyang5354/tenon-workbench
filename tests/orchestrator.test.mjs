@@ -6,12 +6,34 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { classifyRiskFiles, discoverWorkspaces, createWorkspaceProject } from '../lib/workspace.mjs';
+import { EventEmitter } from 'node:events';
+import {
+  classifyRiskFiles,
+  discoverWorkspaces,
+  createWorkspaceProject,
+  inspectWorkspace,
+  getWorkspaceDiff,
+  createManagedWorktree,
+  removeManagedWorktree,
+} from '../lib/workspace.mjs';
 
 const execFileAsync = promisify(execFile);
-import { parseReviewVerdict, parseProviderRef } from '../lib/orchestrator.mjs';
-import { sanitizeAgentText } from '../lib/runners.mjs';
 import {
+  Orchestrator,
+  ValidationError,
+  parseReviewVerdict,
+  parseProviderRef,
+} from '../lib/orchestrator.mjs';
+import { RunStore } from '../lib/store.mjs';
+import {
+  sanitizeAgentText,
+  buildCodexArgs,
+  buildAgyArgs,
+  buildWindowsCmdLine,
+  execCliFile,
+} from '../lib/runners.mjs';
+import {
+  ProviderStore,
   maskSecret,
   parseArgsTemplate,
   parseOpenAiSseChunk,
@@ -801,6 +823,509 @@ test('agent-chat mode supports lightweight multi-turn conversation via POST /api
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await new Promise((resolve) => mockLlm.close(resolve));
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('buildCodexArgs & buildAgyArgs enforce allowCodexNetwork opt-in and safe sandbox bounds', () => {
+  // Default: network disabled
+  const def = buildCodexArgs({ cwd: '/repo', sandbox: 'workspace-write' });
+  assert.equal(def.safeSandbox, 'workspace-write');
+  assert.equal(def.enableNetwork, false);
+  assert.equal(def.args.includes('sandbox_workspace_write.network_access=true'), false);
+
+  // Explicit opt-in with workspace-write enables network flag
+  const optIn = buildCodexArgs({
+    cwd: '/repo',
+    sandbox: 'workspace-write',
+    allowCodexNetwork: true,
+    model: 'gpt-5-codex',
+    reasoningEffort: 'xhigh',
+  });
+  assert.equal(optIn.safeSandbox, 'workspace-write');
+  assert.equal(optIn.enableNetwork, true);
+  const netIdx = optIn.args.indexOf('sandbox_workspace_write.network_access=true');
+  assert.ok(netIdx > 0 && optIn.args[netIdx - 1] === '-c');
+
+  // Resume also carries sandbox_mode and opt-in network flag
+  const resumed = buildCodexArgs({
+    cwd: '/repo',
+    sandbox: 'workspace-write',
+    allowCodexNetwork: true,
+    resumeThreadId: 'thr_abc123',
+  });
+  assert.equal(resumed.args[0], 'exec');
+  assert.equal(resumed.args[1], 'resume');
+  assert.equal(resumed.args[2], 'thr_abc123');
+  assert.equal(resumed.enableNetwork, true);
+  assert.ok(resumed.args.includes('sandbox_mode="workspace-write"'));
+  assert.ok(resumed.args.includes('sandbox_workspace_write.network_access=true'));
+
+  // read-only (e.g. Pre-CI review) MUST stay offline even when allowCodexNetwork is true
+  const ro = buildCodexArgs({
+    cwd: '/repo',
+    sandbox: 'read-only',
+    allowCodexNetwork: true,
+  });
+  assert.equal(ro.safeSandbox, 'read-only');
+  assert.equal(ro.enableNetwork, false);
+  assert.equal(ro.args.includes('sandbox_workspace_write.network_access=true'), false);
+
+  // Dangerous sandbox values are clamped to workspace-write
+  const clamped = buildCodexArgs({
+    cwd: '/repo',
+    sandbox: 'danger-full-access',
+    allowCodexNetwork: false,
+  });
+  assert.equal(clamped.safeSandbox, 'workspace-write');
+  assert.equal(clamped.enableNetwork, false);
+
+  // buildAgyArgs guards leading hyphen prompt
+  const agyArgs = buildAgyArgs({ prompt: '--dangerous-flag', model: 'gemini-4-neon-high', mode: 'plan' });
+  assert.ok(agyArgs.includes('--print= --dangerous-flag'));
+});
+
+test('Windows .cmd shim execution preserves special arguments and prevents cmd.exe shell injection', async (t) => {
+  const line = buildWindowsCmdLine('C:\\Program Files\\shim.cmd', ['hello "x & echo INJECTED"']);
+  assert.ok(line.startsWith('"') && line.endsWith('"'));
+  assert.ok(line.includes('^^^&'), 'cmd.exe metacharacters should be double caret-escaped');
+
+  if (process.platform !== 'win32') {
+    t.skip('Windows-only live .cmd execution check');
+    return;
+  }
+
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tenon-cmd-sec-'));
+  const jsPath = path.join(tmpDir, 'echo-argv.mjs');
+  const cmdPath = path.join(tmpDir, 'space shim.cmd');
+  const markerFile = path.join(tmpDir, 'should-not-exist.txt');
+
+  try {
+    await fs.writeFile(jsPath, 'console.log(JSON.stringify(process.argv.slice(2)));\n', 'utf8');
+    await fs.writeFile(cmdPath, `@echo off\r\n"${process.execPath}" "${jsPath}" %*\r\n`, 'utf8');
+
+    const argv = [
+      '--version',
+      'a & b',
+      `hello "x & echo PWNED > ${markerFile}"`,
+      '%USERNAME% | 中文 "引号" < >',
+    ];
+    const { stdout } = await execCliFile(cmdPath, argv, { timeout: 8000 });
+    const roundtripped = JSON.parse(stdout.trim());
+    assert.deepEqual(roundtripped, argv);
+
+    const markerExists = await fs.access(markerFile).then(() => true).catch(() => false);
+    assert.equal(markerExists, false, 'Shell redirection inside quoted arg must never execute');
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('RunStore recovers interrupted messages/traces on init, flushes atomically, and prevents SSE leaks', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tenon-store-test-'));
+  try {
+    const stuckRuns = [
+      {
+        id: 'run_stuck_1',
+        mode: 'agent-chat',
+        title: 'Crash recovery test',
+        workspaceDir: tmpDir,
+        status: 'running',
+        gate: { type: 'plan_approval', title: 'Pending' },
+        gemini: { status: 'running' },
+        codex: { status: 'running' },
+        messages: [
+          { id: 'u1', role: 'user', status: 'done', content: 'hi' },
+          {
+            id: 'a1',
+            role: 'assistant',
+            status: 'running',
+            liveStep: 'Executing tool...',
+            content: '',
+            trace: [
+              { id: 't1', kind: 'tool', title: 'Read file', status: 'done' },
+              { id: 't2', kind: 'tool', title: 'Run test', status: 'running' },
+            ],
+          },
+        ],
+        createdAt: '2026-11-24T00:00:00.000Z',
+        updatedAt: '2026-11-24T00:00:00.000Z',
+      },
+    ];
+    await fs.writeFile(path.join(tmpDir, 'runs.json'), JSON.stringify(stuckRuns, null, 2), 'utf8');
+
+    const store = new RunStore(tmpDir);
+    await store.init();
+
+    const recovered = store.get('run_stuck_1');
+    assert.ok(recovered);
+    assert.equal(recovered.status, 'interrupted');
+    assert.equal(recovered.gate, null);
+    assert.equal(recovered.gemini.status, 'interrupted');
+    assert.equal(recovered.codex.status, 'interrupted');
+    assert.ok(Array.isArray(recovered.events));
+    assert.equal(recovered.messages[1].status, 'interrupted');
+    assert.equal(recovered.messages[1].liveStep, null);
+    assert.ok(recovered.messages[1].error);
+    assert.equal(recovered.messages[1].trace[0].status, 'done');
+    assert.equal(recovered.messages[1].trace[1].status, 'error');
+
+    // Rapid concurrent mutations + serialized flush leave clean JSON and zero leftover .tmp files
+    for (let i = 0; i < 15; i += 1) {
+      store.update('run_stuck_1', (r) => {
+        r.title = `Batch title #${i}`;
+      });
+    }
+    await store.flush();
+
+    const files = await fs.readdir(tmpDir);
+    assert.equal(files.some((f) => f.endsWith('.tmp')), false, 'No orphaned .tmp files after flush');
+    const persisted = JSON.parse(await fs.readFile(path.join(tmpDir, 'runs.json'), 'utf8'));
+    assert.equal(persisted[0].title, 'Batch title #14');
+    assert.equal(persisted[0].status, 'interrupted');
+
+    // SSE subscriber cleanup & write-after-end safety
+    const makeFakeRes = () => {
+      const ee = new EventEmitter();
+      ee.writable = true;
+      ee.writableEnded = false;
+      ee.destroyed = false;
+      ee.closed = false;
+      ee.writes = [];
+      ee.write = (chunk) => {
+        if (ee.writableEnded || ee.destroyed) throw new Error('write after end');
+        ee.writes.push(chunk);
+        return true;
+      };
+      ee.end = () => {
+        ee.writableEnded = true;
+        ee.writable = false;
+        ee.emit('close');
+      };
+      return ee;
+    };
+
+    const runSub = makeFakeRes();
+    const globalSub = makeFakeRes();
+    store.subscribe('run_stuck_1', runSub);
+    store.subscribeGlobal(globalSub);
+    assert.equal(store.subscribers.get('run_stuck_1')?.size, 1);
+    assert.equal(store.globalSubscribers.size, 1);
+
+    // Emit when writable works, then remove() cleanly ends & detaches subscriber
+    store.emit('run_stuck_1', 'ping', { ok: true });
+    assert.equal(runSub.writes.length, 1);
+    store.remove('run_stuck_1');
+    assert.equal(runSub.writableEnded, true);
+    assert.equal(store.subscribers.has('run_stuck_1'), false);
+
+    // Emitting after stream ended never throws and prunes dead global subscriber
+    globalSub.writableEnded = true;
+    store.broadcastGlobal('run_updated', { id: 'x' });
+    assert.equal(store.globalSubscribers.size, 0);
+
+    store.dispose();
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('Orchestrator wires allowCodexNetwork, enforces cancelRun generation guards, and resolves gate aborts accurately', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tenon-orch-guard-'));
+  const store = new RunStore(tmpDir);
+  await store.init();
+  const orch = new Orchestrator(store);
+
+  try {
+    // Reject invalid mode with ValidationError (400)
+    await assert.rejects(
+      () => orch.startRun({ mode: 'invalid-mode', prompt: 'hello', workspaceDir: tmpDir }),
+      (err) => err instanceof ValidationError && err.statusCode === 400
+    );
+
+    // Seed an active run and test cancelRun() + generation invalidation
+    const runId = 'run_cancel_guard';
+    store.create({
+      id: runId,
+      mode: 'agent-chat',
+      title: 'Cancel test',
+      workspaceDir: tmpDir,
+      effectiveWorkDir: tmpDir,
+      isGitRepo: false,
+      status: 'running',
+      activeStage: 'chat',
+      config: { sandbox: 'workspace-write', allowCodexNetwork: true },
+      gate: null,
+      gemini: { status: 'idle' },
+      codex: { status: 'running', threadId: 'thr_live_1' },
+      metrics: { totalDurationMs: 0, geminiTokens: 0, codexTokens: 0 },
+      messages: [
+        {
+          id: 'asst_1',
+          role: 'assistant',
+          status: 'running',
+          liveStep: 'Running command',
+          trace: [{ id: 'cmd_1', kind: 'tool', title: 'git status', status: 'running' }],
+        },
+      ],
+      events: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const gen = orch.nextGeneration(runId);
+    let aborted = false;
+    assert.equal(orch.setActiveProcess(runId, { abort: () => { aborted = true; } }, gen), true);
+    assert.equal(orch.isExecutionActive(runId, gen), true);
+
+    assert.equal(orch.cancelRun(runId), true);
+    assert.equal(aborted, true);
+    assert.equal(orch.isExecutionActive(runId, gen), false);
+
+    // Late process registration with stale generation must be rejected and aborted immediately
+    let lateAborted = false;
+    assert.equal(orch.setActiveProcess(runId, { abort: () => { lateAborted = true; } }, gen), false);
+    assert.equal(lateAborted, true);
+
+    const afterCancel = store.get(runId);
+    assert.equal(afterCancel.status, 'cancelled');
+    assert.equal(afterCancel.codex.status, 'cancelled');
+    assert.equal(afterCancel.messages[0].status, 'cancelled');
+    assert.equal(afterCancel.messages[0].liveStep, null);
+    assert.equal(afterCancel.messages[0].trace[0].status, 'cancelled');
+    // Cancelling an already-terminal run returns false
+    assert.equal(orch.cancelRun(runId), false);
+
+    // resolveGate('abort') distinguishes plan_approval -> cancelled vs review_escalation -> blocked
+    const gatePlanId = 'run_gate_plan';
+    store.create({
+      id: gatePlanId,
+      mode: 'full-pipeline',
+      title: 'Gate plan abort',
+      workspaceDir: tmpDir,
+      status: 'running',
+      gate: null,
+      events: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const planGen = orch.nextGeneration(gatePlanId);
+    const planGatePromise = orch.waitForHumanGate(gatePlanId, { type: 'plan_approval', message: 'approve?' }, planGen);
+    assert.equal(store.get(gatePlanId).status, 'awaiting_approval');
+    assert.equal(orch.resolveGate(gatePlanId, { action: 'abort' }), true);
+    assert.deepEqual(await planGatePromise, { action: 'abort' });
+    assert.equal(store.get(gatePlanId).status, 'cancelled');
+    assert.equal(store.get(gatePlanId).gate, null);
+
+    const gateRevId = 'run_gate_rev';
+    store.create({
+      id: gateRevId,
+      mode: 'full-pipeline',
+      title: 'Gate review abort',
+      workspaceDir: tmpDir,
+      status: 'running',
+      gate: null,
+      events: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const revGen = orch.nextGeneration(gateRevId);
+    const revGatePromise = orch.waitForHumanGate(gateRevId, { type: 'review_escalation', message: 'blocked' }, revGen);
+    assert.equal(orch.resolveGate(gateRevId, { action: 'abort' }), true);
+    assert.deepEqual(await revGatePromise, { action: 'abort' });
+    assert.equal(store.get(gateRevId).status, 'blocked');
+    assert.equal(store.get(gateRevId).gate, null);
+  } finally {
+    store.dispose();
+    orch.shutdown();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('Server hardens media suffix ranges, non-object JSON bodies, gate action validation, and ProviderStore corruption backup', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tenon-hardening-'));
+  const tmpData = path.join(root, 'data');
+  const wsDir = path.join(root, 'workspace');
+  await Promise.all([fs.mkdir(tmpData, { recursive: true }), fs.mkdir(wsDir, { recursive: true })]);
+
+  // Pre-seed a corrupt providers.json to verify backup preservation on init()
+  await fs.writeFile(path.join(tmpData, 'providers.json'), '{not-valid-json', 'utf8');
+  const pStore = new ProviderStore(tmpData);
+  await pStore.init();
+  const dataFiles = await fs.readdir(tmpData);
+  assert.ok(dataFiles.some((f) => f.startsWith('providers.json.corrupt.') && f.endsWith('.bak')));
+
+  // Short secrets <= 4 chars must be completely masked
+  assert.equal(maskSecret('ab'), '••••');
+  assert.equal(maskSecret('1234'), '••••');
+
+  // Anthropic message_start usage parsing
+  const anthStart = parseAnthropicSseChunk(JSON.stringify({
+    type: 'message_start',
+    message: { usage: { input_tokens: 42 } },
+  }));
+  assert.equal(anthStart.usage?.input_tokens, 42);
+
+  // Create a dummy PNG file inside wsDir for range & header checks
+  const mediaBytes = Buffer.from('0123456789ABCDEF');
+  await fs.writeFile(path.join(wsDir, 'sample.png'), mediaBytes);
+
+  const { server, store } = await createWorkbenchServer({ dataDir: tmpData, defaultWorkspace: wsDir });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // Non-object JSON body -> 400
+    const arrRes = await fetch(`${base}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '["not-an-object"]',
+    });
+    assert.equal(arrRes.status, 400);
+
+    // Invalid gate action -> 400
+    store.create({
+      id: 'run_gate_val',
+      mode: 'full-pipeline',
+      title: 'Gate action check',
+      workspaceDir: wsDir,
+      status: 'awaiting_approval',
+      events: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const badGate = await fetch(`${base}/api/runs/run_gate_val/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'drop_table' }),
+    });
+    assert.equal(badGate.status, 400);
+
+    // Media null byte -> 400, traversal -> 403
+    const nullMedia = await fetch(`${base}/api/workspace/media?dir=${encodeURIComponent(wsDir)}&file=sample.png%00.jpg`);
+    assert.equal(nullMedia.status, 400);
+    const escMedia = await fetch(`${base}/api/workspace/media?dir=${encodeURIComponent(wsDir)}&file=../outside.png`);
+    assert.equal(escMedia.status, 403);
+
+    // Media invalid range bytes=- -> 416
+    const badRange = await fetch(`${base}/api/workspace/media?dir=${encodeURIComponent(wsDir)}&file=sample.png`, {
+      headers: { Range: 'bytes=-' },
+    });
+    assert.equal(badRange.status, 416);
+
+    // RFC 9110 suffix range bytes=-4 -> 206 with last 4 bytes and nosniff
+    const suffixRange = await fetch(`${base}/api/workspace/media?dir=${encodeURIComponent(wsDir)}&file=sample.png`, {
+      headers: { Range: 'bytes=-4' },
+    });
+    assert.equal(suffixRange.status, 206);
+    assert.equal(suffixRange.headers.get('content-range'), 'bytes 12-15/16');
+    assert.equal(suffixRange.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(await suffixRange.text(), 'CDEF');
+
+    // Verify allowCodexNetwork plumbing through POST /api/runs and POST /api/runs/:id/message without spawning external CLIs
+    const mockLlm = http.createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'ok' } }] })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+    await new Promise((resolve) => mockLlm.listen(0, '127.0.0.1', resolve));
+    try {
+      const pRes = await fetch(`${base}/api/providers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Mock Net Flag Provider',
+          kind: 'api',
+          protocol: 'openai-compatible',
+          baseUrl: `http://127.0.0.1:${mockLlm.address().port}/v1`,
+          apiKey: 'sk-test-1234',
+          defaultModel: 'mock-1',
+          enabled: true,
+        }),
+      });
+      const { provider } = await pRes.json();
+
+      const netRunRes = await fetch(`${base}/api/runs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'agent-chat',
+          prompt: 'turn 1',
+          workspaceDir: wsDir,
+          geminiModel: `provider:${provider.id}:mock-1`,
+          allowCodexNetwork: true,
+        }),
+      });
+      assert.equal(netRunRes.status, 201);
+      const { run: createdNet } = await netRunRes.json();
+      assert.equal(createdNet.config.allowCodexNetwork, true);
+
+      // Wait for turn 1 to finish before continuing chat with allowCodexNetwork: false
+      for (let i = 0; i < 40; i += 1) {
+        const latest = await (await fetch(`${base}/api/runs/${createdNet.id}`)).json();
+        if (latest.run.status === 'completed' || latest.run.status === 'failed') break;
+        await new Promise((r) => setTimeout(r, 30));
+      }
+
+      const contRes = await fetch(`${base}/api/runs/${createdNet.id}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'turn 2',
+          geminiModel: `provider:${provider.id}:mock-1`,
+          allowCodexNetwork: false,
+        }),
+      });
+      assert.equal(contRes.status, 200);
+      const { run: updatedNet } = await contRes.json();
+      assert.equal(updatedNet.config.allowCodexNetwork, false);
+
+      for (let i = 0; i < 40; i += 1) {
+        const latest = await (await fetch(`${base}/api/runs/${createdNet.id}`)).json();
+        if (latest.run.status === 'completed' || latest.run.status === 'failed') break;
+        await new Promise((r) => setTimeout(r, 30));
+      }
+      await fetch(`${base}/api/runs/${createdNet.id}`, { method: 'DELETE' });
+    } finally {
+      await new Promise((resolve) => mockLlm.close(resolve));
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('workspace helpers handle Chinese/space filenames, unborn repos, and guarded worktree removal', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tenon-ws-edge-'));
+  const repoDir = path.join(root, '中文 工程目录');
+  try {
+    await fs.mkdir(repoDir, { recursive: true });
+    await execFileAsync('git', ['init', '-b', 'main'], { cwd: repoDir, windowsHide: true });
+
+    // Unborn repo (no commits yet) must cleanly refuse managed worktree creation
+    const wtUnborn = await createManagedWorktree(repoDir, 'unborn_1');
+    assert.equal(wtUnborn.ok, false);
+    assert.match(wtUnborn.error || '', /首次提交/);
+
+    // Untracked Chinese/space file & binary file in unborn repo
+    await fs.writeFile(path.join(repoDir, '设计 说明.md'), '# 测试\n', 'utf8');
+    await fs.writeFile(path.join(repoDir, 'blob.bin'), Buffer.from([0x00, 0x01, 0x02, 0x03]));
+
+    const info = await inspectWorkspace(repoDir);
+    assert.equal(info.ok, true);
+    assert.equal(info.isGitRepo, true);
+    assert.ok(info.changedFiles.some((f) => f.file === '设计 说明.md'));
+
+    const diffInfo = await getWorkspaceDiff(repoDir);
+    assert.equal(diffInfo.ok, true);
+    assert.match(diffInfo.diff, /设计 说明\.md/);
+    assert.doesNotMatch(diffInfo.diff, /blob\.bin/, 'Binary NUL files should be skipped in untracked diffs');
+
+    // removeManagedWorktree refuses unmanaged directories outside os.tmpdir()/conduit-wt-*
+    const refused = await removeManagedWorktree(repoDir, repoDir);
+    assert.equal(refused.ok, false);
+  } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
 });

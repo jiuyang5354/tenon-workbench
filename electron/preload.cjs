@@ -2,6 +2,8 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
+const VALID_SURFACES = new Set(['weave', 'paper', 'charcoal']);
+
 contextBridge.exposeInMainWorld('TenonDesktop', {
   isDesktopApp: true,
   platform: process.platform,
@@ -13,7 +15,8 @@ contextBridge.exposeInMainWorld('TenonDesktop', {
   },
   setTitleBarTheme: (surface) => {
     try {
-      ipcRenderer.send('tenon:titlebar-theme', String(surface || 'weave'));
+      const clean = VALID_SURFACES.has(surface) ? surface : 'weave';
+      ipcRenderer.send('tenon:titlebar-theme', clean);
     } catch {
       // Ignore IPC errors during shutdown
     }

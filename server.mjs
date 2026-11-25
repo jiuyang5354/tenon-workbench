@@ -1,6 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -28,11 +29,47 @@ import { Orchestrator, ValidationError } from './lib/orchestrator.mjs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const IS_PACKAGED_ASAR = /(?:^|[\\/])app\.asar(?:$|[\\/])/i.test(__dirname);
+const UNPACKED_ROOT = IS_PACKAGED_ASAR
+  ? __dirname.replace(/([\\/])app\.asar($|[\\/])/i, '$1app.asar.unpacked$2')
+  : __dirname;
+
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const PUBLIC_PREFIX = `${PUBLIC_DIR}${path.sep}`;
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = IS_PACKAGED_ASAR
+  ? path.join(os.tmpdir(), 'tenon-workbench-data')
+  : path.join(__dirname, 'data');
 const TEMPLATES_DIR = path.join(__dirname, 'templates');
+const UNPACKED_TEMPLATES_DIR = path.join(UNPACKED_ROOT, 'templates');
 const SCRIPTS_DIR = path.join(__dirname, 'scripts');
+const UNPACKED_SCRIPTS_DIR = path.join(UNPACKED_ROOT, 'scripts');
+
+const VALID_GATE_ACTIONS = new Set(['approve', 'replan', 'override', 'abort', 'cancel']);
+
+function normalizeFsPath(p) {
+  const resolved = path.resolve(String(p || ''));
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function isPathWithin(baseDir, candidate, { allowEqual = false } = {}) {
+  const baseNorm = normalizeFsPath(baseDir);
+  const candNorm = normalizeFsPath(candidate);
+  if (candNorm === baseNorm) return allowEqual;
+  const prefix = baseNorm.endsWith(path.sep) ? baseNorm : `${baseNorm}${path.sep}`;
+  return candNorm.startsWith(prefix);
+}
+
+function withSoftTimeout(promise, ms, fallbackValue) {
+  let timer = null;
+  return Promise.race([
+    promise.finally(() => {
+      if (timer) clearTimeout(timer);
+    }),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(fallbackValue), ms);
+      if (typeof timer.unref === 'function') timer.unref();
+    }),
+  ]);
+}
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -67,86 +104,145 @@ const SAFE_MEDIA_EXTS = new Set([
   '.mov',
 ]);
 
+function pipeFileStreamSafely(res, filePath, streamOpts = undefined) {
+  const stream = createReadStream(filePath, streamOpts);
+  const cleanup = () => {
+    if (!stream.destroyed) stream.destroy();
+  };
+  stream.on('error', () => {
+    if (!res.headersSent) {
+      sendJson(res, 500, { error: '读取媒体文件失败' });
+    } else if (!res.writableEnded) {
+      res.destroy();
+    }
+  });
+  res.on('close', cleanup);
+  res.on('error', cleanup);
+  stream.pipe(res);
+}
+
 async function serveWorkspaceMedia(req, res, workspaceDir, relFile) {
   if (!workspaceDir || !relFile) {
     return sendJson(res, 400, { error: '缺少 dir 或 file 参数' });
   }
+  if (String(workspaceDir).includes('\0') || String(relFile).includes('\0')) {
+    return sendJson(res, 400, { error: '文件路径包含非法空字节' });
+  }
+
   const base = path.resolve(workspaceDir);
   const candidate = path.isAbsolute(relFile) ? path.resolve(relFile) : path.resolve(base, relFile);
-  const baseNorm = process.platform === 'win32' ? base.toLowerCase() : base;
-  const candNorm = process.platform === 'win32' ? candidate.toLowerCase() : candidate;
-  const prefix = baseNorm.endsWith(path.sep) ? baseNorm : `${baseNorm}${path.sep}`;
-  if (candNorm !== baseNorm && !candNorm.startsWith(prefix)) {
+  if (!isPathWithin(base, candidate, { allowEqual: false })) {
     return sendJson(res, 403, { error: '拒绝访问工作区目录之外的媒体文件' });
   }
   const ext = path.extname(candidate).toLowerCase();
   if (!SAFE_MEDIA_EXTS.has(ext)) {
     return sendJson(res, 403, { error: '仅允许预览图片或视频媒体文件' });
   }
+
+  let realBase;
+  let realCandidate;
   let stat;
   try {
-    stat = await fs.stat(candidate);
+    [realBase, realCandidate] = await Promise.all([fs.realpath(base), fs.realpath(candidate)]);
+    stat = await fs.stat(realCandidate);
     if (!stat.isFile()) return sendJson(res, 404, { error: '媒体文件不存在' });
   } catch {
     return sendJson(res, 404, { error: '媒体文件不存在' });
   }
 
+  // Enforce symlink/junction realpath containment inside workspace
+  if (!isPathWithin(realBase, realCandidate, { allowEqual: false })) {
+    return sendJson(res, 403, { error: '拒绝通过符号链接访问工作区之外的媒体文件' });
+  }
+
   const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+  const baseHeaders = {
+    'Content-Type': contentType,
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+  };
+  if (ext === '.svg') {
+    baseHeaders['Content-Security-Policy'] = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+  }
+
   const total = stat.size;
   const range = req.headers.range;
   if (range) {
-    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-    if (!match) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(String(range).trim());
+    if (!match || (!match[1] && !match[2]) || total === 0) {
       res.writeHead(416, { 'Content-Range': `bytes */${total}` });
       res.end();
       return;
     }
-    const start = match[1] ? Number(match[1]) : 0;
-    const end = match[2] ? Math.min(Number(match[2]), total - 1) : total - 1;
-    if (start > end || start >= total) {
+
+    let start;
+    let end;
+    if (!match[1]) {
+      // RFC 9110 suffix-byte-range: bytes=-N
+      const suffix = Number(match[2]);
+      if (!Number.isFinite(suffix) || suffix <= 0) {
+        res.writeHead(416, { 'Content-Range': `bytes */${total}` });
+        res.end();
+        return;
+      }
+      start = Math.max(0, total - suffix);
+      end = total - 1;
+    } else {
+      start = Number(match[1]);
+      end = match[2] ? Math.min(Number(match[2]), total - 1) : total - 1;
+    }
+
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > end || start >= total) {
       res.writeHead(416, { 'Content-Range': `bytes */${total}` });
       res.end();
       return;
     }
     res.writeHead(206, {
-      'Content-Type': contentType,
+      ...baseHeaders,
       'Content-Range': `bytes ${start}-${end}/${total}`,
-      'Accept-Ranges': 'bytes',
       'Content-Length': end - start + 1,
-      'Cache-Control': 'no-store',
     });
-    createReadStream(candidate, { start, end }).pipe(res);
+    pipeFileStreamSafely(res, realCandidate, { start, end });
     return;
   }
 
   res.writeHead(200, {
-    'Content-Type': contentType,
-    'Accept-Ranges': 'bytes',
+    ...baseHeaders,
     'Content-Length': total,
-    'Cache-Control': 'no-store',
   });
-  createReadStream(candidate).pipe(res);
+  pipeFileStreamSafely(res, realCandidate);
 }
 
 function sendJson(res, status, data) {
+  if (res.headersSent) {
+    if (!res.writableEnded) res.end();
+    return;
+  }
   const body = JSON.stringify(data);
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
   });
   res.end(body);
 }
 
 /**
- * Guards state-mutating POST endpoints against cross-site browser CSRF requests.
+ * Guards state-mutating POST/PATCH/DELETE endpoints against cross-site browser CSRF requests.
  */
 function verifyLocalPostSecurity(req) {
   const origin = req.headers.origin;
   if (origin) {
     try {
       const parsed = new URL(origin);
-      const isLocal = parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost' || parsed.hostname === '[::1]';
-      if (!isLocal) {
+      const isHttpScheme = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+      const isLocal =
+        parsed.hostname === '127.0.0.1' ||
+        parsed.hostname === 'localhost' ||
+        parsed.hostname === '[::1]' ||
+        parsed.hostname === '::1';
+      if (!isHttpScheme || !isLocal) {
         const err = new ValidationError('拒绝跨站来源请求 (Origin mismatch)');
         err.statusCode = 403;
         throw err;
@@ -167,7 +263,10 @@ function verifyLocalPostSecurity(req) {
   }
 
   const ct = String(req.headers['content-type'] || '').toLowerCase();
-  if (req.headers['content-length'] && req.headers['content-length'] !== '0' && !ct.includes('application/json')) {
+  const hasBody =
+    (req.headers['content-length'] && req.headers['content-length'] !== '0') ||
+    Boolean(req.headers['transfer-encoding']);
+  if (hasBody && !ct.includes('application/json')) {
     const err = new ValidationError('POST 请求必须使用 Content-Type: application/json');
     err.statusCode = 415;
     throw err;
@@ -196,7 +295,11 @@ async function readJsonBody(req, maxBytes = 1024 * 1024) {
       if (rejected) return;
       if (chunks.length === 0) return resolve({});
       try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          return reject(new ValidationError('请求体必须是 JSON 对象'));
+        }
+        resolve(parsed);
       } catch {
         reject(new ValidationError('请求体 JSON 格式错误'));
       }
@@ -208,9 +311,14 @@ async function readJsonBody(req, maxBytes = 1024 * 1024) {
 }
 
 async function serveStatic(res, reqPath) {
+  if (String(reqPath || '').includes('\0')) {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Bad Request');
+    return;
+  }
   const cleanPath = reqPath === '/' ? '/index.html' : reqPath;
   const resolved = path.resolve(PUBLIC_DIR, `.${cleanPath}`);
-  if (resolved !== PUBLIC_DIR && !resolved.startsWith(PUBLIC_PREFIX)) {
+  if (!isPathWithin(PUBLIC_DIR, resolved, { allowEqual: true })) {
     res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Forbidden');
     return;
@@ -221,6 +329,7 @@ async function serveStatic(res, reqPath) {
     res.writeHead(200, {
       'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
       'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
     });
     res.end(content);
   } catch {
@@ -229,10 +338,24 @@ async function serveStatic(res, reqPath) {
   }
 }
 
+async function readFirstExistingText(candidates = []) {
+  for (const filePath of candidates) {
+    if (!filePath) continue;
+    try {
+      return await fs.readFile(filePath, 'utf8');
+    } catch {
+      // Try next fallback location
+    }
+  }
+  return '';
+}
+
 export async function createWorkbenchServer(options = {}) {
   const dataDir = options.dataDir || DATA_DIR;
-  const writableTemplatesDir = options.templatesDir || TEMPLATES_DIR;
-  const defaultWorkspaceDir = options.defaultWorkspace || path.resolve(__dirname, '..');
+  const writableTemplatesDir =
+    options.templatesDir || (IS_PACKAGED_ASAR ? path.join(dataDir, 'templates') : TEMPLATES_DIR);
+  const defaultWorkspaceDir =
+    options.defaultWorkspace || (IS_PACKAGED_ASAR ? os.homedir() : path.resolve(__dirname, '..'));
   const store = new RunStore(dataDir);
   await store.init();
   const providerStore = new ProviderStore(dataDir);
@@ -244,6 +367,7 @@ export async function createWorkbenchServer(options = {}) {
     runtime: options.runtime || (process.versions?.electron ? 'electron' : 'node-web'),
     repo: options.updateRepo,
     apiBase: options.updateApiBase,
+    downloadDir: options.updateDownloadDir || options.downloadDir,
     fetchImpl: options.updateFetchImpl,
     onRequestQuit: options.onRequestQuit,
   });
@@ -252,23 +376,73 @@ export async function createWorkbenchServer(options = {}) {
   const onPickDirectory = typeof options.onPickDirectory === 'function' ? options.onPickDirectory : null;
 
   let discoveryCache = { at: 0, data: null };
+  let discoveryInFlight = null;
   const getDiscoveredWorkspaces = async (force = false) => {
     const now = Date.now();
     if (!force && discoveryCache.data && now - discoveryCache.at < 20_000) {
       return discoveryCache.data;
+    }
+    if (!force && discoveryInFlight) {
+      return discoveryInFlight;
     }
     const recentRunDirs = store
       .list()
       .slice(0, 12)
       .map((r) => ({ path: r.workspaceDir, timestamp: r.updatedAt || r.createdAt }))
       .filter((r) => r.path);
-    const data = await discoverWorkspaces({
-      scanRoots: [__dirname, path.resolve(__dirname, '..'), defaultWorkspaceDir],
+    const defaultScanRoots = IS_PACKAGED_ASAR
+      ? [defaultWorkspaceDir]
+      : [__dirname, path.resolve(__dirname, '..'), defaultWorkspaceDir];
+
+    const task = discoverWorkspaces({
+      scanRoots: defaultScanRoots,
       recentRunDirs,
       ...(options.workspaceDiscoveryOptions || {}),
+    }).then((data) => {
+      discoveryCache = { at: Date.now(), data };
+      return data;
     });
-    discoveryCache = { at: Date.now(), data };
-    return data;
+
+    discoveryInFlight = task;
+    try {
+      return await task;
+    } finally {
+      if (discoveryInFlight === task) discoveryInFlight = null;
+    }
+  };
+
+  let healthCache = { at: 0, data: null };
+  let healthInFlight = null;
+  const getEnvironmentHealth = async (force = false) => {
+    const now = Date.now();
+    if (!force && healthCache.data && now - healthCache.at < 15_000) {
+      return healthCache.data;
+    }
+    if (!force && healthInFlight) {
+      return healthInFlight;
+    }
+    const task = checkEnvironmentHealth()
+      .then((data) => {
+        healthCache = { at: Date.now(), data };
+        return data;
+      })
+      .catch((err) => ({
+        timestamp: new Date().toISOString(),
+        platform: process.platform,
+        nodeVersion: process.version,
+        agy: { installed: false, path: null, status: 'ERROR' },
+        codex: { installed: false, version: null, path: null, status: 'ERROR', config: null },
+        git: { installed: false, version: null, path: null },
+        gh: { installed: false, version: null, path: null },
+        probeError: err?.message || 'environment health check failed',
+      }));
+
+    healthInFlight = task;
+    try {
+      return await task;
+    } finally {
+      if (healthInFlight === task) healthInFlight = null;
+    }
   };
 
   const server = http.createServer(async (req, res) => {
@@ -289,9 +463,15 @@ export async function createWorkbenchServer(options = {}) {
 
       // --- API Routes ---
       if (pathname === '/api/health' && method === 'GET') {
+        const forceRefresh = url.searchParams.get('refresh') === '1';
+        const fallbackDiscovery = { recommended: null, summary: null };
         const [health, discovery] = await Promise.all([
-          checkEnvironmentHealth(),
-          getDiscoveredWorkspaces(false).catch(() => ({ recommended: null, summary: null })),
+          getEnvironmentHealth(forceRefresh),
+          withSoftTimeout(
+            getDiscoveredWorkspaces(forceRefresh).catch(() => fallbackDiscovery),
+            6000,
+            discoveryCache.data || fallbackDiscovery
+          ),
         ]);
         return sendJson(res, 200, {
           ...health,
@@ -303,7 +483,7 @@ export async function createWorkbenchServer(options = {}) {
           capabilities: {
             nativeFolderPicker: Boolean(onPickDirectory),
           },
-          workbenchDir: __dirname,
+          workbenchDir: UNPACKED_ROOT,
         });
       }
 
@@ -385,7 +565,7 @@ export async function createWorkbenchServer(options = {}) {
         if (!provider.enabled) return sendJson(res, 400, { error: `接入「${provider.name}」当前未启用` });
         const prompt = String(body.prompt || '').trim();
         if (!prompt) throw new ValidationError('请输入要执行的任务需求');
-        const cwd = body.cwd ? path.resolve(String(body.cwd)) : __dirname;
+        const cwd = body.cwd ? path.resolve(String(body.cwd)) : defaultWorkspaceDir;
         const model = String(body.model || provider.defaultModel || '').trim();
         const result = await runProvider(provider, {
           prompt,
@@ -433,7 +613,7 @@ export async function createWorkbenchServer(options = {}) {
           );
           return sendJson(res, 200, {
             result,
-            provider: providerStore.toPublic(updated),
+            provider: updated ? providerStore.toPublic(updated) : null,
             providers: providerStore.listPublic(),
           });
         }
@@ -472,19 +652,19 @@ export async function createWorkbenchServer(options = {}) {
       }
 
       if (pathname === '/api/workspace/inspect' && method === 'GET') {
-        const dir = url.searchParams.get('dir') || __dirname;
+        const dir = url.searchParams.get('dir') || defaultWorkspaceDir;
         const info = await inspectWorkspace(dir);
         return sendJson(res, info.ok ? 200 : 400, info);
       }
 
       if (pathname === '/api/workspace/diff' && method === 'GET') {
-        const dir = url.searchParams.get('dir') || __dirname;
+        const dir = url.searchParams.get('dir') || defaultWorkspaceDir;
         const info = await getWorkspaceDiff(dir);
         return sendJson(res, 200, info);
       }
 
       if (pathname === '/api/workspace/media' && method === 'GET') {
-        const dir = url.searchParams.get('dir') || __dirname;
+        const dir = url.searchParams.get('dir') || defaultWorkspaceDir;
         const file = url.searchParams.get('file') || '';
         return await serveWorkspaceMedia(req, res, dir, file);
       }
@@ -506,20 +686,34 @@ export async function createWorkbenchServer(options = {}) {
           'Content-Type': 'text/event-stream; charset=utf-8',
           'Cache-Control': 'no-cache, no-transform',
           Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
         });
+        if (typeof res.flushHeaders === 'function') res.flushHeaders();
         res.write(`event: connected\ndata: ${JSON.stringify({ ok: true })}\n\n`);
         store.subscribeGlobal(res);
-        const hb = setInterval(() => {
+        let cleaned = false;
+        let hb = null;
+        const cleanup = () => {
+          if (cleaned) return;
+          cleaned = true;
+          if (hb) clearInterval(hb);
+          store.unsubscribeGlobal(res);
+        };
+        hb = setInterval(() => {
+          if (res.writableEnded || res.destroyed || res.closed) {
+            cleanup();
+            return;
+          }
           try {
             res.write(': heartbeat\n\n');
           } catch {
-            clearInterval(hb);
+            cleanup();
           }
         }, 20_000);
-        req.on('close', () => {
-          clearInterval(hb);
-          store.unsubscribeGlobal(res);
-        });
+        if (typeof hb.unref === 'function') hb.unref();
+        req.on('close', cleanup);
+        res.on('close', cleanup);
+        res.on('error', cleanup);
         return;
       }
 
@@ -548,7 +742,7 @@ export async function createWorkbenchServer(options = {}) {
         }
 
         if (!sub && method === 'DELETE') {
-          orchestrator.cancelRun(runId);
+          orchestrator.cleanupRun(runId);
           store.remove(runId);
           return sendJson(res, 200, { ok: true, id: runId });
         }
@@ -558,20 +752,34 @@ export async function createWorkbenchServer(options = {}) {
             'Content-Type': 'text/event-stream; charset=utf-8',
             'Cache-Control': 'no-cache, no-transform',
             Connection: 'keep-alive',
+            'X-Accel-Buffering': 'no',
           });
+          if (typeof res.flushHeaders === 'function') res.flushHeaders();
           res.write(`event: state\ndata: ${JSON.stringify(run)}\n\n`);
           store.subscribe(runId, res);
-          const hb = setInterval(() => {
+          let cleaned = false;
+          let hb = null;
+          const cleanup = () => {
+            if (cleaned) return;
+            cleaned = true;
+            if (hb) clearInterval(hb);
+            store.unsubscribe(runId, res);
+          };
+          hb = setInterval(() => {
+            if (res.writableEnded || res.destroyed || res.closed) {
+              cleanup();
+              return;
+            }
             try {
               res.write(': heartbeat\n\n');
             } catch {
-              clearInterval(hb);
+              cleanup();
             }
           }, 15_000);
-          req.on('close', () => {
-            clearInterval(hb);
-            store.unsubscribe(runId, res);
-          });
+          if (typeof hb.unref === 'function') hb.unref();
+          req.on('close', cleanup);
+          res.on('close', cleanup);
+          res.on('error', cleanup);
           return;
         }
 
@@ -583,8 +791,12 @@ export async function createWorkbenchServer(options = {}) {
 
         if (sub === 'approve' && method === 'POST') {
           const body = await readJsonBody(req);
+          const action = String(body.action || 'approve').trim();
+          if (!VALID_GATE_ACTIONS.has(action)) {
+            throw new ValidationError(`不支持的闸门决策操作：${action}`);
+          }
           const ok = orchestrator.resolveGate(runId, {
-            action: body.action || 'approve',
+            action,
             spec: body.spec || '',
             feedback: body.feedback || '',
           });
@@ -604,17 +816,23 @@ export async function createWorkbenchServer(options = {}) {
       }
 
       if (pathname === '/api/assets' && method === 'GET') {
-        const readTemplate = async (name) => {
-          const override = await fs.readFile(path.join(writableTemplatesDir, name), 'utf8').catch(() => '');
-          if (override) return override;
-          return fs.readFile(path.join(TEMPLATES_DIR, name), 'utf8').catch(() => '');
-        };
+        const readTemplate = (name) =>
+          readFirstExistingText([
+            path.join(writableTemplatesDir, name),
+            UNPACKED_TEMPLATES_DIR !== TEMPLATES_DIR ? path.join(UNPACKED_TEMPLATES_DIR, name) : null,
+            path.join(TEMPLATES_DIR, name),
+          ]);
+        const readScript = (name) =>
+          readFirstExistingText([
+            UNPACKED_SCRIPTS_DIR !== SCRIPTS_DIR ? path.join(UNPACKED_SCRIPTS_DIR, name) : null,
+            path.join(SCRIPTS_DIR, name),
+          ]);
         const [geminiMd, codexMd, geminiAskJs, codexWorkerJs, codexReviewJs] = await Promise.all([
           readTemplate('GEMINI.md'),
           readTemplate('CODEX.md'),
-          fs.readFile(path.join(SCRIPTS_DIR, 'gemini-ask.mjs'), 'utf8').catch(() => ''),
-          fs.readFile(path.join(SCRIPTS_DIR, 'codex-worker.mjs'), 'utf8').catch(() => ''),
-          fs.readFile(path.join(SCRIPTS_DIR, 'codex-review.mjs'), 'utf8').catch(() => ''),
+          readScript('gemini-ask.mjs'),
+          readScript('codex-worker.mjs'),
+          readScript('codex-review.mjs'),
         ]);
         return sendJson(res, 200, {
           templates: {
@@ -626,7 +844,7 @@ export async function createWorkbenchServer(options = {}) {
             'scripts/codex-worker.mjs': codexWorkerJs,
             'scripts/codex-review.mjs': codexReviewJs,
           },
-          workbenchDir: __dirname,
+          workbenchDir: UNPACKED_ROOT,
         });
       }
 
@@ -658,15 +876,20 @@ export async function createWorkbenchServer(options = {}) {
 }
 
 // Start standalone when run directly
-const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename);
+const isDirectRun = Boolean(
+  process.argv[1] && normalizeFsPath(process.argv[1]) === normalizeFsPath(__filename)
+);
 if (isDirectRun) {
   const PORT = Number(process.env.PORT) || 4177;
   const HOST = process.env.HOST || '127.0.0.1';
-  const { server, orchestrator } = await createWorkbenchServer();
+  const { server, store, orchestrator } = await createWorkbenchServer();
 
   const gracefulExit = () => {
     orchestrator.shutdown();
-    server.close(() => process.exit(0));
+    store.closeAllStreams();
+    void store.flush().finally(() => {
+      server.close(() => process.exit(0));
+    });
     setTimeout(() => process.exit(0), 2000).unref();
   };
   process.on('SIGINT', gracefulExit);

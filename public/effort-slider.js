@@ -389,6 +389,11 @@
     }
 
     function resizeCanvases() {
+      if (state.destroyed) return;
+      if (!trackEl.isConnected) {
+        api.destroy();
+        return;
+      }
       const rect = trackEl.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
       const userScale = Number(document.documentElement.dataset.canvasScale || 2);
@@ -543,6 +548,10 @@
     function step(ts) {
       if (state.destroyed) return;
       rafId = 0;
+      if (!trackEl.isConnected) {
+        api.destroy();
+        return;
+      }
       const delta = lastTs ? Math.min((ts - lastTs) / 1000, 0.05) : 0.016;
       lastTs = ts;
       const reduced = prefersReducedMotion();

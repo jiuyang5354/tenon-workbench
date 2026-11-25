@@ -71,6 +71,7 @@
     updateInfo: null,
     updateChecking: false,
     updatePollTimer: null,
+    updatePollInFlight: false,
     autoCheckUpdates: (() => {
       try { return localStorage.getItem('tenon_auto_check_updates') !== '0'; } catch { return true; }
     })(),
@@ -83,6 +84,7 @@
     discoveredSummary: null,
     wsDiscoverFilter: 'all',
     wsDiscovering: false,
+    wsDiscoverError: '',
     activeAsset: 'GEMINI.md',
     stageView: 'chat',
     lastWorkView: 'chat',
@@ -97,6 +99,8 @@
     currentRun: null,
     activeStream: null,
     globalStream: null,
+    globalStreamReconnectTimer: null,
+    openRunSeq: 0,
     resumeThreadId: '',
     stickyBottom: true,
     gateDirtyText: null,
@@ -131,6 +135,7 @@
   let workspacePanels = null;
   let canvasFittedOnce = false;
   let paletteBlurTimer = null;
+  let reclampPanesFn = () => {};
   const el = (id) => document.getElementById(id);
 
   function loadTweaks() {
@@ -442,10 +447,15 @@
      Zero-dependency native SVG port adapted for Gemini x Codex Orchestration
      ========================================================================= */
   function initInkOrbitDiagrams() {
+    const flowMount = el('inkFlowSvgMount');
+    const hubMountEarly = el('inkHubSvgMount');
+    const chartMountEarly = el('inkChartSvgMount');
+    if (!flowMount && !hubMountEarly && !chartMountEarly) {
+      return { sync: () => {} };
+    }
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     // 1. Live Flow Diagram (Gemini Orchestrator Cluster -> CONDUIT Hub -> Codex Report Stack)
-    const flowMount = el('inkFlowSvgMount');
     let reportCount = Math.max(12, appState.runs.length || 0);
     let flowSide = '';
 
@@ -611,7 +621,7 @@
           const act = hubTools[idx].action;
           if (act === 'diff') openInspector('diff');
           else if (act === 'review') openInspector('review');
-          else { closeAllPopovers('envPopover'); el('envPopover').classList.remove('hidden'); }
+          else { closeAllPopovers(); switchStageView('settings', 'env'); }
         });
       });
     }
@@ -1295,8 +1305,17 @@
   /* =========================================================================
      21st.dev Chat Sidebar (#46401): Grouped Thread List + Pin/Rename/Delete
      ========================================================================= */
+  function closeActiveStream() {
+    if (appState.activeStream) {
+      try { appState.activeStream.close(); } catch {}
+      appState.activeStream = null;
+    }
+  }
+
   async function openRunById(id) {
+    const reqSeq = ++appState.openRunSeq;
     if (appState.localRuns.has(id)) {
+      closeActiveStream();
       const localRun = appState.localRuns.get(id);
       closeMobileDrawers();
       switchStageView('chat');
@@ -1307,11 +1326,13 @@
     }
     try {
       const { run } = await api(`/api/runs/${encodeURIComponent(id)}`);
+      if (reqSeq !== appState.openRunSeq) return;
       closeMobileDrawers();
       switchStageView('chat');
       if (run.mode === 'agent-chat') setModeValue('agent-chat');
       attachToRun(run);
     } catch (err) {
+      if (reqSeq !== appState.openRunSeq) return;
       showToast(`载入会话失败: ${err.message}`);
     }
   }
@@ -1422,6 +1443,9 @@
             }
           } else if (act === 'delete') {
             local.mediaJob?._cancel?.();
+            if (local.mediaJob?.src && String(local.mediaJob.src).startsWith('blob:')) {
+              try { URL.revokeObjectURL(local.mediaJob.src); } catch {}
+            }
             appState.localRuns.delete(id);
             appState.runs = appState.runs.filter((x) => x.id !== id);
             if (appState.currentRun?.id === id) resetToNewChat();
@@ -1468,17 +1492,15 @@
      Codex-Style Chronological Thread Renderer (Conversation + Tool Calls)
      ========================================================================= */
   function resetToNewChat() {
-    if (appState.activeStream) {
-      appState.activeStream.close();
-      appState.activeStream = null;
-    }
+    appState.openRunSeq += 1;
+    closeActiveStream();
     appState.currentRun = null;
     appState.gateDirtyText = null;
     el('welcomeStage').classList.remove('hidden');
     el('threadMessages').classList.add('hidden');
     el('threadMessages').innerHTML = '';
     el('topbarTitle').textContent = '新协同会话';
-    el('topbarMeta').textContent = 'GEMINI 4 NEON × CODEX CLI';
+    el('topbarMeta').textContent = 'TENON · MULTI-AGENT WORKBENCH';
     el('btnCancelRun').classList.add('hidden');
     el('sendCtaGroup').classList.remove('hidden');
     el('composerShell').classList.remove('is-streaming');
@@ -2049,7 +2071,10 @@
 
     const decisions = [];
     if (run.config?.geminiModel) decisions.push(`架构规划锁定 ${run.config.geminiModel}，保持接口契约优先。`);
-    if (run.config?.sandbox) decisions.push(`Codex 沙箱策略设为 ${run.config.sandbox}（推理档位 ${run.config.codexEffort || 'high'}）。`);
+    if (run.config?.sandbox) {
+      const netNote = run.config.allowCodexNetwork && run.config.sandbox === 'workspace-write' ? '，允许沙箱联网' : '';
+      decisions.push(`Codex 沙箱策略设为 ${run.config.sandbox}（推理档位 ${run.config.codexEffort || 'high'}${netNote}）。`);
+    }
     if (run.reviewVerdict) decisions.push(`Pre-CI 门禁裁决：${run.reviewVerdict.passed ? 'PASS 放行' : 'BLOCK 拦截'}。`);
 
     const openQuestions = [];
@@ -2098,7 +2123,7 @@
       </section>`;
   }
 
-  function renderChatTraceHtml(msg, isStreaming) {
+  function renderChatTraceHtml(msg, isStreaming, fallbackKey = '') {
     const trace = Array.isArray(msg.trace) ? msg.trace : [];
     const thoughtText = String(msg.thinkingText || '').trim();
     const thinkTok = Number(msg.thinkingTokens) || 0;
@@ -2108,8 +2133,9 @@
 
     if (!isStreaming && !hasContent) return '';
 
-    const hasManual = appState.chatTraceOpen.has(msg.id);
-    const isOpen = hasManual ? appState.chatTraceOpen.get(msg.id) : isStreaming;
+    const msgKey = msg.id || fallbackKey || 'msg';
+    const hasManual = appState.chatTraceOpen.has(msgKey);
+    const isOpen = hasManual ? appState.chatTraceOpen.get(msgKey) : isStreaming;
 
     const activeTool = [...trace].reverse().find((t) => t.status === 'running' && t.kind === 'tool');
     const summaryBits = [];
@@ -2146,8 +2172,8 @@
     const nonDuplicateSteps = trace.filter((t) => !(t.id === 'reason_stream' && thoughtText));
     if (nonDuplicateSteps.length > 0) {
       const rowsHtml = nonDuplicateSteps
-        .map((item) => {
-          const itemKey = `${msg.id}:${item.id}`;
+        .map((item, sIdx) => {
+          const itemKey = `${msgKey}:${item.id || sIdx}`;
           const expanded = appState.chatToolOpen.has(itemKey);
           const hasDetail = Boolean(item.body && String(item.body).trim());
           const statusCls = item.status === 'error' ? 'is-error' : item.status === 'running' ? 'is-running' : 'is-done';
@@ -2185,7 +2211,7 @@
 
     return `
       <div class="chat-trace-box ${isOpen ? 'is-open' : ''} ${isStreaming ? 'is-live' : ''}">
-        <button type="button" class="chat-trace-head" data-chat-trace-toggle="${escapeHtml(msg.id)}" aria-expanded="${isOpen}">
+        <button type="button" class="chat-trace-head" data-chat-trace-toggle="${escapeHtml(msgKey)}" aria-expanded="${isOpen}">
           <span class="chat-trace-dot ${isStreaming ? 'is-pulse' : ''}" aria-hidden="true"></span>
           <span class="chat-trace-title">${escapeHtml(titleText)}</span>
           <span class="chat-trace-toggle-chev mono-xs">${isOpen ? '收起 ▴' : '展开 ▾'}</span>
@@ -2199,6 +2225,8 @@
     el('welcomeStage').classList.add('hidden');
     const container = el('threadMessages');
     container.classList.remove('hidden');
+    const vp = el('conversationViewport');
+    const prevScrollTop = vp ? vp.scrollTop : 0;
 
     const isActive = run.status === 'running' || run.status === 'awaiting_approval';
     el('btnCancelRun').classList.toggle('hidden', !isActive);
@@ -2233,7 +2261,8 @@
         ? run.messages
         : [{ id: 'initial_u', role: 'user', content: run.prompt, status: 'done', createdAt: run.createdAt }];
 
-      messages.forEach((msg) => {
+      messages.forEach((msg, idx) => {
+        const msgKey = msg.id || `${run.id}:msg:${idx}`;
         const ts = new Date(msg.createdAt || run.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
         if (msg.role === 'user') {
           parts.push(`
@@ -2254,9 +2283,34 @@
           const metaBits = [];
           if (msg.tokens) metaBits.push(`${Number(msg.tokens).toLocaleString()} TOKENS`);
           if (msg.durationMs) metaBits.push(`${(msg.durationMs / 1000).toFixed(1)}s`);
-          if (!metaBits.length) metaBits.push(isStreamingMsg ? '回复中...' : ts);
+          if (!metaBits.length) {
+            if (isStreamingMsg) metaBits.push('回复中...');
+            else if (msg.status === 'interrupted') metaBits.push('已中断');
+            else if (msg.status === 'cancelled') metaBits.push('已中止');
+            else metaBits.push(ts);
+          }
 
-          const traceHtml = renderChatTraceHtml(msg, isStreamingMsg);
+          const traceHtml = renderChatTraceHtml(msg, isStreamingMsg, msgKey);
+          let statusPillHtml = '';
+          if (isStreamingMsg) {
+            statusPillHtml = `<span class="agent-status-pill running is-shimmer"><span>${escapeHtml(msg.liveStep ? '执行工具中...' : '思考与回复中...')}</span></span>`;
+          } else if (msg.status === 'failed') {
+            statusPillHtml = '<span class="agent-status-pill failed"><span>执行失败</span></span>';
+          } else if (msg.status === 'cancelled') {
+            statusPillHtml = '<span class="agent-status-pill cancelled"><span>已中止</span></span>';
+          } else if (msg.status === 'interrupted') {
+            statusPillHtml = '<span class="agent-status-pill interrupted"><span>已中断</span></span>';
+          }
+
+          const fallbackNote = !isStreamingMsg && !msg.content && !msg.error
+            ? (msg.status === 'interrupted'
+                ? '<p class="agent-empty-state mono-xs">本次回复在完成前被中断（工作台重启或进程退出）。可继续发送下一条消息。</p>'
+                : msg.status === 'cancelled'
+                  ? '<p class="agent-empty-state mono-xs">已手动中止本次回复。</p>'
+                  : msg.status === 'failed'
+                    ? '<p class="agent-empty-state mono-xs">本次调用未返回内容，请在右侧终端事件查看详情。</p>'
+                    : '')
+            : '';
 
           parts.push(`
             <article class="agent-turn chat-turn ${isStreamingMsg ? 'is-streaming' : ''}">
@@ -2266,16 +2320,16 @@
                   <span class="agent-role-name">${escapeHtml(engineLabel)}</span>
                   ${msg.model ? `<span class="agent-model-tag">${escapeHtml(msg.model)}</span>` : ''}
                 </div>
-                ${isStreamingMsg ? `<span class="agent-status-pill running is-shimmer"><span>${escapeHtml(msg.liveStep ? '执行工具中...' : '思考与回复中...')}</span></span>` : ''}
+                ${statusPillHtml}
               </header>
               ${traceHtml}
-              ${msg.content ? `<div class="markdown-output">${renderMarkdown(msg.content)}</div>` : ''}
+              ${msg.content ? `<div class="markdown-output">${renderMarkdown(msg.content)}</div>` : fallbackNote}
               ${msg.error ? `<div class="error-banner">${escapeHtml(msg.error)}</div>` : ''}
               <footer class="agent-turn-foot">
                 <span class="mono-xs">${escapeHtml(metaBits.join(' · '))}</span>
                 <div class="turn-foot-actions">
                   ${isCodexEng && run.codex?.diff ? '<button type="button" class="link-btn" data-open-insp="diff">查看 Git Diff →</button>' : ''}
-                  ${msg.content ? `<button type="button" class="link-btn" data-copy-msg="${escapeHtml(msg.id)}">复制</button>` : ''}
+                  ${msg.content ? `<button type="button" class="link-btn" data-copy-msg="${escapeHtml(msgKey)}">复制</button>` : ''}
                 </div>
               </footer>
             </article>`);
@@ -2286,12 +2340,14 @@
       bindThreadDynamicHandlers(container, run);
       if (window.ConduitOrbs) window.ConduitOrbs.mountAll(container);
       renderInspectorContent(run);
-      const vp = el('conversationViewport');
-      if (appState.stickyBottom) {
-        vp.scrollTop = vp.scrollHeight;
-        el('btnJumpLatest').classList.add('hidden');
-      } else if (run.status === 'running') {
-        el('btnJumpLatest').classList.remove('hidden');
+      if (vp) {
+        if (appState.stickyBottom) {
+          vp.scrollTop = vp.scrollHeight;
+          el('btnJumpLatest').classList.add('hidden');
+        } else {
+          vp.scrollTop = prevScrollTop;
+          if (run.status === 'running') el('btnJumpLatest').classList.remove('hidden');
+        }
       }
       if (waveEngine) waveEngine.redraw();
       return;
@@ -2541,12 +2597,14 @@
     if (appState.stageView === 'workflow') renderWorkflowCanvas();
 
     // Smart auto-follow (21st.dev Conversation #46450 — NEVER uses scrollIntoView!)
-    const vp = el('conversationViewport');
-    if (appState.stickyBottom) {
-      vp.scrollTop = vp.scrollHeight;
-      el('btnJumpLatest').classList.add('hidden');
-    } else if (run.status === 'running') {
-      el('btnJumpLatest').classList.remove('hidden');
+    if (vp) {
+      if (appState.stickyBottom) {
+        vp.scrollTop = vp.scrollHeight;
+        el('btnJumpLatest').classList.add('hidden');
+      } else {
+        vp.scrollTop = prevScrollTop;
+        if (run.status === 'running') el('btnJumpLatest').classList.remove('hidden');
+      }
     }
 
     if (waveEngine) waveEngine.redraw();
@@ -2651,7 +2709,7 @@
     container.querySelectorAll('[data-copy-msg]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const mid = btn.dataset.copyMsg;
-        const found = (run.messages || []).find((m) => m.id === mid);
+        const found = (run.messages || []).find((m, idx) => (m.id || `${run.id}:msg:${idx}`) === mid);
         copyText(found?.content || '', '已复制回复');
       });
     });
@@ -2687,9 +2745,18 @@
       });
     }
 
+    const gateButtons = ['btnInlineApprove', 'btnInlineReplan', 'btnInlineAbort', 'btnInlineOverride', 'btnInlineStopBlocked']
+      .map((id) => el(id))
+      .filter(Boolean);
+    const setGateBusy = (busy) => {
+      gateButtons.forEach((b) => { b.disabled = busy; });
+    };
+
     const btnApprove = el('btnInlineApprove');
     if (btnApprove) {
       btnApprove.addEventListener('click', async () => {
+        if (btnApprove.disabled) return;
+        setGateBusy(true);
         try {
           const spec = el('inlineGateEditor')?.value || '';
           await api(`/api/runs/${encodeURIComponent(run.id)}/approve`, {
@@ -2699,6 +2766,7 @@
           appState.gateDirtyText = null;
           showToast('已拍板放行，正在派发 Codex 施工');
         } catch (err) {
+          setGateBusy(false);
           showToast(`放行失败: ${err.message}`);
         }
       });
@@ -2707,6 +2775,8 @@
     const btnReplan = el('btnInlineReplan');
     if (btnReplan) {
       btnReplan.addEventListener('click', async () => {
+        if (btnReplan.disabled) return;
+        setGateBusy(true);
         try {
           const fb = el('inlineGateFeedback')?.value.trim() || '';
           await api(`/api/runs/${encodeURIComponent(run.id)}/approve`, {
@@ -2716,6 +2786,7 @@
           appState.gateDirtyText = null;
           showToast('已打回 Gemini 重新规划');
         } catch (err) {
+          setGateBusy(false);
           showToast(`打回失败: ${err.message}`);
         }
       });
@@ -2724,11 +2795,14 @@
     const btnAbort = el('btnInlineAbort');
     if (btnAbort) {
       btnAbort.addEventListener('click', async () => {
+        if (btnAbort.disabled) return;
+        setGateBusy(true);
         try {
           await api(`/api/runs/${encodeURIComponent(run.id)}/cancel`, { method: 'POST' });
           appState.gateDirtyText = null;
           showToast('已中止任务');
         } catch (err) {
+          setGateBusy(false);
           showToast(`中止失败: ${err.message}`);
         }
       });
@@ -2737,6 +2811,8 @@
     const btnOverride = el('btnInlineOverride');
     if (btnOverride) {
       btnOverride.addEventListener('click', async () => {
+        if (btnOverride.disabled) return;
+        setGateBusy(true);
         try {
           await api(`/api/runs/${encodeURIComponent(run.id)}/approve`, {
             method: 'POST',
@@ -2744,6 +2820,7 @@
           });
           showToast('已人工强制放行，进入 Gemini 最终汇报');
         } catch (err) {
+          setGateBusy(false);
           showToast(`放行失败: ${err.message}`);
         }
       });
@@ -2752,6 +2829,8 @@
     const btnStopBlocked = el('btnInlineStopBlocked');
     if (btnStopBlocked) {
       btnStopBlocked.addEventListener('click', async () => {
+        if (btnStopBlocked.disabled) return;
+        setGateBusy(true);
         try {
           await api(`/api/runs/${encodeURIComponent(run.id)}/approve`, {
             method: 'POST',
@@ -2759,6 +2838,7 @@
           });
           showToast('已停止并保持门禁拦截');
         } catch (err) {
+          setGateBusy(false);
           showToast(`操作失败: ${err.message}`);
         }
       });
@@ -3010,6 +3090,8 @@
           },
     };
 
+    appState.openRunSeq += 1;
+    closeActiveStream();
     appState.localRuns.set(id, run);
     appState.runs = [
       { id: run.id, title: run.title, mode: run.mode, status: run.status, createdAt: run.createdAt },
@@ -3046,7 +3128,7 @@
         const idx = appState.runs.findIndex((r) => r.id === id);
         if (idx >= 0) appState.runs[idx].status = 'completed';
         renderSidebarThreads();
-        renderConversationThread(run);
+        if (appState.currentRun?.id === id) renderConversationThread(run);
       });
     } else {
       const { posterSrc, videoPromise } = window.ConduitMediaGen.recordKineticClip({ prompt: cleanPrompt, seconds: 3.4 });
@@ -3066,7 +3148,7 @@
         const idx = appState.runs.findIndex((r) => r.id === id);
         if (idx >= 0) appState.runs[idx].status = run.status;
         renderSidebarThreads();
-        renderConversationThread(run);
+        if (appState.currentRun?.id === id) renderConversationThread(run);
       };
       videoPromise.then((url) => {
         clipUrl = url;
@@ -3101,6 +3183,7 @@
     el('inspectorPane').classList.remove('hidden');
     el('inspectorResizeHandle')?.classList.remove('hidden');
     el('btnToggleInspector').setAttribute('aria-expanded', 'true');
+    reclampPanesFn();
     if (tabName) switchInspectorTab(tabName);
     else renderInspectorContent(appState.currentRun);
     requestAnimationFrame(syncAllFluidTracks);
@@ -3115,46 +3198,99 @@
 
   function initPaneResizers() {
     const root = document.documentElement;
-    const clampSidebar = (w) => Math.max(204, Math.min(380, Math.round(w)));
-    const clampInspector = (w) => {
-      const maxW = Math.max(460, Math.round(window.innerWidth * 0.74));
-      return Math.max(340, Math.min(maxW, Math.round(w)));
+    const MIN_STAGE_W = 500;
+    const COMPACT_INSP_BP = 1180;
+    const INSPECTOR_PRESETS = { compact: 380, standard: 448, wide: 540 };
+
+    const getPreferredSidebar = () => {
+      try {
+        const saved = Number(localStorage.getItem('tenon_sidebar_w'));
+        if (Number.isFinite(saved) && saved >= 204) return saved;
+      } catch {}
+      return 248;
     };
 
-    try {
-      const savedSide = Number(localStorage.getItem('tenon_sidebar_w'));
-      if (Number.isFinite(savedSide) && savedSide >= 204) {
-        root.style.setProperty('--sidebar-w', `${clampSidebar(savedSide)}px`);
+    const getPreferredInspector = () => {
+      try {
+        const saved = Number(localStorage.getItem('tenon_inspector_w'));
+        if (Number.isFinite(saved) && saved >= 320) return saved;
+      } catch {}
+      return INSPECTOR_PRESETS[appState.tweaks?.inspector] || 448;
+    };
+
+    const clampSidebar = (w) => {
+      const vw = window.innerWidth || 1440;
+      const cap = vw <= COMPACT_INSP_BP
+        ? Math.max(204, Math.min(280, Math.round(vw * 0.28)))
+        : Math.max(220, Math.min(360, Math.round(vw * 0.28)));
+      return Math.max(204, Math.min(cap, Math.round(w)));
+    };
+
+    const clampInspector = (w) => {
+      const vw = window.innerWidth || 1440;
+      if (vw <= COMPACT_INSP_BP) {
+        return Math.max(320, Math.min(460, Math.round(vw * 0.94)));
       }
-      const savedInsp = Number(localStorage.getItem('tenon_inspector_w'));
-      if (Number.isFinite(savedInsp) && savedInsp >= 340) {
-        root.style.setProperty('--inspector-w', `${clampInspector(savedInsp)}px`);
+      const sidebar = el('sidebar');
+      const activeSideW = vw <= 820
+        ? 0
+        : sidebar?.classList.contains('is-collapsed')
+          ? 54
+          : clampSidebar(getPreferredSidebar());
+      const availForInsp = vw - activeSideW - MIN_STAGE_W;
+      const maxW = Math.max(320, Math.min(Math.round(vw * 0.62), availForInsp));
+      return Math.max(320, Math.min(maxW, Math.round(w)));
+    };
+
+    const reclampPanes = () => {
+      const vw = window.innerWidth || 1440;
+      if (vw <= 820) {
+        root.style.removeProperty('--sidebar-w');
+      } else {
+        root.style.setProperty('--sidebar-w', `${clampSidebar(getPreferredSidebar())}px`);
       }
-    } catch {}
+
+      if (vw <= COMPACT_INSP_BP) {
+        // Below 1180px (including Electron 1080px minWidth), inspector switches to overlay drawer
+        root.style.removeProperty('--inspector-w');
+      } else {
+        root.style.setProperty('--inspector-w', `${clampInspector(getPreferredInspector())}px`);
+      }
+    };
+
+    reclampPanesFn = reclampPanes;
+    reclampPanes();
 
     const sideHandle = el('sidebarResizeHandle');
     if (sideHandle) {
       sideHandle.addEventListener('dblclick', () => {
-        root.style.setProperty('--sidebar-w', '248px');
         try { localStorage.removeItem('tenon_sidebar_w'); } catch {}
+        reclampPanes();
         requestAnimationFrame(syncAllFluidTracks);
       });
       sideHandle.addEventListener('pointerdown', (ev) => {
         const sidebar = el('sidebar');
-        if (!sidebar || sidebar.classList.contains('is-collapsed')) return;
+        if (!sidebar || sidebar.classList.contains('is-collapsed') || window.innerWidth <= 820) return;
         ev.preventDefault();
         sideHandle.setPointerCapture(ev.pointerId);
         sideHandle.classList.add('is-dragging');
         document.body.classList.add('is-resizing');
-        let lastW = sidebar.getBoundingClientRect().width;
+        let lastW = clampSidebar(sidebar.getBoundingClientRect().width);
         const onMove = (mEv) => {
           lastW = clampSidebar(mEv.clientX);
           root.style.setProperty('--sidebar-w', `${lastW}px`);
+          if (window.innerWidth > COMPACT_INSP_BP) {
+            const availForInsp = window.innerWidth - lastW - MIN_STAGE_W;
+            const curInsp = clampInspector(getPreferredInspector());
+            const boundedInsp = Math.max(320, Math.min(curInsp, Math.max(320, availForInsp)));
+            root.style.setProperty('--inspector-w', `${boundedInsp}px`);
+          }
         };
         const onUp = () => {
           sideHandle.classList.remove('is-dragging');
           document.body.classList.remove('is-resizing');
           try { localStorage.setItem('tenon_sidebar_w', String(lastW)); } catch {}
+          reclampPanes();
           requestAnimationFrame(syncAllFluidTracks);
           sideHandle.removeEventListener('pointermove', onMove);
           sideHandle.removeEventListener('pointerup', onUp);
@@ -3169,16 +3305,17 @@
     const inspHandle = el('inspectorResizeHandle');
     if (inspHandle) {
       inspHandle.addEventListener('dblclick', () => {
-        root.style.setProperty('--inspector-w', '448px');
         try { localStorage.removeItem('tenon_inspector_w'); } catch {}
+        reclampPanes();
         requestAnimationFrame(syncAllFluidTracks);
       });
       inspHandle.addEventListener('pointerdown', (ev) => {
+        if (window.innerWidth <= COMPACT_INSP_BP) return;
         ev.preventDefault();
         inspHandle.setPointerCapture(ev.pointerId);
         inspHandle.classList.add('is-dragging');
         document.body.classList.add('is-resizing');
-        let lastW = el('inspectorPane')?.getBoundingClientRect().width || 448;
+        let lastW = clampInspector(el('inspectorPane')?.getBoundingClientRect().width || 448);
         const onMove = (mEv) => {
           lastW = clampInspector(window.innerWidth - mEv.clientX);
           root.style.setProperty('--inspector-w', `${lastW}px`);
@@ -3187,6 +3324,7 @@
           inspHandle.classList.remove('is-dragging');
           document.body.classList.remove('is-resizing');
           try { localStorage.setItem('tenon_inspector_w', String(lastW)); } catch {}
+          reclampPanes();
           requestAnimationFrame(syncAllFluidTracks);
           inspHandle.removeEventListener('pointermove', onMove);
           inspHandle.removeEventListener('pointerup', onUp);
@@ -3229,6 +3367,7 @@
       failed: { label: '已失败', cls: 'is-failed' },
       blocked: { label: '门禁拦截', cls: 'is-failed' },
       cancelled: { label: '已中止', cls: 'is-stopped' },
+      interrupted: { label: '已中断', cls: 'is-stopped' },
     };
     box.innerHTML = `
       <div class="runs-monitor-head">
@@ -3424,6 +3563,7 @@
       codexHome: el('selectCodexHome').value,
       requireApproval: el('chkApproval').checked,
       useWorktree: el('chkWorktree').checked,
+      allowCodexNetwork: Boolean(el('chkCodexNetwork')?.checked),
       resumeThreadId: mode === 'codex-exec' ? appState.resumeThreadId : '',
     };
 
@@ -3446,6 +3586,10 @@
       });
       el('inputPrompt').value = '';
       autoGrowTextarea(el('inputPrompt'));
+      if (appState.contextChips.length > 0) {
+        appState.contextChips = [];
+        renderContextChips();
+      }
       appState.stickyBottom = true;
       appState.gateDirtyText = null;
       if (canvasEngine) canvasEngine.clearDemoOverlay();
@@ -3458,11 +3602,36 @@
     }
   }
 
-  function attachToRun(run) {
-    if (appState.activeStream) {
-      appState.activeStream.close();
-      appState.activeStream = null;
+  async function cancelCurrentRun() {
+    const run = appState.currentRun;
+    if (!run) return;
+    if (appState.localRuns.has(run.id)) {
+      run.mediaJob?._cancel?.();
+      run.status = 'cancelled';
+      if (run.mediaJob) {
+        run.mediaJob.status = 'failed';
+        run.mediaJob.errorText = '已手动中止本地媒体渲染';
+        run.mediaJob._api?.update({ status: 'failed', errorText: run.mediaJob.errorText });
+      }
+      const idx = appState.runs.findIndex((r) => r.id === run.id);
+      if (idx >= 0) appState.runs[idx].status = 'cancelled';
+      renderSidebarThreads();
+      renderConversationThread(run);
+      showToast('已中止本地媒体渲染任务');
+      return;
     }
+    try {
+      await api(`/api/runs/${encodeURIComponent(run.id)}/cancel`, { method: 'POST' });
+      showToast('已发送中止指令');
+    } catch (err) {
+      showToast(`中止失败: ${err.message}`);
+    }
+  }
+
+  function attachToRun(run) {
+    appState.openRunSeq += 1;
+    closeActiveStream();
+    const runId = run.id;
     appState.currentRun = run;
     appState.gateDirtyText = null;
     renderSidebarThreads();
@@ -3470,12 +3639,22 @@
 
     if (isTerminalStatus(run.status)) return;
 
-    const es = new EventSource(`/api/runs/${encodeURIComponent(run.id)}/stream`);
+    const es = new EventSource(`/api/runs/${encodeURIComponent(runId)}/stream`);
     appState.activeStream = es;
+    let errCount = 0;
+    let probing = false;
+
+    es.onopen = () => { errCount = 0; };
 
     es.addEventListener('state', (ev) => {
+      if (appState.activeStream !== es || appState.currentRun?.id !== runId) {
+        es.close();
+        return;
+      }
+      errCount = 0;
       try {
         const next = JSON.parse(ev.data);
+        if (next?.id && next.id !== runId) return;
         const hadDiff = Boolean(appState.currentRun?.codex?.diff);
         appState.currentRun = next;
         renderConversationThread(next);
@@ -3488,14 +3667,19 @@
           loadRunsList();
         }
       } catch {
-        // Ignore
+        // Ignore malformed SSE payload
       }
     });
 
     es.addEventListener('event', (ev) => {
+      if (appState.activeStream !== es || appState.currentRun?.id !== runId) {
+        es.close();
+        return;
+      }
+      errCount = 0;
       try {
         const item = JSON.parse(ev.data);
-        if (appState.currentRun) {
+        if (appState.currentRun && appState.currentRun.id === runId) {
           appState.currentRun.events = appState.currentRun.events || [];
           appState.currentRun.events.push(item);
           if (appState.inspectorOpen && appState.inspectorTab === 'events') {
@@ -3503,26 +3687,154 @@
           }
         }
       } catch {
-        // Ignore
+        // Ignore malformed event payload
       }
     });
 
     es.onerror = () => {
+      if (appState.activeStream !== es || appState.currentRun?.id !== runId) {
+        es.close();
+        return;
+      }
       if (appState.currentRun && isTerminalStatus(appState.currentRun.status)) {
         es.close();
-        if (appState.activeStream === es) appState.activeStream = null;
+        appState.activeStream = null;
+        return;
+      }
+      errCount += 1;
+      if (es.readyState === EventSource.CLOSED) {
+        es.close();
+        appState.activeStream = null;
+        return;
+      }
+      if (errCount >= 3 && !probing) {
+        probing = true;
+        api(`/api/runs/${encodeURIComponent(runId)}`)
+          .then(({ run: latest }) => {
+            if (appState.activeStream !== es || appState.currentRun?.id !== runId) {
+              es.close();
+              return;
+            }
+            if (latest) {
+              appState.currentRun = latest;
+              renderConversationThread(latest);
+              if (isTerminalStatus(latest.status)) {
+                es.close();
+                appState.activeStream = null;
+                loadRunsList();
+              }
+            }
+          })
+          .catch(() => {
+            if (appState.activeStream === es) {
+              es.close();
+              appState.activeStream = null;
+            }
+          })
+          .finally(() => {
+            probing = false;
+            if (errCount >= 5 && appState.activeStream === es) {
+              es.close();
+              appState.activeStream = null;
+            }
+          });
       }
     };
   }
 
+  let globalRunsSyncTimer = null;
+  function scheduleRunsListSync() {
+    if (globalRunsSyncTimer) return;
+    globalRunsSyncTimer = setTimeout(() => {
+      globalRunsSyncTimer = null;
+      loadRunsList();
+    }, 220);
+  }
+
   function initGlobalEvents() {
-    if (appState.globalStream) return;
+    if (appState.globalStream && appState.globalStream.readyState !== EventSource.CLOSED) return;
+    if (appState.globalStream) {
+      try { appState.globalStream.close(); } catch {}
+      appState.globalStream = null;
+    }
+    if (appState.globalStreamReconnectTimer) {
+      clearTimeout(appState.globalStreamReconnectTimer);
+      appState.globalStreamReconnectTimer = null;
+    }
+
     const es = new EventSource('/api/events');
     appState.globalStream = es;
-    const sync = () => loadRunsList();
-    es.addEventListener('run_created', sync);
-    es.addEventListener('run_updated', sync);
-    es.addEventListener('run_deleted', sync);
+
+    const patchSummary = (ev, isCreate = false) => {
+      let summary = null;
+      try { summary = JSON.parse(ev.data); } catch {}
+      if (!summary || !summary.id) {
+        scheduleRunsListSync();
+        return;
+      }
+      const idx = appState.runs.findIndex((r) => r.id === summary.id);
+      if (idx >= 0) {
+        const prev = appState.runs[idx];
+        const visuallyChanged =
+          prev.title !== summary.title ||
+          prev.status !== summary.status ||
+          Boolean(prev.pinned) !== Boolean(summary.pinned) ||
+          prev.mode !== summary.mode;
+        appState.runs[idx] = { ...prev, ...summary };
+        if (visuallyChanged) {
+          renderSidebarThreads();
+          if (appState.inspectorOpen && appState.inspectorTab === 'runs') {
+            renderAgentRunsMonitor(el('inspectorRunsBox'));
+          }
+        }
+      } else if (isCreate) {
+        appState.runs = [summary, ...appState.runs];
+        renderSidebarThreads();
+        if (appState.inspectorOpen && appState.inspectorTab === 'runs') {
+          renderAgentRunsMonitor(el('inspectorRunsBox'));
+        }
+      } else {
+        scheduleRunsListSync();
+      }
+    };
+
+    es.addEventListener('run_created', (ev) => patchSummary(ev, true));
+    es.addEventListener('run_updated', (ev) => patchSummary(ev, false));
+    es.addEventListener('run_deleted', (ev) => {
+      let payload = null;
+      try { payload = JSON.parse(ev.data); } catch {}
+      const delId = payload?.id;
+      if (!delId) {
+        scheduleRunsListSync();
+        return;
+      }
+      appState.runs = appState.runs.filter((r) => r.id !== delId);
+      if (appState.currentRun?.id === delId) {
+        resetToNewChat();
+      } else {
+        renderSidebarThreads();
+      }
+      if (appState.inspectorOpen && appState.inspectorTab === 'runs') {
+        renderAgentRunsMonitor(el('inspectorRunsBox'));
+      }
+    });
+
+    es.onerror = () => {
+      if (appState.globalStream !== es) {
+        es.close();
+        return;
+      }
+      if (es.readyState === EventSource.CLOSED) {
+        es.close();
+        appState.globalStream = null;
+        if (!appState.globalStreamReconnectTimer) {
+          appState.globalStreamReconnectTimer = setTimeout(() => {
+            appState.globalStreamReconnectTimer = null;
+            initGlobalEvents();
+          }, 3000);
+        }
+      }
+    };
   }
 
   /* =========================================================================
@@ -3987,7 +4299,7 @@
 
       const agyModels = data.agy?.models || [];
       const prevAgy = el('selectGeminiModel').value;
-      if (prevAgy && (prevAgy.startsWith('provider:') || agyModels.some((m) => m.id === prevAgy))) {
+      if (prevAgy && (prevAgy === 'codex:chat' || prevAgy.startsWith('provider:') || agyModels.some((m) => m.id === prevAgy))) {
         setGeminiModelValue(prevAgy);
       } else if (agyModels.some((m) => m.id === 'gemini-4-neon-high')) {
         setGeminiModelValue('gemini-4-neon-high');
@@ -3998,7 +4310,7 @@
       }
 
       const prevCodex = el('selectCodexModel').value;
-      if (prevCodex && (data.codex || []).some((m) => m.id === prevCodex)) {
+      if (prevCodex && ((data.codex || []).some((m) => m.id === prevCodex) || appState.customCodexModels.includes(prevCodex))) {
         setCodexModelValue(prevCodex);
       } else {
         setCodexModelValue('');
@@ -4070,6 +4382,7 @@
         maxRounds: el('selectMaxRounds')?.value || '2',
         approval: Boolean(el('chkApproval')?.checked),
         worktree: Boolean(el('chkWorktree')?.checked),
+        allowCodexNetwork: Boolean(el('chkCodexNetwork')?.checked),
       }),
       onOpenProviderHub: () => {
         switchStageView('settings', 'providers');
@@ -4243,9 +4556,13 @@
   }
 
   function syncUpdateBadge() {
+    const info = appState.updateInfo;
+    const relBtn = el('btnOpenReleases');
+    if (relBtn && info?.releasesUrl) {
+      relBtn.href = info.releasesUrl;
+    }
     const badge = el('settingsUpdateBadge');
     if (!badge) return;
-    const info = appState.updateInfo;
     const hasNew = Boolean(info?.lastCheck?.ok && info?.lastCheck?.hasUpdate);
     badge.textContent = hasNew ? `v${info.lastCheck.latestVersion}` : `v${info?.currentVersion || '1.0.0'}`;
     badge.classList.toggle('is-new', hasNew);
@@ -4317,6 +4634,7 @@
       clearInterval(appState.updatePollTimer);
       appState.updatePollTimer = null;
     }
+    appState.updatePollInFlight = false;
   }
 
   async function startAppUpdateDownload() {
@@ -4325,16 +4643,20 @@
         method: 'POST',
         body: JSON.stringify({}),
       });
-      if (appState.updateInfo && data.download) {
+      appState.updateInfo = appState.updateInfo || {};
+      if (data.download) {
         appState.updateInfo.download = data.download;
       }
       renderSettingsUpdates();
       showToast('正在后台下载新版安装包...');
       stopUpdateDownloadPoll();
       appState.updatePollTimer = setInterval(async () => {
+        if (appState.updatePollInFlight) return;
+        appState.updatePollInFlight = true;
         try {
           const st = await api('/api/update/status');
-          if (appState.updateInfo && st.download) {
+          appState.updateInfo = appState.updateInfo || {};
+          if (st.download) {
             appState.updateInfo.download = st.download;
           }
           if (appState.stageView === 'settings' && appState.settingsSection === 'updates') {
@@ -4343,11 +4665,16 @@
           if (st.download?.state === 'downloaded') {
             stopUpdateDownloadPoll();
             showToast('新版安装包下载完成，点击「立即启动安装程序」完成升级');
-          } else if (st.download?.state === 'error' || st.download?.state === 'idle') {
+          } else if (st.download?.state === 'error') {
+            stopUpdateDownloadPoll();
+            showToast(`安装包下载失败: ${st.download.error || '未知错误'}`);
+          } else if (st.download?.state === 'idle') {
             stopUpdateDownloadPoll();
           }
         } catch {
           stopUpdateDownloadPoll();
+        } finally {
+          appState.updatePollInFlight = false;
         }
       }, 450);
     } catch (err) {
@@ -4509,6 +4836,8 @@
     if (summaryEl) {
       if (appState.wsDiscovering) {
         summaryEl.textContent = '正在扫描本机 Codex / Claude / Git 仓库...';
+      } else if (appState.wsDiscoverError) {
+        summaryEl.textContent = `扫描失败：${appState.wsDiscoverError}`;
       } else if (s && s.total > 0) {
         const parts = [];
         if (s.codex) parts.push(`Codex ${s.codex}`);
@@ -4528,6 +4857,11 @@
 
     if (appState.wsDiscovering && items.length === 0) {
       list.innerHTML = '<div class="ws-discover-empty mono-xs">正在扫描 Codex / Claude / 本机 Git 仓库...</div>';
+      return;
+    }
+
+    if (appState.wsDiscoverError && items.length === 0) {
+      list.innerHTML = `<div class="ws-discover-empty mono-xs is-error">扫描工作目录失败：${escapeHtml(appState.wsDiscoverError)}（可点击「重新扫描」或下方手动输入路径）</div>`;
       return;
     }
 
@@ -4607,20 +4941,32 @@
 
   async function loadDiscoveredWorkspaces(force = false) {
     appState.wsDiscovering = true;
+    appState.wsDiscoverError = '';
     renderDiscoveredWorkspaces();
     try {
       const data = await api(`/api/workspace/discover${force ? '?refresh=1' : ''}`);
       appState.discoveredWorkspaces = Array.isArray(data.workspaces) ? data.workspaces : [];
       appState.discoveredSummary = data.summary || null;
+      appState.wsDiscoverError = '';
       if (force) {
         showToast(`已扫描完成：发现 ${appState.discoveredWorkspaces.length} 个工作目录`);
       }
     } catch (err) {
+      appState.wsDiscoverError = err.message || '网络或文件系统异常';
       if (force) showToast(`自动探测目录失败: ${err.message}`);
     } finally {
       appState.wsDiscovering = false;
       renderDiscoveredWorkspaces();
     }
+  }
+
+  function validateWorkspaceFolderName(rawName) {
+    const name = String(rawName || '').trim();
+    if (!name) return '请输入工程名称';
+    if (name === '.' || name === '..') return '工程名称不能为 . 或 ..';
+    if (/[<>:"/\\|?*\x00-\x1f]/.test(name)) return '名称包含非法路径字符（<>:"/\\|?*）';
+    if (/[. ]$/.test(name)) return 'Windows 目录名不能以句点或空格结尾';
+    return '';
   }
 
   function formatTodayStamp() {
@@ -4637,8 +4983,15 @@
     const rawName = (el('inputNewWsName')?.value || '').trim();
     const parent = (el('inputNewWsParent')?.value || '').trim().replace(/[\\/]+$/, '');
     const withDate = Boolean(el('chkNewWsDate')?.checked);
+    preview.classList.remove('is-error');
     if (!rawName) {
       preview.textContent = '请输入工程名称以预览创建路径';
+      return;
+    }
+    const nameErr = validateWorkspaceFolderName(rawName);
+    if (nameErr) {
+      preview.classList.add('is-error');
+      preview.textContent = `路径校验未通过：${nameErr}`;
       return;
     }
     const hasDate = /_\d{4}-\d{2}-\d{2}$/.test(rawName);
@@ -4675,8 +5028,10 @@
     const parentDir = (el('inputNewWsParent')?.value || '').trim();
     const appendDate = Boolean(el('chkNewWsDate')?.checked);
     const initGit = Boolean(el('chkNewWsGit')?.checked);
-    if (!name) {
-      showToast('请输入新工程名称');
+    const nameErr = validateWorkspaceFolderName(name);
+    if (nameErr) {
+      showToast(nameErr);
+      updateNewWsPreview();
       el('inputNewWsName')?.focus();
       return;
     }
@@ -4723,6 +5078,7 @@
     const ok = await inspectCurrentWorkspace({ persist: true });
     if (opts.closePopover) {
       el('wsPopover')?.classList.add('hidden');
+      el('btnWsPopover')?.setAttribute('aria-expanded', 'false');
     }
     if (opts.notify && ok) {
       const baseName = clean.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || clean;
@@ -4733,10 +5089,17 @@
   async function inspectCurrentWorkspace(opts = {}) {
     const dir = el('inputWorkspace').value.trim();
     const box = el('wsTelemetry');
+    const inspectBtn = el('btnInspectWs');
     if (!dir) {
       el('wsShortName').textContent = '选择工作目录';
       el('wsBranchPill').textContent = '—';
       el('wsSubStatus').textContent = '点击配置目录路径';
+      if (box) {
+        box.innerHTML = opts.explicit
+          ? '<span class="risk-flag">请先输入有效的本地绝对路径，或点击「浏览...」选择文件夹</span>'
+          : '';
+      }
+      if (opts.explicit) showToast('请先输入或选择工程目录路径');
       appState.workspaceFiles = [];
       return false;
     }
@@ -4745,6 +5108,7 @@
     el('wsShortName').textContent = baseName;
     el('wsShortName').title = dir;
     el('btnWsPopover').title = `当前工作目录：${dir}\n点击切换或重新扫描 Agent 目录`;
+    if (inspectBtn) inspectBtn.disabled = true;
 
     try {
       const info = await api(`/api/workspace/inspect?dir=${encodeURIComponent(dir)}`);
@@ -4795,6 +5159,8 @@
       box.innerHTML = `<span class="risk-flag">${escapeHtml(err.message)}</span>`;
       appState.workspaceFiles = [];
       return false;
+    } finally {
+      if (inspectBtn) inspectBtn.disabled = false;
     }
   }
 
@@ -5032,6 +5398,9 @@
     ['wsPopover', 'guardrailsPopover', 'composerOrbPopover'].forEach((id) => {
       if (id !== exceptId) el(id)?.classList.add('hidden');
     });
+    if (exceptId !== 'wsPopover') {
+      el('btnWsPopover')?.setAttribute('aria-expanded', 'false');
+    }
     if (exceptId !== 'guardrailsPopover') {
       el('btnGuardrailsPopover')?.setAttribute('aria-expanded', 'false');
     }
@@ -5117,7 +5486,7 @@
     el('inputWfFollowup')?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); fireDrawerFollowup(); }
     });
-    ['chkApproval', 'chkWorktree', 'selectSandbox', 'selectCodexEffort', 'selectCodexReviewModel', 'selectMaxRounds'].forEach((id) => {
+    ['chkApproval', 'chkWorktree', 'chkCodexNetwork', 'selectSandbox', 'selectCodexEffort', 'selectCodexReviewModel', 'selectMaxRounds'].forEach((id) => {
       el(id)?.addEventListener('change', () => {
         renderCliCommandCards();
         if (appState.stageView === 'workflow') renderWorkflowCanvas();
@@ -5136,10 +5505,15 @@
         return;
       }
       el('sidebar').classList.toggle('is-collapsed');
-      setTimeout(() => { if (waveEngine) waveEngine.resize(); }, 240);
+      reclampPanesFn();
+      setTimeout(() => {
+        if (waveEngine) waveEngine.resize();
+        syncAllFluidTracks();
+      }, 240);
     });
 
     window.addEventListener('resize', () => {
+      reclampPanesFn();
       if (window.innerWidth > 820 && el('sidebar').classList.contains('is-mobile-open')) {
         closeMobileDrawers();
       }
@@ -5149,6 +5523,7 @@
         const selectedId = appState.branchSelected.get(rid) || wrap.dataset.branchSelected || 'contract-gate';
         applyBranchDeckLayout(wrap, expanded, selectedId);
       });
+      requestAnimationFrame(syncAllFluidTracks);
     });
 
     el('btnMobileSidebar').addEventListener('click', () => {
@@ -5212,8 +5587,12 @@
       if (!dir) return;
       try {
         const info = await api(`/api/workspace/diff?dir=${encodeURIComponent(dir)}`);
-        if (appState.currentRun) appState.currentRun.codex.diff = info.diff || '';
-        else appState.standaloneDiff = info.diff || '';
+        if (appState.currentRun) {
+          appState.currentRun.codex = appState.currentRun.codex || {};
+          appState.currentRun.codex.diff = info.diff || '';
+        } else {
+          appState.standaloneDiff = info.diff || '';
+        }
         openInspector('diff');
         showToast('已刷新 Git Diff');
       } catch (err) {
@@ -5226,6 +5605,7 @@
       const open = el('wsPopover').classList.contains('hidden');
       closeAllPopovers(open ? 'wsPopover' : '');
       el('wsPopover').classList.toggle('hidden', !open);
+      el('btnWsPopover')?.setAttribute('aria-expanded', String(open));
       if (open) {
         setWsPopoverMode('browse');
         if (appState.discoveredWorkspaces.length === 0 && !appState.wsDiscovering) {
@@ -5238,6 +5618,7 @@
     el('btnCloseWsPopover').addEventListener('click', () => {
       setWsPopoverMode('browse');
       el('wsPopover').classList.add('hidden');
+      el('btnWsPopover')?.setAttribute('aria-expanded', 'false');
     });
     el('btnToggleNewWs')?.addEventListener('click', () => {
       const inCreate = !el('wsCreatePanel')?.classList.contains('hidden');
@@ -5255,17 +5636,24 @@
     });
     el('btnCreateWsSubmit')?.addEventListener('click', submitCreateWorkspace);
     el('btnPickNewWsParent')?.addEventListener('click', async () => {
+      const btn = el('btnPickNewWsParent');
+      if (btn?.disabled) return;
+      if (btn) btn.disabled = true;
       try {
         const res = await api('/api/workspace/pick', {
           method: 'POST',
           body: JSON.stringify({ defaultPath: el('inputNewWsParent')?.value.trim() || '' }),
         });
-        if (res.path && el('inputNewWsParent')) {
+        if (res.supported === false) {
+          showToast('当前环境不支持原生文件夹选择器，请直接粘贴父目录路径');
+        } else if (res.path && el('inputNewWsParent')) {
           el('inputNewWsParent').value = res.path;
           updateNewWsPreview();
         }
       } catch (err) {
         showToast(`选择父目录失败: ${err.message}`);
+      } finally {
+        if (btn) btn.disabled = false;
       }
     });
     el('btnRescanWs')?.addEventListener('click', () => loadDiscoveredWorkspaces(true));
@@ -5276,19 +5664,26 @@
       renderDiscoveredWorkspaces();
     });
     el('btnPickWsFolder')?.addEventListener('click', async () => {
+      const btn = el('btnPickWsFolder');
+      if (btn?.disabled) return;
+      if (btn) btn.disabled = true;
       try {
         const res = await api('/api/workspace/pick', {
           method: 'POST',
           body: JSON.stringify({ defaultPath: el('inputWorkspace').value.trim() }),
         });
-        if (res.path) {
+        if (res.supported === false) {
+          showToast('当前环境不支持原生文件夹选择器，请直接粘贴目录路径');
+        } else if (res.path) {
           await selectWorkspace(res.path, { closePopover: true, notify: true });
         }
       } catch (err) {
         showToast(`打开文件夹选择器失败: ${err.message}`);
+      } finally {
+        if (btn) btn.disabled = false;
       }
     });
-    el('btnInspectWs').addEventListener('click', () => inspectCurrentWorkspace({ persist: true }));
+    el('btnInspectWs').addEventListener('click', () => inspectCurrentWorkspace({ persist: true, explicit: true }));
     el('inputWorkspace').addEventListener('change', () => {
       if (appState.resumeThreadId) {
         appState.resumeThreadId = '';
@@ -5475,12 +5870,7 @@
     el('btnOrbPopPrimary')?.addEventListener('click', async () => {
       const isRunActive = Boolean(appState.currentRun && (appState.currentRun.status === 'running' || appState.currentRun.status === 'awaiting_approval'));
       if (isRunActive) {
-        try {
-          await api(`/api/runs/${encodeURIComponent(appState.currentRun.id)}/cancel`, { method: 'POST' });
-          showToast('已停止当前协同任务');
-        } catch (err) {
-          showToast(`停止失败: ${err.message}`);
-        }
+        await cancelCurrentRun();
         return;
       }
       closeAllPopovers();
@@ -5512,14 +5902,8 @@
         syncTopbarOrb(appState.currentRun);
       }, seq.length * 1050 + 900));
     });
-    el('btnCancelRun').addEventListener('click', async () => {
-      if (!appState.currentRun) return;
-      try {
-        await api(`/api/runs/${encodeURIComponent(appState.currentRun.id)}/cancel`, { method: 'POST' });
-        showToast('已发送中止指令');
-      } catch (err) {
-        showToast(`中止失败: ${err.message}`);
-      }
+    el('btnCancelRun').addEventListener('click', () => {
+      cancelCurrentRun();
     });
 
     el('btnClearResume').addEventListener('click', () => {
@@ -5547,7 +5931,11 @@
       group.querySelectorAll('button').forEach((btn) => {
         btn.addEventListener('click', () => {
           appState.tweaks[key] = btn.dataset.val;
+          if (key === 'inspector') {
+            try { localStorage.removeItem('tenon_inspector_w'); } catch {}
+          }
           applyTweaks();
+          if (key === 'inspector') reclampPanesFn();
           saveTweaks();
           if (key === 'canvasScale') {
             showToast(`画布渲染分辨率已切换至 ${btn.textContent}`);
@@ -5584,7 +5972,12 @@
     });
     el('btnResetTweaks').addEventListener('click', () => {
       appState.tweaks = { ...DEFAULT_TWEAKS };
+      try {
+        localStorage.removeItem('tenon_sidebar_w');
+        localStorage.removeItem('tenon_inspector_w');
+      } catch {}
       applyTweaks();
+      reclampPanesFn();
       saveTweaks();
       showToast('已恢复 Figma Weave 建筑白昼默认值');
     });
@@ -5935,6 +6328,22 @@
   syncTopbarOrb(null);
   setModeValue('agent-chat');
   initGlobalEvents();
+  window.addEventListener('beforeunload', () => {
+    closeActiveStream();
+    if (appState.globalStream) {
+      try { appState.globalStream.close(); } catch {}
+      appState.globalStream = null;
+    }
+    if (appState.globalStreamReconnectTimer) {
+      clearTimeout(appState.globalStreamReconnectTimer);
+      appState.globalStreamReconnectTimer = null;
+    }
+    if (globalRunsSyncTimer) {
+      clearTimeout(globalRunsSyncTimer);
+      globalRunsSyncTimer = null;
+    }
+    stopUpdateDownloadPoll();
+  });
   loadHealth();
   loadModels(false);
   loadProviders(false);

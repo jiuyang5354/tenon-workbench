@@ -1431,6 +1431,17 @@
         });
       });
 
+      // Inline In-Card Selection Helper (hoisted before resize handles & editors)
+      const selectNodeQuietly = (nid) => {
+        if (state.selectedId === nid) return;
+        state.selectedId = nid;
+        nodesLayerEl.querySelectorAll('.ic-node-wrap').forEach((w) => {
+          const s = w.dataset.nodeId === nid;
+          w.classList.toggle('is-selected', s);
+          w.querySelector('.agent-node')?.classList.toggle('is-selected', s);
+        });
+      };
+
       // Blender/Figma Free Per-Node Resize Handles (W / E / S / SE + delayed capture so dblclick reset works 100%!)
       nodesLayerEl.querySelectorAll('[data-ic-resize]').forEach((handle) => {
         handle.addEventListener('pointerdown', (e) => {
@@ -1475,15 +1486,6 @@
       });
 
       // Inline In-Card Editors: Title, Subtitle, Task Prompt & Editable Params (IME & focus safe!)
-      const selectNodeQuietly = (nid) => {
-        if (state.selectedId === nid) return;
-        state.selectedId = nid;
-        nodesLayerEl.querySelectorAll('.ic-node-wrap').forEach((w) => {
-          const s = w.dataset.nodeId === nid;
-          w.classList.toggle('is-selected', s);
-          w.querySelector('.agent-node')?.classList.toggle('is-selected', s);
-        });
-      };
 
       nodesLayerEl.querySelectorAll('[data-ic-title]').forEach((inp) => {
         inp.addEventListener('pointerdown', (e) => { e.stopPropagation(); selectNodeQuietly(inp.dataset.icTitle); });
@@ -2087,6 +2089,15 @@
     /* =========================================================================
        Collapsible Right-Side Deliverable & Node Config/CoT Drawer
        ========================================================================= */
+    let drawerEffortApi = null;
+
+    function cleanupDrawerWidgets() {
+      if (drawerEffortApi && typeof drawerEffortApi.destroy === 'function') {
+        try { drawerEffortApi.destroy(); } catch {}
+      }
+      drawerEffortApi = null;
+    }
+
     function openResultDrawer(tab = null) {
       state.drawerOpen = true;
       if (tab) state.drawerTab = tab;
@@ -2096,6 +2107,7 @@
 
     function closeResultDrawer() {
       state.drawerOpen = false;
+      cleanupDrawerWidgets();
       if (resultDrawerEl) resultDrawerEl.classList.add('hidden');
     }
 
@@ -2143,6 +2155,8 @@
         }
         return;
       }
+
+      cleanupDrawerWidgets();
 
       if (state.drawerTab === 'summary') {
         resultBodyEl.dataset.editingNodeId = '';
@@ -2291,15 +2305,15 @@
             <button type="button" class="btn-secondary-sm" id="btnDrawerRealCli">以此模型调起真实 CLI</button>
           </div>`;
 
-        // M6 fix: patch card title textContent directly without nuking canvas DOM or orbs!
+        // Sync live edits directly into in-card inputs without nuking canvas DOM or orbs
         let titlePushed = false;
         const titleInp = resultBodyEl.querySelector('#icEditTitle');
         titleInp?.addEventListener('focus', () => { titlePushed = false; });
         titleInp?.addEventListener('input', (e) => {
           if (!titlePushed) { pushHistory(); titlePushed = true; }
           node.title = e.target.value;
-          const titleEl = nodeEls.get(node.id)?.querySelector('.agent-node-title');
-          if (titleEl) titleEl.textContent = node.title;
+          const cardTitleInp = nodeEls.get(node.id)?.querySelector('.ic-inline-title');
+          if (cardTitleInp) cardTitleInp.value = node.title;
         });
 
         let promptPushed = false;
@@ -2308,6 +2322,8 @@
         promptInp?.addEventListener('input', (e) => {
           if (!promptPushed) { pushHistory(); promptPushed = true; }
           node.prompt = e.target.value;
+          const cardPromptInp = nodeEls.get(node.id)?.querySelector('.ic-inline-prompt');
+          if (cardPromptInp) cardPromptInp.value = node.prompt;
         });
 
         resultBodyEl.querySelector('#btnDrawerPickModel')?.addEventListener('click', (e) => {
@@ -2322,7 +2338,7 @@
         });
         const effMount = resultBodyEl.querySelector('#icDrawerEffortMount');
         if (effMount && window.ConduitEffortSlider) {
-          window.ConduitEffortSlider.mount(effMount, {
+          drawerEffortApi = window.ConduitEffortSlider.mount(effMount, {
             defaultValue: node.effort || getContext()?.codexEffort || 'high',
             recommended: 'high',
             compact: true,
@@ -2377,7 +2393,7 @@
               node._previewClip.videoPromise.then((u) => {
                 if (u) {
                   node._previewClipUrl = u;
-                  vApi?.update({ status: 'done', progress: 100, src: u });
+                  if (mediaMount.isConnected) vApi?.update({ status: 'done', progress: 100, src: u });
                 }
               });
             }
@@ -2615,10 +2631,23 @@
               .filter((e) => e && typeof e === 'object' && idSet.has(e.source) && idSet.has(e.target) && e.source !== e.target)
               .map((e, idx) => ({ id: typeof e.id === 'string' && e.id ? e.id : `e-load-${idx + 1}`, source: e.source, target: e.target }))
           : [];
+        const validAccents = new Set(['sage', 'slate', 'amber']);
+        const safeGroups = Array.isArray(raw.groups)
+          ? raw.groups
+              .filter((g) => g && typeof g === 'object' && Array.isArray(g.nodeIds))
+              .map((g, idx) => ({
+                id: typeof g.id === 'string' && g.id ? g.id : `grp-load-${idx + 1}`,
+                title: typeof g.title === 'string' && g.title.trim() ? g.title.trim() : `节点组 #${idx + 1}`,
+                accent: validAccents.has(g.accent) ? g.accent : 'sage',
+                nodeIds: Array.from(new Set(g.nodeIds.filter((nid) => idSet.has(nid)))),
+                collapsed: Boolean(g.collapsed),
+              }))
+              .filter((g) => g.nodeIds.length > 0)
+          : [];
 
         cancelActiveDemo(true);
         pushHistory();
-        state.graph = { nodes: hydratedNodes, edges: safeEdges };
+        state.graph = { nodes: hydratedNodes, edges: safeEdges, groups: safeGroups };
         state.seq = Math.max(state.seq, maxNumericSuffix(state.graph) + 1);
         state.selectedId = state.graph.nodes[0]?.id || '';
         if (onPresetChange) onPresetChange('');
@@ -2896,6 +2925,7 @@
             id, kind, title, model: model || 'global-default', effort: effort || 'global-default', prompt, x, y, w: w || NODE_WIDTH, h: h || null, muted,
           })),
           edges: state.graph.edges,
+          groups: Array.isArray(state.graph.groups) ? state.graph.groups : [],
         },
         null,
         2
@@ -3180,9 +3210,10 @@
       }
       const tag = (e.target?.tagName || '').toLowerCase();
       if (['input', 'textarea', 'select'].includes(tag)) return;
-      if (e.target?.closest?.('.ic-result-drawer, .studio-drawer, .inspector-pane, .tweaks-panel, .floating-popover, .ic-ctx-menu')) return;
-      const studioOpen = !document.getElementById('studioDrawer')?.classList.contains('hidden');
-      if (studioOpen) return;
+      if (e.target?.closest?.('.ic-result-drawer, .studio-drawer, .inspector-pane, .tweaks-panel, .floating-popover, .ic-ctx-menu, .c-modal, .mg-lightbox')) return;
+      const studioEl = document.getElementById('studioDrawer');
+      if (studioEl && !studioEl.classList.contains('hidden')) return;
+      if (document.querySelector('.c-modal:not(.hidden), .mg-lightbox:not(.hidden)')) return;
 
       const hasMod = e.ctrlKey || e.metaKey || e.altKey;
       const keyLower = e.key.toLowerCase();

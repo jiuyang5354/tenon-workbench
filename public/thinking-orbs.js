@@ -949,6 +949,11 @@
     mountAll(svg.parentElement || document);
     if (v.settles && !isPaused && settleMs > 0) {
       svg.__settleTimer = setTimeout(() => {
+        svg.__settleTimer = null;
+        if (!svg.isConnected) {
+          svg.__conduitOrb?.destroy();
+          return;
+        }
         if (svg.dataset.aiOrbState === key && svg.__conduitOrb) svg.__conduitOrb.pause();
       }, settleMs);
     }
