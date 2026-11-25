@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-surface="weave" data-accent="lime" data-inspector="standard" data-crosshairs="off" data-hatch="off" data-canvas-scale="2" data-canvas-grid="dots">
+<html lang="zh-CN" data-surface="weave" data-accent="lime" data-inspector="standard" data-chat-width="wide" data-crosshairs="off" data-hatch="off" data-canvas-scale="2" data-canvas-grid="dots">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -247,8 +247,8 @@
         </button>
       </div>
 
-      <!-- Full-Viewport Blender-Style Infinite Agent Cluster Canvas -->
-      <section class="workflow-stage hidden" id="workflowStage" aria-label="Blender 风格无限 Agent 集群编排画布">
+      <!-- Full-Viewport Multi-Agent Node Canvas -->
+      <section class="workflow-stage hidden" id="workflowStage" aria-label="多 Agent 节点编排画布">
         <div class="ic-viewport" id="wfViewport" tabindex="0">
           <!-- Transformed Infinite World Layer -->
           <div class="ic-world" id="wfWorld">
@@ -257,71 +257,77 @@
             <div class="ic-nodes-layer" id="wfNodesLayer"></div>
           </div>
 
-          <!-- Floating Top-Left: Unified Architectural Add, Node Group & Preset Strip -->
+          <!-- Floating Top-Left: Node Creation, Grouping & Flow Template -->
           <div class="ic-floating-bar ic-top-left">
-            <div class="ic-add-group" role="group" aria-label="添加 Agent 节点与节点组">
-              <button type="button" class="ic-chip-btn" data-ic-add="gemini-plan" title="添加 Gemini 规划节点">+ Gemini</button>
-              <button type="button" class="ic-chip-btn" data-ic-add="codex-exec" title="添加并行 Codex 沙箱工位">+ Codex</button>
-              <button type="button" class="ic-chip-btn" data-ic-add="custom-agent" title="添加已接入的外部本地 Agent 或 API 节点（Claude Code / Ollama / DeepSeek 等）">+ 外部 Agent</button>
-              <button type="button" class="ic-chip-btn" data-ic-add="cluster-merge" title="添加多路集群聚合合并器">+ 合并器</button>
-              <button type="button" class="ic-chip-btn" data-ic-add="codex-review" title="添加 Pre-CI 代码审查门禁">+ Pre-CI</button>
-              <button type="button" class="ic-chip-btn is-group-add" id="btnWfAddGroup" title="创建 Blender 风格节点组容器 (Ctrl+G)">+ 节点组</button>
+            <div class="ic-add-group" role="group" aria-label="添加节点与分组">
+              <button type="button" class="ic-chip-btn" data-ic-add="gemini-plan" title="添加需求分析与规划节点">+ 规划</button>
+              <button type="button" class="ic-chip-btn" data-ic-add="codex-exec" title="添加代码实现节点">+ 开发</button>
+              <button type="button" class="ic-chip-btn" data-ic-add="custom-agent" title="添加外部 Agent 或 API 节点（Claude Code / Ollama / DeepSeek 等）">+ 外部模型</button>
+              <button type="button" class="ic-chip-btn" data-ic-add="cluster-merge" title="添加结果汇总节点，将多路输出合并">+ 汇总</button>
+              <button type="button" class="ic-chip-btn" data-ic-add="codex-review" title="添加代码审查节点">+ 审查</button>
+              <button type="button" class="ic-chip-btn is-group-add" id="btnWfAddGroup" title="将相关节点归为一组方便整体移动 (Ctrl+G)">+ 分组</button>
             </div>
             <span class="ic-divider" aria-hidden="true"></span>
-            <label class="ic-preset-wrap" title="切换集群拓扑模板">
-              <select id="selectWfPreset" class="ic-preset-select" aria-label="集群拓扑模板">
-                <option value="cluster" selected>5节点集群</option>
-                <option value="multi">双集群二级合并 (9节点)</option>
-                <option value="linear">3节点精简链路</option>
-                <option value="blank">空白自定义画布</option>
+            <label class="ic-preset-wrap" title="切换流程模板">
+              <select id="selectWfPreset" class="ic-preset-select" aria-label="流程模板">
+                <option value="cluster" selected>并行开发模板 (5节点)</option>
+                <option value="multi">前后端分层模板 (9节点)</option>
+                <option value="linear">标准三步模板 (3节点)</option>
+                <option value="blank">空白画布</option>
               </select>
             </label>
           </div>
 
-          <!-- Floating Top-Right: Quiet Studio Actions + Signature Chartreuse CTA -->
+          <!-- Floating Top-Right: Canvas Actions + Clear Preview vs Real Execution -->
           <div class="ic-floating-bar ic-top-right">
-            <button type="button" class="ic-chip-btn" id="btnWfDrawerToggle" title="展开/收起集群交付成果与思考链面板">成果面板</button>
-            <button type="button" class="ic-chip-btn" id="btnWfLayout" title="按拓扑层级自动整理节点 (L)">整理</button>
-            <button type="button" class="ic-chip-btn" id="btnWfUndo" title="撤销上一步 (Ctrl+Z)">撤销</button>
-            <button type="button" class="ic-chip-btn" id="btnWfReset" title="重置运行状态">重置</button>
+            <button type="button" class="ic-chip-btn" id="btnWfDrawerToggle" title="展开或收起流程概览与节点配置面板">详情面板</button>
+            <button type="button" class="ic-chip-btn" id="btnWfLayout" title="按执行顺序自动排列节点 (L)">自动排列</button>
+            <button type="button" class="ic-chip-btn" id="btnWfUndo" title="撤销上一步操作 (Ctrl+Z)">撤销</button>
+            <button type="button" class="ic-chip-btn" id="btnWfReset" title="清空节点运行状态">重置</button>
             <span class="ic-divider" aria-hidden="true"></span>
-            <label class="ic-chip-check" title="勾选后在终局门禁触发模拟拦截">
+            <label class="ic-chip-check" title="勾选后在流程预演时演示审查拦截效果">
               <input type="checkbox" id="chkWfFailLast" />
-              <span>模拟拦截</span>
+              <span>预演拦截</span>
             </label>
-            <button type="button" class="btn-weave-cta wf-btn" id="btnWfRunAll">
+            <button type="button" class="ic-chip-btn" id="btnWfPreviewAll" title="仅在画布内演示各阶段执行顺序，不会修改本地文件">流程预演</button>
+            <button type="button" class="btn-weave-cta wf-btn" id="btnWfRunAll" title="按当前画布的模型与节点提示词发起真实执行">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5Z" /></svg>
-              <span>运行集群</span>
+              <span>按此流程执行</span>
             </button>
+          </div>
+
+          <!-- Floating Bottom-Center: Subtle Interaction Hint & Live Status Pill -->
+          <div class="ic-bottom-stack">
+            <div class="ic-status-pill mono" id="wfStatusBar">拖动画布平移 · 滚轮缩放 · 点击或拖拽端口连线 · 双击节点编辑</div>
           </div>
 
           <!-- Floating Bottom-Left: Compact Zoom, Grid & Fit Controls -->
           <div class="ic-floating-bar ic-zoom-hud">
-            <button type="button" class="ic-zoom-btn mono" id="btnWfZoomOut" title="缩小">−</button>
+            <button type="button" class="ic-zoom-btn mono" id="btnWfZoomOut" title="缩小画布">−</button>
             <button type="button" class="ic-zoom-val mono" id="btnWfZoomReset" title="点击重置为 100%">84%</button>
-            <button type="button" class="ic-zoom-btn mono" id="btnWfZoomIn" title="放大">+</button>
+            <button type="button" class="ic-zoom-btn mono" id="btnWfZoomIn" title="放大画布">+</button>
             <span class="ic-divider" aria-hidden="true"></span>
-            <button type="button" class="ic-chip-btn" id="btnWfGridCycle" title="切换无限画布底纹（点状网格 / 制图细格 / 纯粹素面）">网格: 点阵</button>
-            <button type="button" class="ic-chip-btn" id="btnWfFit" title="适配全部节点到视野 (F)">全览</button>
-            <button type="button" class="ic-chip-btn" id="btnWfExport" title="导出集群拓扑 JSON">JSON</button>
+            <button type="button" class="ic-chip-btn" id="btnWfGridCycle" title="切换画布背景底纹">底纹: 点阵</button>
+            <button type="button" class="ic-chip-btn" id="btnWfFit" title="将全部节点适配到当前视野 (F)">全览</button>
+            <button type="button" class="ic-chip-btn" id="btnWfExport" title="复制当前流程配置 JSON">导出 JSON</button>
           </div>
 
           <!-- Floating Bottom-Right: Live Interactive Minimap -->
-          <div class="ic-minimap-card" title="实时缩略导航图（点击居中全览）">
+          <div class="ic-minimap-card" title="缩略导航图（点击居中全览）">
             <canvas id="wfMinimapCanvas" width="164" height="100"></canvas>
           </div>
 
-          <!-- Blender-Style Right-Click Context Menu (21st.dev #23560) -->
-          <div class="ic-ctx-menu hidden" id="wfContextMenu" role="menu" aria-label="Blender 节点画布右键菜单"></div>
+          <!-- Right-Click / Quick-Add Context Menu -->
+          <div class="ic-ctx-menu hidden" id="wfContextMenu" role="menu" aria-label="画布快捷菜单"></div>
 
-          <!-- Slide-Over Cluster Deliverable & Node CoT Result Drawer -->
-          <aside class="ic-result-drawer hidden" id="wfResultDrawer" aria-label="集群交付成果与节点思考链面板">
+          <!-- Slide-Over Flow Overview & Node Config Drawer -->
+          <aside class="ic-result-drawer hidden" id="wfResultDrawer" aria-label="流程概览与节点配置面板">
             <header class="ic-drawer-head">
               <div class="ic-drawer-tabs" id="wfResultTabs" role="tablist">
-                <button type="button" class="ic-dtab active" role="tab" aria-selected="true" data-drawer-tab="summary">集群总汇报</button>
-                <button type="button" class="ic-dtab" role="tab" aria-selected="false" data-drawer-tab="node">当前节点详情</button>
+                <button type="button" class="ic-dtab active" role="tab" aria-selected="true" data-drawer-tab="summary">流程概览</button>
+                <button type="button" class="ic-dtab" role="tab" aria-selected="false" data-drawer-tab="node">节点配置</button>
               </div>
-              <button type="button" class="rail-icon-btn" id="btnWfDrawerClose" title="收起成果面板">
+              <button type="button" class="rail-icon-btn" id="btnWfDrawerClose" title="收起详情面板">
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.35" />
                 </svg>
@@ -329,8 +335,8 @@
             </header>
             <div class="ic-drawer-body" id="wfResultBody"></div>
             <footer class="ic-drawer-foot">
-              <input type="text" class="text-input ic-drawer-followup" id="inputWfFollowup" placeholder="继续向此集群追问或下发下一轮指令..." autocomplete="off" />
-              <button type="button" class="btn-primary-sm" id="btnWfFollowupSend">发送</button>
+              <input type="text" class="text-input ic-drawer-followup" id="inputWfFollowup" placeholder="输入本次任务目标，回车按当前流程真实执行..." autocomplete="off" />
+              <button type="button" class="btn-primary-sm" id="btnWfFollowupSend">执行</button>
             </footer>
           </aside>
         </div>
@@ -426,6 +432,17 @@
                     <button type="button" data-val="lime" class="active">柠黄高亮</button>
                     <button type="button" data-val="ink">极简纯墨</button>
                     <button type="button" data-val="sage">雾森绿</button>
+                  </div>
+                </div>
+
+                <div class="settings-row">
+                  <div class="settings-row-info">
+                    <strong>对话流阅读宽度</strong>
+                  </div>
+                  <div class="tweak-pills settings-pills" data-tweak="chatWidth">
+                    <button type="button" data-val="standard">适中</button>
+                    <button type="button" data-val="wide" class="active">宽屏</button>
+                    <button type="button" data-val="full">铺满</button>
                   </div>
                 </div>
 
@@ -613,8 +630,11 @@
 
           <!-- Resume Session Context Chip -->
           <div class="composer-context-bar hidden" id="resumeIndicator">
-            <span class="mono-xs">续跑 Codex 会话（仅直派模式生效）：<strong id="resumeThreadLabel"></strong></span>
-            <button type="button" class="link-btn" id="btnClearResume">清除</button>
+            <span class="mono-xs">将在当前对话内续跑 Codex 会话：<strong id="resumeThreadLabel"></strong></span>
+            <div class="resume-bar-actions">
+              <button type="button" class="link-btn is-accent-link" id="btnResumeNow" title="直接发送“继续”从中断处续跑">立即续跑</button>
+              <button type="button" class="link-btn" id="btnClearResume">取消</button>
+            </div>
           </div>
 
           <textarea
@@ -901,6 +921,15 @@
         <span class="field-label">CODEX_HOME 配置档</span>
         <select id="selectCodexHome" class="select-input mono">
           <option value="">默认环境变量</option>
+        </select>
+      </label>
+      <label class="field-block span-2">
+        <span class="field-label">执行超时策略</span>
+        <select id="selectTimeoutMode" class="select-input mono">
+          <option value="none" selected>不限时（默认，可随时点击停止）</option>
+          <option value="idle-10m">连续 10 分钟无输出自动停止</option>
+          <option value="max-15m">单步最长 15 分钟</option>
+          <option value="max-30m">单步最长 30 分钟</option>
         </select>
       </label>
       <div class="guardrail-checks span-2">

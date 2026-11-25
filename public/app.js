@@ -53,6 +53,7 @@
     surface: 'weave',
     accent: 'lime',
     inspector: 'standard',
+    chatWidth: 'wide',
     canvasScale: '2',
     canvasGrid: 'dots',
     fontSize: 14,
@@ -102,6 +103,7 @@
     globalStreamReconnectTimer: null,
     openRunSeq: 0,
     resumeThreadId: '',
+    resumeRunId: '',
     stickyBottom: true,
     gateDirtyText: null,
     treeGroupOpen: new Map(), // key -> boolean (manual override)
@@ -161,6 +163,7 @@
     root.dataset.surface = t.surface;
     root.dataset.accent = t.accent;
     root.dataset.inspector = t.inspector;
+    root.dataset.chatWidth = String(t.chatWidth || 'wide');
     root.dataset.canvasScale = String(t.canvasScale || '2');
     root.dataset.canvasGrid = String(t.canvasGrid || 'dots');
     root.dataset.crosshairs = t.crosshairs ? 'on' : 'off';
@@ -184,8 +187,8 @@
     }
     const gridBtn = el('btnWfGridCycle');
     if (gridBtn) {
-      const gLabels = { dots: '网格: 点阵', grid: '网格: 细格', solid: '网格: 纯色' };
-      gridBtn.textContent = gLabels[t.canvasGrid || 'dots'] || '网格: 点阵';
+      const gLabels = { dots: '底纹: 点阵', grid: '底纹: 细格', solid: '底纹: 纯色' };
+      gridBtn.textContent = gLabels[t.canvasGrid || 'dots'] || '底纹: 点阵';
     }
 
     el('tweakFontRange').value = String(t.fontSize);
@@ -1312,8 +1315,17 @@
     }
   }
 
+  function clearResumeState() {
+    appState.resumeThreadId = '';
+    appState.resumeRunId = '';
+    el('resumeIndicator')?.classList.add('hidden');
+  }
+
   async function openRunById(id) {
     const reqSeq = ++appState.openRunSeq;
+    if (appState.resumeRunId && appState.resumeRunId !== id) {
+      clearResumeState();
+    }
     if (appState.localRuns.has(id)) {
       closeActiveStream();
       const localRun = appState.localRuns.get(id);
@@ -1494,6 +1506,7 @@
   function resetToNewChat() {
     appState.openRunSeq += 1;
     closeActiveStream();
+    clearResumeState();
     appState.currentRun = null;
     appState.gateDirtyText = null;
     el('welcomeStage').classList.remove('hidden');
@@ -2220,6 +2233,93 @@
       </div>`;
   }
 
+  function renderChatMessagesHtml(run, messages) {
+    const htmlParts = [];
+    (messages || []).forEach((msg, idx) => {
+      const msgKey = msg.id || `${run.id}:msg:${idx}`;
+      const ts = new Date(msg.createdAt || run.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+      if (msg.role === 'user') {
+        htmlParts.push(`
+          <div class="msg-user-wrap">
+            <div class="msg-user-bubble">
+              <div class="msg-user-text">${escapeHtml(stripPreferenceTag(msg.content))}</div>
+              <div class="msg-user-meta">
+                <span>${ts}</span>
+              </div>
+            </div>
+          </div>`);
+        return;
+      }
+
+      const isStreamingMsg = msg.status === 'running';
+      const engineLabel = msg.engine || 'Gemini';
+      const isCodexEng = engineLabel === 'Codex';
+      const avatarCls = isCodexEng ? 'codex' : 'gemini';
+      const glyph = isCodexEng ? 'C' : (engineLabel === 'Gemini' ? 'G' : (engineLabel.trim()[0] || 'A').toUpperCase());
+      const metaBits = [];
+      if (msg.tokens) metaBits.push(`${Number(msg.tokens).toLocaleString()} TOKENS`);
+      if (msg.durationMs) metaBits.push(`${(msg.durationMs / 1000).toFixed(1)}s`);
+      if (!metaBits.length) {
+        if (isStreamingMsg) metaBits.push('回复中...');
+        else if (msg.status === 'interrupted') metaBits.push('已中断');
+        else if (msg.status === 'cancelled') metaBits.push('已中止');
+        else metaBits.push(ts);
+      }
+
+      const traceHtml = renderChatTraceHtml(msg, isStreamingMsg, msgKey);
+      let statusPillHtml = '';
+      if (isStreamingMsg) {
+        statusPillHtml = `<span class="agent-status-pill running is-shimmer"><span>${escapeHtml(msg.liveStep ? '执行工具中...' : '思考与回复中...')}</span></span>`;
+      } else if (msg.status === 'failed') {
+        statusPillHtml = '<span class="agent-status-pill failed"><span>执行失败</span></span>';
+      } else if (msg.status === 'cancelled') {
+        statusPillHtml = '<span class="agent-status-pill cancelled"><span>已中止</span></span>';
+      } else if (msg.status === 'interrupted') {
+        statusPillHtml = '<span class="agent-status-pill interrupted"><span>已中断</span></span>';
+      }
+
+      const fallbackNote = !isStreamingMsg && !msg.content && !msg.error
+        ? (msg.status === 'interrupted'
+            ? '<p class="agent-empty-state mono-xs">本次回复在完成前被中断，可直接点击右下角在当前对话内继续。</p>'
+            : msg.status === 'cancelled'
+              ? '<p class="agent-empty-state mono-xs">已手动中止本次回复。</p>'
+              : msg.status === 'failed'
+                ? '<p class="agent-empty-state mono-xs">本次调用未返回内容，可在右侧事件终端查看详情。</p>'
+                : '')
+        : '';
+
+      const canResumeCodex = !isStreamingMsg && isCodexEng && Boolean(run.codex?.threadId);
+      const canContinueInterrupted = !isStreamingMsg && !canResumeCodex && (msg.status === 'interrupted' || msg.status === 'cancelled');
+
+      htmlParts.push(`
+        <article class="agent-turn chat-turn ${isStreamingMsg ? 'is-streaming' : ''}">
+          <header class="agent-turn-head">
+            <div class="agent-identity">
+              <span class="agent-avatar ${avatarCls} ${isStreamingMsg ? 'is-orb' : ''}">${isStreamingMsg ? '<svg class="thinking-orb" width="16" height="16" viewBox="0 0 18 18" data-orb-family="ai" data-orb-state="ai-solving" data-orb-variant="ai" data-orb-size="16" aria-hidden="true"></svg>' : escapeHtml(glyph)}</span>
+              <span class="agent-role-name">${escapeHtml(engineLabel)}</span>
+              ${msg.model ? `<span class="agent-model-tag">${escapeHtml(msg.model)}</span>` : ''}
+            </div>
+            <div class="agent-head-right">
+              ${statusPillHtml}
+            </div>
+          </header>
+          ${traceHtml}
+          ${msg.content ? `<div class="markdown-output">${renderMarkdown(msg.content)}</div>` : fallbackNote}
+          ${msg.error ? `<div class="error-banner">${escapeHtml(msg.error)}</div>` : ''}
+          <footer class="agent-turn-foot">
+            <span class="mono-xs">${escapeHtml(metaBits.join(' · '))}</span>
+            <div class="turn-foot-actions">
+              ${canResumeCodex ? `<button type="button" class="link-btn" data-use-resume="${escapeHtml(run.codex.threadId)}">以此会话续跑</button>` : ''}
+              ${canContinueInterrupted ? '<button type="button" class="link-btn" data-continue-interrupted="1">从中断处续跑</button>' : ''}
+              ${isCodexEng && run.codex?.diff ? '<button type="button" class="link-btn" data-open-insp="diff">查看 Git Diff →</button>' : ''}
+              ${msg.content ? `<button type="button" class="link-btn" data-copy-msg="${escapeHtml(msgKey)}">复制</button>` : ''}
+            </div>
+          </footer>
+        </article>`);
+    });
+    return htmlParts.join('');
+  }
+
   function renderConversationThread(run) {
     if (!run) return;
     el('welcomeStage').classList.add('hidden');
@@ -2261,80 +2361,7 @@
         ? run.messages
         : [{ id: 'initial_u', role: 'user', content: run.prompt, status: 'done', createdAt: run.createdAt }];
 
-      messages.forEach((msg, idx) => {
-        const msgKey = msg.id || `${run.id}:msg:${idx}`;
-        const ts = new Date(msg.createdAt || run.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
-        if (msg.role === 'user') {
-          parts.push(`
-            <div class="msg-user-wrap">
-              <div class="msg-user-bubble">
-                <div class="msg-user-text">${escapeHtml(stripPreferenceTag(msg.content))}</div>
-                <div class="msg-user-meta">
-                  <span>${ts}</span>
-                </div>
-              </div>
-            </div>`);
-        } else {
-          const isStreamingMsg = msg.status === 'running';
-          const engineLabel = msg.engine || 'Gemini';
-          const isCodexEng = engineLabel === 'Codex';
-          const avatarCls = isCodexEng ? 'codex' : 'gemini';
-          const glyph = isCodexEng ? 'C' : (engineLabel === 'Gemini' ? 'G' : (engineLabel.trim()[0] || 'A').toUpperCase());
-          const metaBits = [];
-          if (msg.tokens) metaBits.push(`${Number(msg.tokens).toLocaleString()} TOKENS`);
-          if (msg.durationMs) metaBits.push(`${(msg.durationMs / 1000).toFixed(1)}s`);
-          if (!metaBits.length) {
-            if (isStreamingMsg) metaBits.push('回复中...');
-            else if (msg.status === 'interrupted') metaBits.push('已中断');
-            else if (msg.status === 'cancelled') metaBits.push('已中止');
-            else metaBits.push(ts);
-          }
-
-          const traceHtml = renderChatTraceHtml(msg, isStreamingMsg, msgKey);
-          let statusPillHtml = '';
-          if (isStreamingMsg) {
-            statusPillHtml = `<span class="agent-status-pill running is-shimmer"><span>${escapeHtml(msg.liveStep ? '执行工具中...' : '思考与回复中...')}</span></span>`;
-          } else if (msg.status === 'failed') {
-            statusPillHtml = '<span class="agent-status-pill failed"><span>执行失败</span></span>';
-          } else if (msg.status === 'cancelled') {
-            statusPillHtml = '<span class="agent-status-pill cancelled"><span>已中止</span></span>';
-          } else if (msg.status === 'interrupted') {
-            statusPillHtml = '<span class="agent-status-pill interrupted"><span>已中断</span></span>';
-          }
-
-          const fallbackNote = !isStreamingMsg && !msg.content && !msg.error
-            ? (msg.status === 'interrupted'
-                ? '<p class="agent-empty-state mono-xs">本次回复在完成前被中断（工作台重启或进程退出）。可继续发送下一条消息。</p>'
-                : msg.status === 'cancelled'
-                  ? '<p class="agent-empty-state mono-xs">已手动中止本次回复。</p>'
-                  : msg.status === 'failed'
-                    ? '<p class="agent-empty-state mono-xs">本次调用未返回内容，请在右侧终端事件查看详情。</p>'
-                    : '')
-            : '';
-
-          parts.push(`
-            <article class="agent-turn chat-turn ${isStreamingMsg ? 'is-streaming' : ''}">
-              <header class="agent-turn-head">
-                <div class="agent-identity">
-                  <span class="agent-avatar ${avatarCls} ${isStreamingMsg ? 'is-orb' : ''}">${isStreamingMsg ? '<svg class="thinking-orb" width="18" height="18" viewBox="0 0 18 18" data-orb-family="ai" data-orb-state="ai-solving" data-orb-variant="ai" data-orb-size="18" aria-hidden="true"></svg>' : escapeHtml(glyph)}</span>
-                  <span class="agent-role-name">${escapeHtml(engineLabel)}</span>
-                  ${msg.model ? `<span class="agent-model-tag">${escapeHtml(msg.model)}</span>` : ''}
-                </div>
-                ${statusPillHtml}
-              </header>
-              ${traceHtml}
-              ${msg.content ? `<div class="markdown-output">${renderMarkdown(msg.content)}</div>` : fallbackNote}
-              ${msg.error ? `<div class="error-banner">${escapeHtml(msg.error)}</div>` : ''}
-              <footer class="agent-turn-foot">
-                <span class="mono-xs">${escapeHtml(metaBits.join(' · '))}</span>
-                <div class="turn-foot-actions">
-                  ${isCodexEng && run.codex?.diff ? '<button type="button" class="link-btn" data-open-insp="diff">查看 Git Diff →</button>' : ''}
-                  ${msg.content ? `<button type="button" class="link-btn" data-copy-msg="${escapeHtml(msgKey)}">复制</button>` : ''}
-                </div>
-              </footer>
-            </article>`);
-        }
-      });
+      parts.push(renderChatMessagesHtml(run, messages));
 
       container.innerHTML = parts.join('');
       bindThreadDynamicHandlers(container, run);
@@ -2589,6 +2616,12 @@
       }
     }
 
+    // 8. In-Place Resumed / Follow-Up Messages appended onto non-chat runs
+    if (Array.isArray(run.messages) && run.messages.length > 0) {
+      parts.push('<div class="thread-followup-divider"><span class="mono-xs">原会话内续跑记录</span></div>');
+      parts.push(renderChatMessagesHtml(run, run.messages));
+    }
+
     container.innerHTML = parts.join('');
     bindThreadDynamicHandlers(container, run);
     mountTurnMediaWidgets(container, run);
@@ -2731,10 +2764,29 @@
       btn.addEventListener('click', () => {
         const tid = btn.dataset.useResume;
         appState.resumeThreadId = tid;
-        el('resumeThreadLabel').textContent = `${tid.slice(0, 14)}...`;
+        appState.resumeRunId = run.id;
+        el('resumeThreadLabel').textContent = tid.length > 16 ? `${tid.slice(0, 14)}...` : tid;
         el('resumeIndicator').classList.remove('hidden');
-        setModeValue('codex-exec');
-        showToast('已锁定上次 Codex 会话并切至「Codex 直派」');
+        setModeValue('agent-chat');
+        setGeminiModelValue('codex:chat');
+        el('inputPrompt')?.focus();
+        showToast('已锁定原 Codex 会话，下一条消息将在当前对话内续跑（不新建对话）');
+      });
+    });
+
+    container.querySelectorAll('[data-continue-interrupted]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        setModeValue('agent-chat');
+        const ta = el('inputPrompt');
+        if (ta) {
+          if (!ta.value.trim()) {
+            ta.value = '请从上次中断处继续完成刚才的任务。';
+            autoGrowTextarea(ta);
+          }
+          ta.focus();
+          ta.setSelectionRange(ta.value.length, ta.value.length);
+        }
+        showToast('已就绪，按回车即可在当前对话内继续');
       });
     });
 
@@ -3548,13 +3600,23 @@
         ? `\n\n[用户偏好风格: ${prefCtx.personalityName}${cleanInstr ? ` | ${cleanInstr}` : ''}]`
         : '';
 
+    const usedExplicitPipelineSlash = /^\/(pipeline|plan|codex|review|copy|agent|image|video)(?:\s|$)/i.test(rawPrompt);
+    const isInPlaceResume = Boolean(
+      appState.resumeThreadId &&
+      appState.currentRun &&
+      appState.resumeRunId === appState.currentRun.id &&
+      !appState.localRuns.has(appState.currentRun.id) &&
+      appState.currentRun.status !== 'running' &&
+      appState.currentRun.status !== 'awaiting_approval'
+    );
+
     const payload = {
       mode,
       prompt: `${prompt}${refNotes}${prefNote}`,
       workspaceDir: el('inputWorkspace').value.trim(),
-      geminiModel: selectedPrimaryModel,
-      providerId: parsedExtRef?.providerId || '',
-      providerModel: parsedExtRef?.model || '',
+      geminiModel: isInPlaceResume ? 'codex:chat' : selectedPrimaryModel,
+      providerId: isInPlaceResume ? '' : (parsedExtRef?.providerId || ''),
+      providerModel: isInPlaceResume ? '' : (parsedExtRef?.model || ''),
       codexModel: el('selectCodexModel').value,
       codexReviewModel: el('selectCodexReviewModel').value,
       codexEffort: cliEffort,
@@ -3564,26 +3626,32 @@
       requireApproval: el('chkApproval').checked,
       useWorktree: el('chkWorktree').checked,
       allowCodexNetwork: Boolean(el('chkCodexNetwork')?.checked),
-      resumeThreadId: mode === 'codex-exec' ? appState.resumeThreadId : '',
+      timeoutMode: el('selectTimeoutMode')?.value || 'none',
+      resumeThreadId: isInPlaceResume
+        ? appState.resumeThreadId
+        : (mode === 'codex-exec' ? appState.resumeThreadId : ''),
+      forceCodexResume: isInPlaceResume,
     };
 
-    const canContinueChat =
-      mode === 'agent-chat' &&
+    const canContinueInPlace = Boolean(
       appState.currentRun &&
-      appState.currentRun.mode === 'agent-chat' &&
       !appState.localRuns.has(appState.currentRun.id) &&
       appState.currentRun.status !== 'running' &&
-      appState.currentRun.status !== 'awaiting_approval';
+      appState.currentRun.status !== 'awaiting_approval' &&
+      !usedExplicitPipelineSlash &&
+      (isInPlaceResume || mode === 'agent-chat')
+    );
 
     el('btnStartRun').disabled = true;
     try {
-      const endpoint = canContinueChat
+      const endpoint = canContinueInPlace
         ? `/api/runs/${encodeURIComponent(appState.currentRun.id)}/message`
         : '/api/runs';
       const { run } = await api(endpoint, {
         method: 'POST',
         body: JSON.stringify(payload),
       });
+      if (isInPlaceResume) clearResumeState();
       el('inputPrompt').value = '';
       autoGrowTextarea(el('inputPrompt'));
       if (appState.contextChips.length > 0) {
@@ -5071,8 +5139,7 @@
     el('inputWorkspace').value = clean;
     saveWorkspacePath(clean);
     if (appState.resumeThreadId) {
-      appState.resumeThreadId = '';
-      el('resumeIndicator')?.classList.add('hidden');
+      clearResumeState();
     }
     renderDiscoveredWorkspaces();
     const ok = await inspectCurrentWorkspace({ persist: true });
@@ -5449,7 +5516,8 @@
         if (canvasEngine) canvasEngine.loadPreset(btn.dataset.icPreset);
       });
     });
-    el('btnWfRunAll')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.runClusterDemo(); });
+    el('btnWfRunAll')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.dispatchFlowReal(); });
+    el('btnWfPreviewAll')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.runClusterDemo(); });
     el('btnWfDrawerToggle')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.toggleResultDrawer(); });
     el('btnWfDrawerClose')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.closeResultDrawer(); });
     el('btnWfLayout')?.addEventListener('click', () => { if (canvasEngine) canvasEngine.autoLayout(); });
@@ -5467,7 +5535,7 @@
     const fireCanvasCmd = () => {
       const inp = el('inputWfCommand');
       const txt = (inp?.value || '').trim();
-      if (canvasEngine) canvasEngine.runClusterDemo(txt);
+      if (canvasEngine) canvasEngine.dispatchFlowReal(txt);
     };
     el('btnWfCommandRun')?.addEventListener('click', fireCanvasCmd);
     el('inputWfCommand')?.addEventListener('keydown', (e) => {
@@ -5480,7 +5548,7 @@
       if (!txt) return;
       if (el('inputWfCommand')) el('inputWfCommand').value = txt;
       inp.value = '';
-      if (canvasEngine) canvasEngine.runClusterDemo(txt);
+      if (canvasEngine) canvasEngine.dispatchFlowReal(txt);
     };
     el('btnWfFollowupSend')?.addEventListener('click', fireDrawerFollowup);
     el('inputWfFollowup')?.addEventListener('keydown', (e) => {
@@ -5686,8 +5754,7 @@
     el('btnInspectWs').addEventListener('click', () => inspectCurrentWorkspace({ persist: true, explicit: true }));
     el('inputWorkspace').addEventListener('change', () => {
       if (appState.resumeThreadId) {
-        appState.resumeThreadId = '';
-        el('resumeIndicator').classList.add('hidden');
+        clearResumeState();
       }
       inspectCurrentWorkspace({ persist: true });
     });
@@ -5907,8 +5974,15 @@
     });
 
     el('btnClearResume').addEventListener('click', () => {
-      appState.resumeThreadId = '';
-      el('resumeIndicator').classList.add('hidden');
+      clearResumeState();
+    });
+    el('btnResumeNow')?.addEventListener('click', () => {
+      const ta = el('inputPrompt');
+      if (ta && !ta.value.trim()) {
+        ta.value = '请从上次中断处继续完成刚才的任务。';
+        autoGrowTextarea(ta);
+      }
+      startRun();
     });
 
     // Dedicated Settings Page Appearance & Canvas Resolution Controls

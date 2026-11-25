@@ -1329,3 +1329,108 @@ test('workspace helpers handle Chinese/space filenames, unborn repos, and guarde
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('in-place session resume continues codex-exec and interrupted pipeline runs in the same thread and honors timeoutPolicy', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tenon-resume-inplace-'));
+  const tmpData = path.join(root, 'data');
+  const wsDir = path.join(root, 'ws');
+  await fs.mkdir(wsDir, { recursive: true });
+
+  const mockLlm = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8' });
+    res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'resumed-in-place-ok' } }] })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
+  });
+  await new Promise((resolve) => mockLlm.listen(0, '127.0.0.1', resolve));
+
+  const { server, store, orchestrator } = await createWorkbenchServer({ dataDir: tmpData, defaultWorkspace: wsDir });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // Verify timeoutPolicy defaults to unlimited (0ms) and supports explicit modes
+    assert.deepEqual(orchestrator.resolveTimeoutPolicy('none'), { timeoutMs: 0, idleTimeoutMs: 0 });
+    assert.deepEqual(orchestrator.resolveTimeoutPolicy(''), { timeoutMs: 0, idleTimeoutMs: 0 });
+    assert.deepEqual(orchestrator.resolveTimeoutPolicy('idle-10m'), { timeoutMs: 0, idleTimeoutMs: 600_000 });
+    assert.deepEqual(orchestrator.resolveTimeoutPolicy('max-15m'), { timeoutMs: 900_000, idleTimeoutMs: 0 });
+    assert.deepEqual(orchestrator.resolveTimeoutPolicy('max-30m'), { timeoutMs: 1_800_000, idleTimeoutMs: 0 });
+
+    // Create mock provider for deterministic in-place execution
+    const pRes = await fetch(`${base}/api/providers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Resume Mock Provider',
+        kind: 'api',
+        protocol: 'openai-compatible',
+        baseUrl: `http://127.0.0.1:${mockLlm.address().port}/v1`,
+        apiKey: 'sk-resume-1234',
+        defaultModel: 'mock-r',
+        enabled: true,
+      }),
+    });
+    assert.equal(pRes.status, 200);
+    const { provider } = await pRes.json();
+
+    // Seed an interrupted full-pipeline run (with existing planText & codex threadId)
+    store.create({
+      id: 'run_pipe_interrupted',
+      mode: 'full-pipeline',
+      title: '被中断的全链路任务',
+      prompt: '检查 PR 代码是否有 bug',
+      workspaceDir: wsDir,
+      effectiveWorkDir: wsDir,
+      isGitRepo: false,
+      status: 'interrupted',
+      activeStage: 'interrupted',
+      config: { geminiModel: 'gemini-4-neon-high', codexModel: '', sandbox: 'workspace-write', timeoutMode: 'none' },
+      gemini: { status: 'done', planText: '初始架构方案保留', summaryText: '', copyText: '', durationMs: 1200, error: null },
+      codex: { status: 'failed', threadId: '01a2104b-5ddd-7e90-95a4-da2d025a0a31', execText: '部分执行结果', diff: '', diffStat: '', durationMs: 300000, error: '已中断' },
+      metrics: { geminiTokens: 100, codexTokens: 200, totalDurationMs: 301200 },
+      messages: [],
+      events: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const beforeList = await (await fetch(`${base}/api/runs`)).json();
+    assert.equal(beforeList.runs.length, 1);
+
+    // Continue in place via POST /api/runs/:id/message (must NOT open a second run!)
+    const contRes = await fetch(`${base}/api/runs/run_pipe_interrupted/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: '请从中断处继续完成',
+        geminiModel: `provider:${provider.id}:mock-r`,
+        timeoutMode: 'idle-10m',
+      }),
+    });
+    assert.equal(contRes.status, 200);
+    const { run: resumed } = await contRes.json();
+    assert.equal(resumed.id, 'run_pipe_interrupted');
+    assert.equal(resumed.config.timeoutMode, 'idle-10m');
+
+    // Wait for follow-up turn to complete
+    let latest = null;
+    for (let i = 0; i < 40; i += 1) {
+      latest = (await (await fetch(`${base}/api/runs/run_pipe_interrupted`)).json()).run;
+      if (latest.status === 'completed' || latest.status === 'failed') break;
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    assert.equal(latest.status, 'completed');
+    assert.equal(latest.gemini.planText, '初始架构方案保留', 'Original planText must remain intact');
+    assert.equal(latest.codex.execText, '部分执行结果', 'Original codex.execText must remain intact');
+    assert.equal(latest.messages.length, 2, 'User + assistant follow-up messages appended in place');
+    assert.equal(latest.messages[1].content, 'resumed-in-place-ok');
+
+    // Verify sidebar run count did NOT grow!
+    const afterList = await (await fetch(`${base}/api/runs`)).json();
+    assert.equal(afterList.runs.length, 1, 'In-place resume must never create a duplicate thread');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await new Promise((resolve) => mockLlm.close(resolve));
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
